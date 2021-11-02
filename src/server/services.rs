@@ -1,16 +1,16 @@
 use crate::actors::{SetupData, VideoData};
 
-use std::convert::TryFrom;
-use std::fmt::Debug;
-use std::path::Path;
+use std::{convert::TryFrom, fmt::Debug, path::Path};
 
 use futures_util::stream::TryStreamExt;
 
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::io::StreamReader;
 
-use hyper::header::{HeaderValue, LOCATION};
-use hyper::{Body, Error, Method, Request, Response, StatusCode};
+use hyper::{
+    header::{HeaderValue, LOCATION},
+    Body, Error, Method, Request, Response, StatusCode,
+};
 
 use ipfs_api::IpfsClient;
 

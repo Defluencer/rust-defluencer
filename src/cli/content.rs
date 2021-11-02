@@ -4,16 +4,16 @@ use crate::utils::dag_nodes::{
     get_from_ipns, ipfs_dag_get_node_async, ipfs_dag_put_node_async, update_ipns,
 };
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
-use ipfs_api::response::Error;
-use ipfs_api::IpfsClient;
+use ipfs_api::{response::Error, IpfsClient};
 
-use linked_data::blog::{FullPost, MicroPost};
-use linked_data::comments::Commentary;
-use linked_data::feed::{FeedAnchor, Media};
-use linked_data::video::{DayNode, HourNode, MinuteNode, VideoMetadata};
+use linked_data::{
+    blog::{FullPost, MicroPost},
+    comments::Commentary,
+    feed::{FeedAnchor, Media},
+    video::{DayNode, HourNode, MinuteNode, VideoMetadata},
+};
 
 use cid::Cid;
 

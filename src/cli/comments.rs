@@ -1,7 +1,6 @@
 use crate::utils::dag_nodes::{get_from_ipns, ipfs_dag_put_node_async, update_ipns};
 
-use ipfs_api::response::Error;
-use ipfs_api::IpfsClient;
+use ipfs_api::{response::Error, IpfsClient};
 
 use linked_data::comments::{Comment, Commentary};
 
@@ -53,7 +52,7 @@ async fn add_comment(command: AddComment) -> Result<(), Error> {
 
     let AddComment { origin, comment } = command;
 
-    let comment = Comment::create(origin.into(), comment);
+    let comment = Comment::create(origin, comment);
     let comment_cid = ipfs_dag_put_node_async(&ipfs, &comment).await?;
 
     println!("Pinning...");

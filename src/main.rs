@@ -3,15 +3,19 @@ mod cli;
 mod server;
 mod utils;
 
-use crate::cli::beacon::{beacon_cli, BeaconCLI};
-use crate::cli::comments::{comments_cli, Comments};
-use crate::cli::content::{content_feed_cli, Content};
-use crate::cli::daemon::file::{file_cli, File};
-use crate::cli::daemon::stream::{stream_cli, Stream};
-use crate::cli::friends::{friends_cli, Friends};
-use crate::cli::identity::{identity_cli, IdentityCLI};
-use crate::cli::live::{live_cli, LiveCLI};
-use crate::cli::moderation::{moderation_cli, Moderation};
+use crate::cli::{
+    beacon::{beacon_cli, BeaconCLI},
+    comments::{comments_cli, Comments},
+    content::{content_feed_cli, Content},
+    daemon::{
+        file::{file_cli, File},
+        stream::{stream_cli, Stream},
+    },
+    friends::{friends_cli, Friends},
+    identity::{identity_cli, IdentityCLI},
+    live::{live_cli, LiveCLI},
+    moderation::{moderation_cli, Moderation},
+};
 
 use structopt::StructOpt;
 

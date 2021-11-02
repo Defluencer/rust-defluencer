@@ -1,14 +1,16 @@
-use crate::actors::{Archive, SetupData, VideoData};
-use crate::server::services::put_requests;
+use crate::{
+    actors::{Archive, SetupData, VideoData},
+    server::services::put_requests,
+};
 
-use std::convert::Infallible;
-use std::net::SocketAddr;
+use std::{convert::Infallible, net::SocketAddr};
 
-use tokio::signal::ctrl_c;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::{signal::ctrl_c, sync::mpsc::UnboundedSender};
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::Server;
+use hyper::{
+    service::{make_service_fn, service_fn},
+    Server,
+};
 
 use ipfs_api::IpfsClient;
 

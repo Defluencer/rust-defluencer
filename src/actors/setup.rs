@@ -1,16 +1,18 @@
-use crate::actors::VideoData;
-use crate::utils::dag_nodes::ipfs_dag_put_node_async;
+use crate::{actors::VideoData, utils::dag_nodes::ipfs_dag_put_node_async};
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use ipfs_api::IpfsClient;
 
-use linked_data::video::{SetupNode, Track};
-use linked_data::IPLDLink;
+use linked_data::{
+    video::{SetupNode, Track},
+    IPLDLink,
+};
 
 use cid::Cid;
 

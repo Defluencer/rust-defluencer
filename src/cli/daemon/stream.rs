@@ -1,6 +1,8 @@
-use crate::actors::{Archivist, ChatAggregator, SetupAggregator, VideoAggregator};
-use crate::server::start_server;
-use crate::utils::config::Configuration;
+use crate::{
+    actors::{Archivist, ChatAggregator, SetupAggregator, VideoAggregator},
+    server::start_server,
+    utils::config::Configuration,
+};
 
 use tokio::sync::mpsc::unbounded_channel;
 

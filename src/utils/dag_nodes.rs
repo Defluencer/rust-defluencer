@@ -1,14 +1,13 @@
-use ipfs_api::response::KeyPair;
-use std::convert::TryFrom;
-use std::io::Cursor;
+use std::{convert::TryFrom, io::Cursor};
 
 use futures_util::TryStreamExt;
 
-use ipfs_api::response::Error;
-use ipfs_api::IpfsClient;
+use ipfs_api::{
+    response::{Error, KeyPair},
+    IpfsClient,
+};
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
 use cid::Cid;
 

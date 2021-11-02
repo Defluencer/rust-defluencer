@@ -1,7 +1,6 @@
 use crate::utils::dag_nodes::{get_from_ipns, update_ipns};
 
-use ipfs_api::response::Error;
-use ipfs_api::IpfsClient;
+use ipfs_api::{response::Error, IpfsClient};
 
 use linked_data::live::Live;
 

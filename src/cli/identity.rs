@@ -1,9 +1,6 @@
 use crate::utils::dag_nodes::{get_from_ipns, update_ipns};
 
-//use std::path::PathBuf;
-
-use ipfs_api::response::Error;
-use ipfs_api::IpfsClient;
+use ipfs_api::{response::Error, IpfsClient};
 
 use linked_data::identity::Identity;
 

@@ -1,36 +1,47 @@
 use std::convert::TryFrom;
 
-use crate::cli::content::{COMMENTS_KEY, FEED_KEY};
-use crate::cli::friends::FRIENDS_KEY;
-use crate::cli::identity::IDENTITY_KEY;
-use crate::cli::live::LIVE_KEY;
-use crate::cli::moderation::{BANS_KEY, MODS_KEY};
-use crate::utils::config::Configuration;
-use crate::utils::dag_nodes::{
-    ipfs_dag_get_node_async, ipfs_dag_put_node_async, search_keypairs, update_ipns,
+use crate::{
+    cli::{
+        content::{COMMENTS_KEY, FEED_KEY},
+        friends::FRIENDS_KEY,
+        identity::IDENTITY_KEY,
+        live::LIVE_KEY,
+        moderation::{BANS_KEY, MODS_KEY},
+    },
+    utils::{
+        config::Configuration,
+        dag_nodes::{
+            ipfs_dag_get_node_async, ipfs_dag_put_node_async, search_keypairs, update_ipns,
+        },
+    },
 };
 
 use tokio::task::JoinHandle;
 
 use serde::Serialize;
 
-use ipfs_api::response::{Error, PinAddResponse, PinRmResponse};
-use ipfs_api::IpfsClient;
-use ipfs_api::KeyType;
+use ipfs_api::{
+    response::{Error, PinAddResponse, PinRmResponse},
+    IpfsClient, KeyType,
+};
 
-use linked_data::beacon::Beacon;
-use linked_data::comments::Commentary;
-use linked_data::feed::FeedAnchor;
-use linked_data::friends::Friendlies;
-use linked_data::identity::Identity;
-use linked_data::keccak256;
-use linked_data::live::Live;
-use linked_data::moderation::{Bans, Moderators};
+use linked_data::{
+    beacon::Beacon,
+    comments::Commentary,
+    feed::FeedAnchor,
+    friends::Friendlies,
+    identity::Identity,
+    keccak256,
+    live::Live,
+    moderation::{Bans, Moderators},
+};
 
 use structopt::StructOpt;
 
-use cid::multibase::{encode, Base};
-use cid::Cid;
+use cid::{
+    multibase::{encode, Base},
+    Cid,
+};
 
 #[derive(Debug, StructOpt)]
 pub struct BeaconCLI {

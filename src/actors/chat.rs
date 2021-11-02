@@ -1,20 +1,26 @@
-use crate::actors::archivist::Archive;
-use crate::cli::moderation::{BANS_KEY, MODS_KEY};
-use crate::utils::config::ChatConfig;
-use crate::utils::dag_nodes::{
-    get_from_ipns, ipfs_dag_get_node_async, ipfs_dag_put_node_async, update_ipns,
+use crate::{
+    actors::archivist::Archive,
+    cli::moderation::{BANS_KEY, MODS_KEY},
+    utils::{
+        config::ChatConfig,
+        dag_nodes::{get_from_ipns, ipfs_dag_get_node_async, ipfs_dag_put_node_async, update_ipns},
+    },
 };
 
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
-use ipfs_api::response::{Error, PubsubSubResponse};
-use ipfs_api::IpfsClient;
+use ipfs_api::{
+    response::{Error, PubsubSubResponse},
+    IpfsClient,
+};
 
-use linked_data::chat::{ChatId, Message, MessageType};
-use linked_data::moderation::{Ban, Bans, ChatModerationCache, Moderators};
-use linked_data::signature::SignedMessage;
-use linked_data::PeerId;
+use linked_data::{
+    chat::{ChatId, Message, MessageType},
+    moderation::{Ban, Bans, ChatModerationCache, Moderators},
+    signature::SignedMessage,
+    PeerId,
+};
 
 pub struct ChatAggregator {
     ipfs: IpfsClient,
