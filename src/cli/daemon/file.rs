@@ -27,7 +27,9 @@ pub async fn file_cli(_file: File) {
         Ok(conf) => conf,
         Err(e) => {
             eprintln!("❗ Configuration file not found. {}", e);
-            return;
+
+            println!("Default configuration will be used.");
+            Configuration::default()
         }
     };
 

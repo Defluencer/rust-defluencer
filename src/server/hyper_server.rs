@@ -27,13 +27,13 @@ async fn shutdown_signal(
         let msg = Archive::Finalize;
 
         if let Err(error) = archive_tx.send(msg) {
-            eprintln!("Archive receiver hung up {}", error);
+            eprintln!("Archive receiver hung up. {}", error);
         }
 
         //Hacky way to shutdown chat actor. Send some msg to trigger a check
-        ipfs.pubsub_pub(&topic, "Stopping")
-            .await
-            .expect("PubSub Pub Failed!");
+        if let Err(e) = ipfs.pubsub_pub(&topic, "Stopping").await {
+            eprintln!("❗ Pubsub disabled. {}", e);
+        }
     }
 }
 
