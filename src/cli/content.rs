@@ -1,7 +1,11 @@
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    path::{Path, PathBuf},
+};
 
-use crate::utils::dag_nodes::{
-    get_from_ipns, ipfs_dag_get_node_async, ipfs_dag_put_node_async, update_ipns,
+use crate::utils::{
+    dag_nodes::{get_from_ipns, ipfs_dag_get_node_async, ipfs_dag_put_node_async, update_ipns},
+    OPTIONS,
 };
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -12,8 +16,11 @@ use linked_data::{
     blog::{FullPost, MicroPost},
     comments::Commentary,
     feed::{FeedAnchor, Media},
+    mime_type::MimeTyped,
     video::{DayNode, HourNode, MinuteNode, VideoMetadata},
 };
+
+use mime_guess::MimeGuess;
 
 use cid::Cid;
 
@@ -100,16 +107,16 @@ async fn add_micro_blog(command: AddMicroPost) -> Result<(), Error> {
 #[derive(Debug, StructOpt)]
 pub struct AddPost {
     /// The blog post title.
-    #[structopt(short, long)]
+    #[structopt(long)]
     title: String,
 
-    /// The post thumbnail image CID.
-    #[structopt(short, long)]
-    image: Cid,
+    /// Path to the thumbnail image.
+    #[structopt(long, parse(from_os_str))]
+    image: PathBuf,
 
-    /// The markdown file CID.
-    #[structopt(short, long)]
-    content: Cid,
+    /// Path to the markdown file.
+    #[structopt(long, parse(from_os_str))]
+    content: PathBuf,
 }
 
 async fn add_blog(command: AddPost) -> Result<(), Error> {
@@ -120,6 +127,16 @@ async fn add_blog(command: AddPost) -> Result<(), Error> {
         image,
         content,
     } = command;
+
+    let image = add_image(&ipfs, &image).await?;
+
+    #[cfg(debug_assertions)]
+    println!("Image Cid => {:?}", &image);
+
+    let content = add_markdown(&ipfs, &content).await?;
+
+    #[cfg(debug_assertions)]
+    println!("Markdown Cid => {:?}", &image);
 
     let metadata = FullPost::create(title, image, content);
 
@@ -133,15 +150,15 @@ async fn add_blog(command: AddPost) -> Result<(), Error> {
 #[derive(Debug, StructOpt)]
 pub struct AddVideo {
     /// The new video title.
-    #[structopt(short, long)]
+    #[structopt(long)]
     title: String,
 
-    /// The new video thumbnail image CID.
-    #[structopt(short, long)]
-    image: Cid,
+    /// Path to the video thumbnail image.
+    #[structopt(long, parse(from_os_str))]
+    image: PathBuf,
 
     /// The new video timecode CID.
-    #[structopt(short, long)]
+    #[structopt(long)]
     video: Cid,
 }
 
@@ -153,6 +170,8 @@ async fn add_video(command: AddVideo) -> Result<(), Error> {
         image,
         video,
     } = command;
+
+    let image = add_image(&ipfs, &image).await?;
 
     let duration = get_video_duration(&ipfs, &video).await?;
     let metadata = VideoMetadata::create(title, duration, image, video);
@@ -215,16 +234,16 @@ pub struct UpdatePost {
     cid: Cid,
 
     /// The new title.
-    #[structopt(short, long)]
+    #[structopt(long)]
     title: Option<String>,
 
-    /// The new thumbnail image CID.
-    #[structopt(short, long)]
-    image: Option<Cid>,
+    /// Path to the new thumbnail image.
+    #[structopt(long, parse(from_os_str))]
+    image: Option<PathBuf>,
 
-    /// The new makdown file CID.
-    #[structopt(short, long)]
-    content: Option<Cid>,
+    /// Path to the new makdown file.
+    #[structopt(long, parse(from_os_str))]
+    content: Option<PathBuf>,
 }
 
 async fn update_blog(command: UpdatePost) -> Result<(), Error> {
@@ -238,6 +257,18 @@ async fn update_blog(command: UpdatePost) -> Result<(), Error> {
     } = command;
 
     let (old_feed_cid, mut feed, mut metadata) = unload_feed::<FullPost>(&ipfs, cid).await?;
+
+    let image = if let Some(image) = image {
+        Some(add_image(&ipfs, &image).await?)
+    } else {
+        None
+    };
+
+    let content = if let Some(content) = content {
+        Some(add_markdown(&ipfs, &content).await?)
+    } else {
+        None
+    };
 
     metadata.update(title, image, content);
 
@@ -260,15 +291,15 @@ pub struct UpdateVideo {
     cid: Cid,
 
     /// The new video title.
-    #[structopt(short, long)]
+    #[structopt(long)]
     title: Option<String>,
 
-    /// The new video thumbnail image CID.
-    #[structopt(short, long)]
-    image: Option<Cid>,
+    /// Path to the new video thumbnail image.
+    #[structopt(long, parse(from_os_str))]
+    image: Option<PathBuf>,
 
     /// The new video timecode CID.
-    #[structopt(short, long)]
+    #[structopt(long)]
     video: Option<Cid>,
 }
 
@@ -287,6 +318,12 @@ async fn update_video(command: UpdateVideo) -> Result<(), Error> {
     let duration = match video {
         Some(cid) => Some(get_video_duration(&ipfs, &cid).await?),
         None => None,
+    };
+
+    let image = if let Some(image) = image {
+        Some(add_image(&ipfs, &image).await?)
+    } else {
+        None
     };
 
     metadata.update(title, image, video, duration);
@@ -408,6 +445,39 @@ async fn repair_content() -> Result<(), Error> {
 }
 
 /*** Utils below ****/
+
+async fn add_image(ipfs: &IpfsClient, path: &Path) -> Result<Cid, Error> {
+    let mime_type = match MimeGuess::from_path(path).first_raw() {
+        Some(mime) => mime.to_owned(),
+        None => return Err(Error::Uncategorized("Cannot Guess Image Mime Type".into())),
+    };
+
+    #[cfg(debug_assertions)]
+    println!("Image Mime Type => {}", &mime_type);
+
+    let file = tokio::fs::File::open(path).await?;
+    let response = ipfs.add_with_options(file, OPTIONS).await?;
+    let cid = Cid::try_from(response.hash).expect("Cid Validation");
+
+    let mime_typed = MimeTyped {
+        mime_type,
+        data: cid.into(),
+    };
+
+    ipfs_dag_put_node_async(ipfs, &mime_typed).await
+}
+
+async fn add_markdown(ipfs: &IpfsClient, path: &Path) -> Result<Cid, Error> {
+    if path.extension().is_none() || path.extension().unwrap() != "md" {
+        return Err(Error::Uncategorized("Markdown file only".into()));
+    };
+
+    let file = tokio::fs::File::open(path).await?;
+    let response = ipfs.add_with_options(file, OPTIONS).await?;
+    let cid = Cid::try_from(response.hash).expect("Cid Validation");
+
+    Ok(cid)
+}
 
 /// Serialize and pin content then update IPNS.
 async fn add_content_to_feed<T>(ipfs: &IpfsClient, metadata: &T) -> Result<Cid, Error>

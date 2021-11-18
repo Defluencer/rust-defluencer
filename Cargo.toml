@@ -13,6 +13,7 @@ hex = "0.4"
 hyper = { version = "0.14", features = ["http1", "server", "runtime", "stream"] }
 ipfs-api = { git = "https://github.com/sionois/rust-ipfs-api", branch = "pubsub-reqwest", features = ["with-reqwest"] }
 linked-data = { git = "https://github.com/Defluencer/rust-linked-data" }
+mime_guess = "2.0"
 m3u8-rs = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

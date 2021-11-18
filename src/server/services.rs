@@ -1,4 +1,7 @@
-use crate::actors::{SetupData, VideoData};
+use crate::{
+    actors::{SetupData, VideoData},
+    utils::OPTIONS,
+};
 
 use std::{convert::TryFrom, fmt::Debug, path::Path};
 
@@ -21,19 +24,6 @@ use m3u8_rs::playlist::Playlist;
 const M3U8: &str = "m3u8";
 pub const MP4: &str = "mp4";
 pub const M4S: &str = "m4s";
-
-const OPTIONS: ipfs_api::request::Add = ipfs_api::request::Add {
-    trickle: None,
-    only_hash: None,
-    wrap_with_directory: None,
-    chunker: None,
-    pin: Some(false),
-    raw_leaves: None,
-    cid_version: Some(1),
-    hash: None,
-    inline: None,
-    inline_limit: None,
-};
 
 pub async fn put_requests(
     req: Request<Body>,
@@ -71,7 +61,7 @@ pub async fn put_requests(
     let reader = StreamReader::new(stream);
 
     let cid = match ipfs.add_with_options(reader, OPTIONS).await {
-        Ok(res) => Cid::try_from(res.hash).expect("Invalid Cid"),
+        Ok(res) => Cid::try_from(res.hash).expect("Cid Validation"),
         Err(error) => return internal_error_response(res, &error),
     };
 
