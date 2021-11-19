@@ -56,6 +56,8 @@ Refer to my scripts for inspiration in creating your own.
 Due to a bug in FFMPEG, original videos cannot be in .mkv containers, missing metadata will cause missing tracks in HLS master playlist.
 In the future, you will be allowed to manually specify codecs and tracks names, that way any video standard could be used.
 
+Keep in mind that web browser support a limited set of codecs.
+
 ## License
 Licensed under either of
 

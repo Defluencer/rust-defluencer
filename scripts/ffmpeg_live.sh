@@ -5,6 +5,8 @@
 
 # Tips: forcing key frame at interval make it easy to cut segment of exact length and allow scene change detection.
 
+# Input MUST be 60fps
+
 ffmpeg -listen 1 -i rtmp://localhost:2525 -rtmp_live live -rtmp_buffer 8000 \
 -filter_complex \
 "[0:v]split=3[1080p60][in1][in2]; \

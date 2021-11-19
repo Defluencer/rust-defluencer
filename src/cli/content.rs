@@ -157,7 +157,7 @@ pub struct AddVideo {
     #[structopt(long, parse(from_os_str))]
     image: PathBuf,
 
-    /// The new video timecode CID.
+    /// Processed video timecode CID.
     #[structopt(long)]
     video: Cid,
 }
@@ -298,7 +298,7 @@ pub struct UpdateVideo {
     #[structopt(long, parse(from_os_str))]
     image: Option<PathBuf>,
 
-    /// The new video timecode CID.
+    /// The new processed video timecode CID.
     #[structopt(long)]
     video: Option<Cid>,
 }
