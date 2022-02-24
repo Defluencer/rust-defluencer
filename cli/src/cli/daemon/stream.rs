@@ -1,12 +1,12 @@
 use crate::{
     actors::{Archivist, ChatAggregator, SetupAggregator, VideoAggregator},
+    config::Configuration,
     server::start_server,
-    utils::config::Configuration,
 };
 
 use tokio::sync::mpsc::unbounded_channel;
 
-use ipfs_api::IpfsClient;
+use ipfs_api::IpfsService;
 
 use structopt::StructOpt;
 
@@ -27,9 +27,9 @@ pub async fn stream_cli(stream: Stream) {
         no_archive,
     } = stream;
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    if ipfs.id(None).await.is_err() {
+    if ipfs.peer_id().await.is_err() {
         eprintln!("❗ IPFS must be started beforehand. Aborting...");
         return;
     }
@@ -60,29 +60,24 @@ pub async fn stream_cli(stream: Stream) {
             let (archive_tx, archive_rx) = unbounded_channel();
 
             if !no_chat {
-                let mut chat =
-                    match ChatAggregator::new(ipfs.clone(), archive_tx.clone(), chat).await {
-                        Ok(chat) => chat,
-                        Err(e) => {
-                            eprintln!("❗ IPFS: {:#?}", e);
-                            return;
-                        }
-                    };
+                let chat = match ChatAggregator::new(ipfs.clone(), archive_tx.clone(), chat).await {
+                    Ok(chat) => chat,
+                    Err(e) => {
+                        eprintln!("❗ IPFS: {:#?}", e);
+                        return;
+                    }
+                };
 
-                let chat_handle = tokio::spawn(async move {
-                    chat.start().await;
-                });
+                let chat_handle = tokio::spawn(chat.start());
 
                 handles.push(chat_handle);
             }
 
             archive.archive_live_chat = !no_chat;
 
-            let mut archivist = Archivist::new(ipfs.clone(), archive_rx);
+            let archivist = Archivist::new(ipfs.clone(), archive_rx);
 
-            let archive_handle = tokio::spawn(async move {
-                archivist.start().await;
-            });
+            let archive_handle = tokio::spawn(archivist.start());
 
             handles.push(archive_handle);
 
@@ -96,35 +91,28 @@ pub async fn stream_cli(stream: Stream) {
 
     video.pubsub_enable = true;
 
-    let mut video = VideoAggregator::new(ipfs.clone(), video_rx, archive_tx.clone(), video);
+    let video = VideoAggregator::new(ipfs.clone(), video_rx, archive_tx.clone(), video);
 
-    let video_handle = tokio::spawn(async move {
-        video.start().await;
-    });
+    let video_handle = tokio::spawn(video.start());
 
     handles.push(video_handle);
 
     let (setup_tx, setup_rx) = unbounded_channel();
 
-    let mut setup = SetupAggregator::new(ipfs.clone(), setup_rx, video_tx.clone());
+    let setup = SetupAggregator::new(ipfs.clone(), setup_rx, video_tx.clone());
 
-    let setup_handle = tokio::spawn(async move {
-        setup.start().await;
-    });
+    let setup_handle = tokio::spawn(setup.start());
 
     handles.push(setup_handle);
 
-    let server_handle = tokio::spawn(async move {
-        start_server(
-            input_socket_addr,
-            video_tx,
-            setup_tx,
-            archive_tx,
-            ipfs,
-            topic,
-        )
-        .await;
-    });
+    let server_handle = tokio::spawn(start_server(
+        input_socket_addr,
+        video_tx,
+        setup_tx,
+        archive_tx,
+        ipfs,
+        topic,
+    ));
 
     handles.push(server_handle);
 

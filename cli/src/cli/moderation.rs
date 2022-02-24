@@ -1,11 +1,10 @@
-use crate::utils::dag_nodes::{get_from_ipns, update_ipns};
-
 use hex::FromHex;
 
-use ipfs_api::{response::Error, IpfsClient};
+use ipfs_api::{errors::Error, IpfsService};
 
 use cid::Cid;
 
+use linked_data::moderation::{Bans, Moderators};
 use structopt::StructOpt;
 
 pub const BANS_KEY: &str = "bans";
@@ -75,18 +74,17 @@ async fn ban_user(args: Ban) -> Result<(), Error> {
 
     println!("Banning User...");
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    let (old_ban_cid, mut ban_list) =
-        get_from_ipns::<linked_data::moderation::Bans>(&ipfs, BANS_KEY).await?;
+    let res = ipfs.ipns_get(BANS_KEY).await?;
+    let (old_ban_cid, mut ban_list): (Cid, Bans) = res.unwrap();
 
-    ban_list.banned.insert(address);
+    ban_list.banned_addrs.insert(address);
 
-    update_ipns(&ipfs, BANS_KEY, &ban_list).await?;
+    ipfs.ipns_put(BANS_KEY, false, &ban_list).await?;
 
-    let rm_cid = old_ban_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&rm_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", rm_cid, e);
+    if let Err(e) = ipfs.pin_rm(&old_ban_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_ban_cid, e);
     }
 
     println!("✅ User {} Banned", args.address);
@@ -106,17 +104,16 @@ async fn unban_user(args: UnBan) -> Result<(), Error> {
 
     println!("Unbanning User...");
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    let (old_ban_cid, mut ban_list) =
-        get_from_ipns::<linked_data::moderation::Bans>(&ipfs, BANS_KEY).await?;
+    let res = ipfs.ipns_get(BANS_KEY).await?;
+    let (old_ban_cid, mut ban_list): (Cid, Bans) = res.unwrap();
 
-    if ban_list.banned.remove(&address) {
-        update_ipns(&ipfs, BANS_KEY, &ban_list).await?;
+    if ban_list.banned_addrs.remove(&address) {
+        ipfs.ipns_put(BANS_KEY, false, &ban_list).await?;
 
-        let rm_cid = old_ban_cid.to_string();
-        if let Err(e) = ipfs.pin_rm(&rm_cid, false).await {
-            eprintln!("❗ IPFS could not unpin {}. Error: {}", rm_cid, e);
+        if let Err(e) = ipfs.pin_rm(&old_ban_cid, false).await {
+            eprintln!("❗ IPFS could not unpin {}. Error: {}", old_ban_cid, e);
         }
 
         println!("✅ User {} Unbanned", args.address);
@@ -139,24 +136,17 @@ pub struct ReplaceBanList {
 async fn replace_ban_list(args: ReplaceBanList) -> Result<(), Error> {
     println!("Replacing Ban List...");
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    let (old_ban_cid, _) = get_from_ipns::<linked_data::moderation::Bans>(&ipfs, BANS_KEY).await?;
+    let res = ipfs.ipns_get(BANS_KEY).await?;
+    let (old_ban_cid, _): (Cid, Bans) = res.unwrap();
 
-    ipfs.pin_add(&args.cid.to_string(), false).await?;
+    ipfs.pin_add(&args.cid, false).await?;
 
-    ipfs.name_publish(
-        &args.cid.to_string(),
-        true,
-        Some("4320h"), // 6 months
-        None,
-        Some(BANS_KEY),
-    )
-    .await?;
+    ipfs.name_publish(&args.cid, BANS_KEY).await?;
 
-    let rm_cid = old_ban_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&rm_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", rm_cid, e);
+    if let Err(e) = ipfs.pin_rm(&old_ban_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_ban_cid, e);
     }
 
     println!("✅ Previous Ban List Replaced with {:?}", &args.cid);
@@ -202,18 +192,17 @@ async fn mod_user(args: Mod) -> Result<(), Error> {
 
     println!("Promoting User...");
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    let (old_mods_cid, mut mods_list) =
-        get_from_ipns::<linked_data::moderation::Moderators>(&ipfs, MODS_KEY).await?;
+    let res = ipfs.ipns_get(MODS_KEY).await?;
+    let (old_mods_cid, mut mods_list): (Cid, Moderators) = res.unwrap();
 
-    mods_list.mods.insert(address);
+    mods_list.moderator_addrs.insert(address);
 
-    update_ipns(&ipfs, MODS_KEY, &mods_list).await?;
+    ipfs.ipns_put(MODS_KEY, false, &mods_list).await?;
 
-    let rm_cid = old_mods_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&rm_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", rm_cid, e);
+    if let Err(e) = ipfs.pin_rm(&old_mods_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_mods_cid, e);
     }
 
     println!("✅ User {} Promoted To Moderator Position", args.address);
@@ -232,17 +221,16 @@ async fn unmod_user(args: UnMod) -> Result<(), Error> {
     let address = parse_address(&args.address);
     println!("Demoting Moderator...");
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    let (old_mods_cid, mut mods_list) =
-        get_from_ipns::<linked_data::moderation::Moderators>(&ipfs, MODS_KEY).await?;
+    let res = ipfs.ipns_get(MODS_KEY).await?;
+    let (old_mods_cid, mut mods_list): (Cid, Moderators) = res.unwrap();
 
-    if mods_list.mods.remove(&address) {
-        update_ipns(&ipfs, MODS_KEY, &mods_list).await?;
+    if mods_list.moderator_addrs.remove(&address) {
+        ipfs.ipns_put(MODS_KEY, false, &mods_list).await?;
 
-        let rm_cid = old_mods_cid.to_string();
-        if let Err(e) = ipfs.pin_rm(&rm_cid, false).await {
-            eprintln!("❗ IPFS could not unpin {}. Error: {}", rm_cid, e);
+        if let Err(e) = ipfs.pin_rm(&old_mods_cid, false).await {
+            eprintln!("❗ IPFS could not unpin {}. Error: {}", old_mods_cid, e);
         }
 
         println!("✅ Moderator {} Demoted", args.address);
@@ -265,25 +253,17 @@ pub struct ReplaceModList {
 async fn replace_mod_list(args: ReplaceModList) -> Result<(), Error> {
     println!("Replacing Moderator List...");
 
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    let (old_mods_cid, _) =
-        get_from_ipns::<linked_data::moderation::Moderators>(&ipfs, MODS_KEY).await?;
+    let res = ipfs.ipns_get(MODS_KEY).await?;
+    let (old_mods_cid, _): (Cid, Moderators) = res.unwrap();
 
-    ipfs.pin_add(&args.cid.to_string(), false).await?;
+    ipfs.pin_add(&args.cid, false).await?;
 
-    ipfs.name_publish(
-        &args.cid.to_string(),
-        true,
-        Some("4320h"), // 6 months
-        None,
-        Some(MODS_KEY),
-    )
-    .await?;
+    ipfs.name_publish(&args.cid, MODS_KEY).await?;
 
-    let rm_cid = old_mods_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&rm_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", rm_cid, e);
+    if let Err(e) = ipfs.pin_rm(&old_mods_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_mods_cid, e);
     }
 
     println!("✅ Previous Moderator List Replaced with {:?}", &args.cid);

@@ -1,6 +1,4 @@
-use crate::utils::dag_nodes::{get_from_ipns, update_ipns};
-
-use ipfs_api::{response::Error, IpfsClient};
+use ipfs_api::{errors::Error, IpfsService};
 
 use linked_data::identity::Identity;
 
@@ -44,19 +42,19 @@ pub struct UpdateName {
 }
 
 async fn update_name(command: UpdateName) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdateName { name } = command;
 
-    let (old_id_cid, mut id) = get_from_ipns::<Identity>(&ipfs, IDENTITY_KEY).await?;
+    let res = ipfs.ipns_get(IDENTITY_KEY).await?;
+    let (old_id_cid, mut id): (Cid, Identity) = res.unwrap();
 
     id.display_name = name;
 
-    update_ipns(&ipfs, IDENTITY_KEY, &id).await?;
+    ipfs.ipns_put(IDENTITY_KEY, false, &id).await?;
 
-    let oidc = old_id_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&oidc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", oidc, e);
+    if let Err(e) = ipfs.pin_rm(&old_id_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_id_cid, e);
     }
 
     println!("✅ Display Name Updated");
@@ -75,19 +73,19 @@ pub struct UpdateAvatar {
 }
 
 async fn update_avatar(command: UpdateAvatar) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdateAvatar { image } = command;
 
-    let (old_id_cid, mut id) = get_from_ipns::<Identity>(&ipfs, IDENTITY_KEY).await?;
+    let res = ipfs.ipns_get(IDENTITY_KEY).await?;
+    let (old_id_cid, mut id): (Cid, Identity) = res.unwrap();
 
     id.avatar = image.into();
 
-    update_ipns(&ipfs, IDENTITY_KEY, &id).await?;
+    ipfs.ipns_put(IDENTITY_KEY, false, &id).await?;
 
-    let ofc = old_id_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_id_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_id_cid, e);
     }
 
     println!("✅ Avatar Updated");

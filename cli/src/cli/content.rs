@@ -1,16 +1,13 @@
 use std::{
-    convert::TryFrom,
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
-use crate::utils::{
-    dag_nodes::{get_from_ipns, ipfs_dag_get_node_async, ipfs_dag_put_node_async, update_ipns},
-    OPTIONS,
-};
+use tokio_util::io::ReaderStream;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use ipfs_api::{response::Error, IpfsClient};
+use ipfs_api::{errors::Error, responses::PinMode, IpfsService};
 
 use linked_data::{
     blog::{FullPost, MicroPost},
@@ -91,7 +88,7 @@ pub struct AddMicroPost {
 }
 
 async fn add_micro_blog(command: AddMicroPost) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let AddMicroPost { content } = command;
 
@@ -120,7 +117,7 @@ pub struct AddPost {
 }
 
 async fn add_blog(command: AddPost) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let AddPost {
         title,
@@ -163,7 +160,7 @@ pub struct AddVideo {
 }
 
 async fn add_video(command: AddVideo) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let AddVideo {
         title,
@@ -207,7 +204,7 @@ pub struct UpdateMicroPost {
 }
 
 async fn update_micro_blog(command: UpdateMicroPost) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdateMicroPost { cid, content } = command;
 
@@ -217,9 +214,8 @@ async fn update_micro_blog(command: UpdateMicroPost) -> Result<(), Error> {
 
     reload_feed(&ipfs, cid, &metadata, &mut feed).await?;
 
-    let ofc = old_feed_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_feed_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_feed_cid, e);
     }
 
     println!("✅ Comments Cleared & Updated Weblog");
@@ -247,7 +243,7 @@ pub struct UpdatePost {
 }
 
 async fn update_blog(command: UpdatePost) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdatePost {
         cid,
@@ -274,9 +270,8 @@ async fn update_blog(command: UpdatePost) -> Result<(), Error> {
 
     reload_feed(&ipfs, cid, &metadata, &mut feed).await?;
 
-    let ofc = old_feed_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_feed_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_feed_cid, e);
     }
 
     println!("✅ Comments Cleared & Updated Weblog");
@@ -304,7 +299,7 @@ pub struct UpdateVideo {
 }
 
 async fn update_video(command: UpdateVideo) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdateVideo {
         cid,
@@ -330,9 +325,8 @@ async fn update_video(command: UpdateVideo) -> Result<(), Error> {
 
     reload_feed(&ipfs, cid, &metadata, &mut feed).await?;
 
-    let ofc = old_feed_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_feed_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_feed_cid, e);
     }
 
     println!("✅ Comments Cleared & Updated Video");
@@ -350,18 +344,19 @@ pub struct DeleteContent {
 
 async fn delete_content(command: DeleteContent) -> Result<(), Error> {
     println!("Deleting Content...");
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let DeleteContent { cid } = command;
 
-    let ((old_feed_cid, mut feed), (old_comments_cid, mut list)) = tokio::try_join!(
-        get_from_ipns::<FeedAnchor>(&ipfs, FEED_KEY),
-        get_from_ipns::<Commentary>(&ipfs, COMMENTS_KEY)
-    )?;
+    let (feed_res, com_res) =
+        tokio::try_join!(ipfs.ipns_get(FEED_KEY), ipfs.ipns_get(COMMENTS_KEY))?;
+
+    let (old_feed_cid, mut feed): (Cid, FeedAnchor) = feed_res.unwrap();
+    let (old_comments_cid, mut list): (Cid, Commentary) = com_res.unwrap();
 
     let index = match feed.content.iter().position(|&probe| probe.link == cid) {
         Some(idx) => idx,
-        None => return Err(Error::Uncategorized("Index Not Found".into())),
+        None => return Err(std::io::Error::from(ErrorKind::NotFound).into()),
     };
 
     let content = feed.content.remove(index);
@@ -369,34 +364,20 @@ async fn delete_content(command: DeleteContent) -> Result<(), Error> {
     if let Some(comments) = list.comments.remove(&content.link) {
         //TODO find a way to do that concurently
         for comment in comments.iter() {
-            let cid = comment.link.to_string();
-
-            if let Err(e) = ipfs.pin_rm(&cid, false).await {
-                eprintln!("❗ IPFS could not unpin {}. Error: {}", cid, e);
+            if let Err(e) = ipfs.pin_rm(&comment.link, false).await {
+                eprintln!("❗ IPFS could not unpin {}. Error: {}", comment.link, e);
             }
         }
     }
 
-    let content_cid = content.link.to_string();
-    let old_feed_cid = old_feed_cid.to_string();
-    let old_comments_cid = old_comments_cid.to_string();
-
     tokio::try_join!(
-        update_ipns(&ipfs, FEED_KEY, &feed),
-        update_ipns(&ipfs, COMMENTS_KEY, &list)
+        ipfs.ipns_put(FEED_KEY, false, &feed),
+        ipfs.ipns_put(COMMENTS_KEY, false, &list)
     )?;
 
-    if let Err(e) = ipfs.pin_rm(&content_cid, true).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", content_cid, e);
-    }
-
-    if let Err(e) = ipfs.pin_rm(&old_feed_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_feed_cid, e);
-    }
-
-    if let Err(e) = ipfs.pin_rm(&old_comments_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_comments_cid, e);
-    }
+    ipfs.pin_rm(&content.link, true).await?;
+    ipfs.pin_rm(&old_feed_cid, false).await?;
+    ipfs.pin_rm(&old_comments_cid, false).await?;
 
     println!("✅ Comments Cleared & Deleted Content {}", cid);
 
@@ -404,25 +385,25 @@ async fn delete_content(command: DeleteContent) -> Result<(), Error> {
 }
 
 async fn repair_content() -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    if let Ok((old_feed_cid, _)) = get_from_ipns::<FeedAnchor>(&ipfs, FEED_KEY).await {
+    let res: Option<(Cid, FeedAnchor)> = ipfs.ipns_get(FEED_KEY).await?;
+
+    if let Some((old_feed_cid, _)) = res {
         println!("Unpinnig Old Content Feed...");
 
-        let ofc = old_feed_cid.to_string();
-        if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-            eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+        if let Err(e) = ipfs.pin_rm(&old_feed_cid, false).await {
+            eprintln!("❗ IPFS could not unpin {}. Error: {}", old_feed_cid, e);
         }
     }
 
     println!("Searching...");
-    let pins = ipfs.pin_ls(None, Some("recursive")).await?;
+    let pins = ipfs.pin_ls(PinMode::Recursive).await?;
 
-    let mut content = Vec::with_capacity(100);
+    let mut content: Vec<(Cid, Media)> = Vec::with_capacity(pins.len());
 
-    for cid in pins.keys.into_keys() {
-        if let Ok(media) = ipfs_dag_get_node_async::<Media>(&ipfs, &cid).await {
-            let cid = Cid::try_from(cid).expect("Invalid Cid");
+    for cid in pins.into_keys() {
+        if let Ok(media) = ipfs.dag_get(&cid, Option::<&str>::None).await {
             content.push((cid, media));
         }
     }
@@ -437,7 +418,7 @@ async fn repair_content() -> Result<(), Error> {
     let content_feed = FeedAnchor { content };
 
     println!("Updating Content Feed...");
-    update_ipns(&ipfs, FEED_KEY, &content_feed).await?;
+    ipfs.ipns_put(FEED_KEY, false, &content_feed).await?;
 
     println!("✅ Repaired Content Feed");
 
@@ -446,95 +427,92 @@ async fn repair_content() -> Result<(), Error> {
 
 /*** Utils below ****/
 
-async fn add_image(ipfs: &IpfsClient, path: &Path) -> Result<Cid, Error> {
+async fn add_image(ipfs: &IpfsService, path: &Path) -> Result<Cid, Error> {
     let mime_type = match MimeGuess::from_path(path).first_raw() {
         Some(mime) => mime.to_owned(),
-        None => return Err(Error::Uncategorized("Cannot Guess Image Mime Type".into())),
+        None => return Err(std::io::Error::from(ErrorKind::InvalidInput).into()),
     };
 
     #[cfg(debug_assertions)]
     println!("Image Mime Type => {}", &mime_type);
 
     let file = tokio::fs::File::open(path).await?;
-    let response = ipfs.add_with_options(file, OPTIONS).await?;
-    let cid = Cid::try_from(response.hash).expect("Cid Validation");
+    let stream = ReaderStream::new(file);
+    let cid = ipfs.add(stream).await?;
 
     let mime_typed = MimeTyped {
         mime_type,
         data: cid.into(),
     };
 
-    ipfs_dag_put_node_async(ipfs, &mime_typed).await
+    ipfs.dag_put(&mime_typed).await
 }
 
-async fn add_markdown(ipfs: &IpfsClient, path: &Path) -> Result<Cid, Error> {
+async fn add_markdown(ipfs: &IpfsService, path: &Path) -> Result<Cid, Error> {
     if path.extension().is_none() || path.extension().unwrap() != "md" {
-        return Err(Error::Uncategorized("Markdown file only".into()));
+        return Err(std::io::Error::from(ErrorKind::InvalidInput).into());
     };
 
     let file = tokio::fs::File::open(path).await?;
-    let response = ipfs.add_with_options(file, OPTIONS).await?;
-    let cid = Cid::try_from(response.hash).expect("Cid Validation");
+    let stream = ReaderStream::new(file);
+
+    let cid = ipfs.add(stream).await?;
 
     Ok(cid)
 }
 
 /// Serialize and pin content then update IPNS.
-async fn add_content_to_feed<T>(ipfs: &IpfsClient, metadata: &T) -> Result<Cid, Error>
+async fn add_content_to_feed<T>(ipfs: &IpfsService, metadata: &T) -> Result<Cid, Error>
 where
     T: Serialize,
 {
     println!("Creating...");
 
-    let content_cid = ipfs_dag_put_node_async(ipfs, metadata).await?;
+    let content_cid = ipfs.dag_put(metadata).await?;
 
     println!("Pinning...");
-    if let Err(e) = ipfs.pin_add(&content_cid.to_string(), true).await {
-        eprintln!(
-            "❗ IPFS could not pin {}. Error: {}",
-            content_cid.to_string(),
-            e
-        );
+    if let Err(e) = ipfs.pin_add(&content_cid, true).await {
+        eprintln!("❗ IPFS could not pin {}. Error: {}", content_cid, e);
     }
 
     println!("Updating Content Feed...");
-    let (old_feed_cid, mut feed) = get_from_ipns::<FeedAnchor>(ipfs, FEED_KEY).await?;
+    let res = ipfs.ipns_get(FEED_KEY).await?;
+    let (old_feed_cid, mut feed): (Cid, FeedAnchor) = res.unwrap();
 
     feed.content.push(content_cid.into());
 
-    update_ipns(ipfs, FEED_KEY, &feed).await?;
+    ipfs.ipns_put(FEED_KEY, false, &feed).await?;
 
-    let ofc = old_feed_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_feed_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_feed_cid, e);
     }
 
     Ok(content_cid)
 }
 
 /// Unpin then return feed and cid.
-async fn unload_feed<T>(ipfs: &IpfsClient, cid: Cid) -> Result<(Cid, FeedAnchor, T), Error>
+async fn unload_feed<T>(ipfs: &IpfsService, cid: Cid) -> Result<(Cid, FeedAnchor, T), Error>
 where
     T: DeserializeOwned,
 {
     println!("Old Content => {}", cid);
 
-    let (old_feed_cid, feed) = get_from_ipns::<FeedAnchor>(ipfs, FEED_KEY).await?;
+    let res = ipfs.ipns_get(FEED_KEY).await?;
+    let (old_feed_cid, feed) = res.unwrap();
 
     println!("Unpinning...");
-    let cid = cid.to_string();
     if let Err(e) = ipfs.pin_rm(&cid, true).await {
         eprintln!("❗ IPFS could not unpin {}. Error: {}", cid, e);
     }
 
-    let metadata: T = ipfs_dag_get_node_async(ipfs, &cid).await?;
+    let metadata: T = ipfs.dag_get(&cid, Option::<&str>::None).await?;
 
     Ok((old_feed_cid, feed, metadata))
 }
 
 /// Serialize and pin metadata then update feed and update IPNS.
 async fn reload_feed<T>(
-    ipfs: &IpfsClient,
+    ipfs: &IpfsService,
     cid: Cid,
     metadata: &T,
     feed: &mut FeedAnchor,
@@ -542,48 +520,42 @@ async fn reload_feed<T>(
 where
     T: Serialize,
 {
-    let new_cid = ipfs_dag_put_node_async(ipfs, metadata).await?;
+    let new_cid = ipfs.dag_put(metadata).await?;
     println!("New Content => {}", new_cid);
 
     println!("Pinning...");
-    if let Err(e) = ipfs.pin_add(&new_cid.to_string(), true).await {
-        eprintln!(
-            "❗ IPFS could not pin {}. Error: {}",
-            new_cid.to_string(),
-            e
-        );
+    if let Err(e) = ipfs.pin_add(&new_cid, true).await {
+        eprintln!("❗ IPFS could not pin {}. Error: {}", new_cid, e);
     }
 
     println!("Updating Content Feed...");
 
     let idx = match feed.content.iter().position(|&probe| probe.link == cid) {
         Some(idx) => idx,
-        None => return Err(Error::Uncategorized("Index Not Found".into())),
+        None => return Err(std::io::Error::from(ErrorKind::NotFound).into()),
     };
 
     feed.content[idx] = new_cid.into();
 
-    update_ipns(ipfs, FEED_KEY, feed).await?;
+    ipfs.ipns_put(FEED_KEY, false, feed).await?;
 
     Ok(())
 }
 
-async fn get_video_duration(ipfs: &IpfsClient, video: &Cid) -> Result<f64, Error> {
-    let path = format!("{}/time", video.to_string());
-
-    let days: DayNode = ipfs_dag_get_node_async(ipfs, &path).await?;
+async fn get_video_duration(ipfs: &IpfsService, video: &Cid) -> Result<f64, Error> {
+    let days: DayNode = ipfs.dag_get(video, Some("/time")).await?;
 
     let mut duration = 0.0;
 
     for (i, ipld) in days.links_to_hours.iter().enumerate().rev().take(1) {
         duration += (i * 3600) as f64; // 3600 second in 1 hour
 
-        let hours: HourNode = ipfs_dag_get_node_async(ipfs, &ipld.link.to_string()).await?;
+        let hours: HourNode = ipfs.dag_get(&ipld.link, Option::<&str>::None).await?;
 
         for (i, ipld) in hours.links_to_minutes.iter().enumerate().rev().take(1) {
             duration += (i * 60) as f64; // 60 second in 1 minute
 
-            let minutes: MinuteNode = ipfs_dag_get_node_async(ipfs, &ipld.link.to_string()).await?;
+            let minutes: MinuteNode = ipfs.dag_get(&ipld.link, Option::<&str>::None).await?;
 
             duration += (minutes.links_to_seconds.len() - 1) as f64;
         }

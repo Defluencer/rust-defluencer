@@ -1,7 +1,4 @@
-use crate::{
-    actors::archivist::Archive,
-    utils::{config::VideoConfig, dag_nodes::ipfs_dag_put_node_async},
-};
+use crate::{actors::archivist::Archive, config::VideoConfig};
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -10,14 +7,14 @@ use std::{
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use ipfs_api::IpfsClient;
+use ipfs_api::IpfsService;
 
 use linked_data::{video::VideoNode, IPLDLink};
 
 use cid::Cid;
 
 pub struct VideoAggregator {
-    ipfs: IpfsClient,
+    ipfs: IpfsService,
 
     service_rx: UnboundedReceiver<VideoData>,
     archive_tx: Option<UnboundedSender<Archive>>,
@@ -41,7 +38,7 @@ pub enum VideoData {
 
 impl VideoAggregator {
     pub fn new(
-        ipfs: IpfsClient,
+        ipfs: IpfsService,
         service_rx: UnboundedReceiver<VideoData>,
         archive_tx: Option<UnboundedSender<Archive>>,
         config: VideoConfig,
@@ -63,7 +60,7 @@ impl VideoAggregator {
         }
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(mut self) {
         println!("✅ Video System Online");
 
         while let Some(msg) = self.service_rx.recv().await {
@@ -141,7 +138,7 @@ impl VideoAggregator {
             if self.config.pubsub_enable {
                 let topic = &self.config.pubsub_topic;
 
-                if let Err(e) = self.ipfs.pubsub_pub(topic, &cid.to_string()).await {
+                if let Err(e) = self.ipfs.pubsub_pub(topic, cid.to_bytes()).await {
                     eprintln!("❗ IPFS: pubsub pub failed {}", e);
                 }
             }
@@ -167,7 +164,7 @@ impl VideoAggregator {
             return None;
         }
 
-        let cid = match ipfs_dag_put_node_async(&self.ipfs, node).await {
+        let cid = match self.ipfs.dag_put(node).await {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);

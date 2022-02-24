@@ -1,6 +1,6 @@
-use crate::utils::dag_nodes::{get_from_ipns, ipfs_dag_put_node_async, update_ipns};
+use std::io::ErrorKind;
 
-use ipfs_api::{response::Error, IpfsClient};
+use ipfs_api::{errors::Error, IpfsService};
 
 use linked_data::comments::{Comment, Commentary};
 
@@ -48,23 +48,23 @@ pub struct AddComment {
 }
 
 async fn add_comment(command: AddComment) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let AddComment { origin, comment } = command;
 
     let comment = Comment::create(origin, comment);
-    let comment_cid = ipfs_dag_put_node_async(&ipfs, &comment).await?;
+    let comment_cid = ipfs.dag_put(&comment).await?;
 
     println!("Pinning...");
 
-    let cc = comment_cid.to_string();
-    if let Err(e) = ipfs.pin_add(&cc, false).await {
-        eprintln!("❗ IPFS could not pin {}. Error: {}", cc, e);
+    if let Err(e) = ipfs.pin_add(&comment_cid, false).await {
+        eprintln!("❗ IPFS could not pin {}. Error: {}", comment_cid, e);
     }
 
     println!("Updating Comment List...");
 
-    let (old_comments_cid, mut list) = get_from_ipns::<Commentary>(&ipfs, COMMENTS_KEY).await?;
+    let res: Option<(Cid, Commentary)> = ipfs.ipns_get(COMMENTS_KEY).await?;
+    let (old_comments_cid, mut list) = res.unwrap();
 
     match list.comments.get_mut(&origin) {
         Some(vec) => vec.push(comment_cid.into()),
@@ -73,13 +73,12 @@ async fn add_comment(command: AddComment) -> Result<(), Error> {
         }
     }
 
-    update_ipns(&ipfs, COMMENTS_KEY, &list).await?;
+    ipfs.ipns_put(COMMENTS_KEY, false, &list).await?;
 
     println!("Unpinning Old List...");
 
-    let occ = old_comments_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&occ, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", occ, e);
+    if let Err(e) = ipfs.pin_rm(&old_comments_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_comments_cid, e);
     }
 
     println!("✅ Added Comment {}", comment_cid);
@@ -99,20 +98,21 @@ pub struct RemoveComment {
 }
 
 async fn remove_comment(command: RemoveComment) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let RemoveComment { origin, comment } = command;
 
-    let (old_comments_cid, mut list) = get_from_ipns::<Commentary>(&ipfs, COMMENTS_KEY).await?;
+    let res: Option<(Cid, Commentary)> = ipfs.ipns_get(COMMENTS_KEY).await?;
+    let (old_comments_cid, mut list) = res.unwrap();
 
     let vec = match list.comments.get_mut(&origin) {
         Some(vec) => vec,
-        None => return Err(Error::Uncategorized("Origin Not Found".into())),
+        None => return Err(std::io::Error::from(ErrorKind::NotFound).into()),
     };
 
     let index = match vec.iter().position(|&ipld| ipld == comment.into()) {
         Some(idx) => idx,
-        None => return Err(Error::Uncategorized("Index Not Found".into())),
+        None => return Err(std::io::Error::from(ErrorKind::NotFound).into()),
     };
 
     vec.remove(index);
@@ -123,13 +123,12 @@ async fn remove_comment(command: RemoveComment) -> Result<(), Error> {
 
     println!("Updating Comment List...");
 
-    update_ipns(&ipfs, COMMENTS_KEY, &list).await?;
+    ipfs.ipns_put(COMMENTS_KEY, false, &list).await?;
 
     println!("Unpinning Old List...");
 
-    let occ = old_comments_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&occ, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", occ, e);
+    if let Err(e) = ipfs.pin_rm(&old_comments_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_comments_cid, e);
     }
 
     println!("✅ Removed Comment {}", comment);

@@ -1,6 +1,5 @@
-use crate::utils::dag_nodes::{get_from_ipns, update_ipns};
-
-use ipfs_api::{response::Error, IpfsClient};
+use cid::Cid;
+use ipfs_api::{errors::Error, IpfsService};
 
 use linked_data::live::Live;
 
@@ -46,11 +45,12 @@ pub struct UpdateTopics {
 }
 
 async fn update_topics(command: UpdateTopics) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdateTopics { chat, video } = command;
 
-    let (old_live_cid, mut live) = get_from_ipns::<Live>(&ipfs, LIVE_KEY).await?;
+    let res = ipfs.ipns_get(LIVE_KEY).await?;
+    let (old_live_cid, mut live): (Cid, Live) = res.unwrap();
 
     if let Some(chat_topic) = chat {
         live.chat_topic = chat_topic;
@@ -60,11 +60,10 @@ async fn update_topics(command: UpdateTopics) -> Result<(), Error> {
         live.video_topic = video_topic;
     }
 
-    update_ipns(&ipfs, LIVE_KEY, &live).await?;
+    ipfs.ipns_put(LIVE_KEY, false, &live).await?;
 
-    let ofc = old_live_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_live_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_live_cid, e);
     }
 
     println!("✅ Display Name Updated");
@@ -76,23 +75,23 @@ async fn update_topics(command: UpdateTopics) -> Result<(), Error> {
 pub struct UpdatePeerId {
     /// Streaming node peer ID.
     #[structopt(short, long)]
-    peer_id: String,
+    peer_id: Cid,
 }
 
 async fn update_peer_id(command: UpdatePeerId) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let UpdatePeerId { peer_id } = command;
 
-    let (old_live_cid, mut live) = get_from_ipns::<Live>(&ipfs, LIVE_KEY).await?;
+    let res = ipfs.ipns_get(LIVE_KEY).await?;
+    let (old_live_cid, mut live): (Cid, Live) = res.unwrap();
 
     live.peer_id = peer_id;
 
-    update_ipns(&ipfs, LIVE_KEY, &live).await?;
+    ipfs.ipns_put(LIVE_KEY, false, &live).await?;
 
-    let ofc = old_live_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_live_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_live_cid, e);
     }
 
     println!("✅ Avatar Updated");

@@ -1,7 +1,7 @@
 mod actors;
 mod cli;
+mod config;
 mod server;
-mod utils;
 
 use crate::cli::{
     beacon::{beacon_cli, BeaconCLI},

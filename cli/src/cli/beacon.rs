@@ -8,12 +8,7 @@ use crate::{
         live::LIVE_KEY,
         moderation::{BANS_KEY, MODS_KEY},
     },
-    utils::{
-        config::Configuration,
-        dag_nodes::{
-            ipfs_dag_get_node_async, ipfs_dag_put_node_async, search_keypairs, update_ipns,
-        },
-    },
+    config::Configuration,
 };
 
 use tokio::task::JoinHandle;
@@ -21,8 +16,9 @@ use tokio::task::JoinHandle;
 use serde::Serialize;
 
 use ipfs_api::{
-    response::{Error, PinAddResponse, PinRmResponse},
-    IpfsClient, KeyType,
+    errors::Error,
+    responses::{PinAddResponse, PinRmResponse},
+    IpfsService,
 };
 
 use linked_data::{
@@ -88,7 +84,7 @@ pub struct Create {
 }
 
 async fn create_beacon(args: Create) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let Create {
         display_name,
@@ -117,8 +113,7 @@ async fn create_beacon(args: Create) -> Result<(), Error> {
 
     config.save_to_file().await?;
 
-    let res = ipfs.id(None).await?;
-    let peer_id = res.id;
+    let peer_id = ipfs.peer_id().await?;
 
     #[cfg(debug_assertions)]
     println!("IPFS: peer id => {}", &peer_id);
@@ -156,9 +151,9 @@ async fn create_beacon(args: Create) -> Result<(), Error> {
         mods: Some(mods),
     };
 
-    let cid = ipfs_dag_put_node_async(&ipfs, &beacon).await?;
+    let cid = ipfs.dag_put(&beacon).await?;
 
-    if let Err(e) = ipfs.pin_add(&cid.to_string(), false).await {
+    if let Err(e) = ipfs.pin_add(&cid, false).await {
         eprintln!("❗ IPFS could not pin {}. Error: {}", cid.to_string(), e);
     }
 
@@ -175,13 +170,13 @@ pub struct Pin {
 }
 
 async fn pin_beacon(args: Pin) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let Pin { cid } = args;
 
     println!("Getting Beacon...");
 
-    let beacon = ipfs_dag_get_node_async(&ipfs, &cid.to_string()).await?;
+    let beacon = ipfs.dag_get(&cid, Option::<&str>::None).await?;
 
     let Beacon {
         identity,
@@ -197,35 +192,27 @@ async fn pin_beacon(args: Pin) -> Result<(), Error> {
 
     let handle = tokio::spawn({
         let ipfs = ipfs.clone();
-        let cid = cid.to_string();
 
         async move { ipfs.pin_add(&cid, false).await }
     });
     handles.push(handle);
 
     if let Some(content_feed) = content_feed {
-        if let Ok(res) = ipfs
-            .name_resolve(Some(&content_feed.to_string()), false, false)
-            .await
-        {
+        if let Ok(cid) = ipfs.name_resolve(&content_feed).await {
             println!("Getting Content Feed...");
 
             let handle = tokio::spawn({
                 let ipfs = ipfs.clone();
-                let cid = res.path.clone();
 
                 async move { ipfs.pin_add(&cid, false).await }
             });
             handles.push(handle);
 
-            if let Ok(feed) = ipfs_dag_get_node_async::<FeedAnchor>(&ipfs, &res.path).await {
+            if let Ok(feed) = ipfs.dag_get::<&str, FeedAnchor>(&cid, None).await {
                 for ipld in feed.content.into_iter() {
                     let ipfs = ipfs.clone();
 
-                    let handle =
-                        tokio::spawn(
-                            async move { ipfs.pin_add(&ipld.link.to_string(), true).await },
-                        );
+                    let handle = tokio::spawn(async move { ipfs.pin_add(&ipld.link, true).await });
 
                     handles.push(handle);
                 }
@@ -238,13 +225,9 @@ async fn pin_beacon(args: Pin) -> Result<(), Error> {
     if let Some(comments) = comments {
         println!("Resolving Comments...");
 
-        if let Ok(res) = ipfs
-            .name_resolve(Some(&comments.to_string()), false, false)
-            .await
-        {
+        if let Ok(cid) = ipfs.name_resolve(&comments).await {
             let handle = tokio::spawn({
                 let ipfs = ipfs.clone();
-                let cid = res.path.clone();
 
                 async move { ipfs.pin_add(&cid, false).await }
             });
@@ -252,14 +235,11 @@ async fn pin_beacon(args: Pin) -> Result<(), Error> {
 
             println!("Getting Comments...");
 
-            if let Ok(comments) = ipfs_dag_get_node_async::<Commentary>(&ipfs, &res.path).await {
+            if let Ok(comments) = ipfs.dag_get::<&str, Commentary>(&cid, None).await {
                 for ipld in comments.comments.into_values().flatten() {
                     let ipfs = ipfs.clone();
 
-                    let handle =
-                        tokio::spawn(
-                            async move { ipfs.pin_add(&ipld.link.to_string(), false).await },
-                        );
+                    let handle = tokio::spawn(async move { ipfs.pin_add(&ipld.link, false).await });
 
                     handles.push(handle);
                 }
@@ -306,13 +286,13 @@ pub struct Unpin {
 }
 
 async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let Unpin { cid } = args;
 
     println!("Getting Beacon...");
 
-    let beacon = ipfs_dag_get_node_async(&ipfs, &cid.to_string()).await?;
+    let beacon = ipfs.dag_get(&cid, Option::<&str>::None).await?;
 
     let Beacon {
         identity,
@@ -328,7 +308,6 @@ async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
 
     let handle = tokio::spawn({
         let ipfs = ipfs.clone();
-        let cid = cid.to_string();
 
         async move { ipfs.pin_rm(&cid, false).await }
     });
@@ -337,13 +316,9 @@ async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
     println!("Resolving Content Feed...");
 
     if let Some(content_feed) = content_feed {
-        if let Ok(res) = ipfs
-            .name_resolve(Some(&content_feed.to_string()), false, false)
-            .await
-        {
+        if let Ok(cid) = ipfs.name_resolve(&content_feed).await {
             let handle = tokio::spawn({
                 let ipfs = ipfs.clone();
-                let cid = res.path.clone();
 
                 async move { ipfs.pin_rm(&cid, false).await }
             });
@@ -351,14 +326,11 @@ async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
 
             println!("Getting Content Feed...");
 
-            if let Ok(feed) = ipfs_dag_get_node_async::<FeedAnchor>(&ipfs, &res.path).await {
+            if let Ok(feed) = ipfs.dag_get::<&str, FeedAnchor>(&cid, None).await {
                 for ipld in feed.content.into_iter() {
                     let ipfs = ipfs.clone();
 
-                    let handle =
-                        tokio::spawn(
-                            async move { ipfs.pin_rm(&ipld.link.to_string(), true).await },
-                        );
+                    let handle = tokio::spawn(async move { ipfs.pin_rm(&ipld.link, true).await });
 
                     handles.push(handle);
                 }
@@ -371,13 +343,9 @@ async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
     if let Some(comments) = comments {
         println!("Resolving Comments...");
 
-        if let Ok(res) = ipfs
-            .name_resolve(Some(&comments.to_string()), false, false)
-            .await
-        {
+        if let Ok(cid) = ipfs.name_resolve(&comments).await {
             let handle = tokio::spawn({
                 let ipfs = ipfs.clone();
-                let cid = res.path.clone();
 
                 async move { ipfs.pin_rm(&cid, false).await }
             });
@@ -385,14 +353,11 @@ async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
 
             println!("Getting Comments...");
 
-            if let Ok(comments) = ipfs_dag_get_node_async::<Commentary>(&ipfs, &res.path).await {
+            if let Ok(comments) = ipfs.dag_get::<&str, Commentary>(&cid, None).await {
                 for ipld in comments.comments.into_values().flatten() {
                     let ipfs = ipfs.clone();
 
-                    let handle =
-                        tokio::spawn(
-                            async move { ipfs.pin_rm(&ipld.link.to_string(), false).await },
-                        );
+                    let handle = tokio::spawn(async move { ipfs.pin_rm(&ipld.link, false).await });
 
                     handles.push(handle);
                 }
@@ -432,19 +397,18 @@ async fn unpin_beacon(args: Unpin) -> Result<(), Error> {
 }
 
 fn pin(
-    ipfs: &IpfsClient,
+    ipfs: &IpfsService,
     ipns: Option<Cid>,
     handles: &mut Vec<JoinHandle<Result<PinAddResponse, Error>>>,
 ) {
     if let Some(ipns) = ipns {
         let handle = tokio::spawn({
             let ipfs = ipfs.clone();
-            let ipns = ipns.to_string();
 
             async move {
-                let res = ipfs.name_resolve(Some(&ipns), false, false).await?;
+                let cid = ipfs.name_resolve(&ipns).await?;
 
-                ipfs.pin_add(&res.path, false).await
+                ipfs.pin_add(&cid, false).await
             }
         });
 
@@ -453,19 +417,18 @@ fn pin(
 }
 
 fn unpin(
-    ipfs: &IpfsClient,
+    ipfs: &IpfsService,
     ipns: Option<Cid>,
     handles: &mut Vec<JoinHandle<Result<PinRmResponse, Error>>>,
 ) {
     if let Some(ipns) = ipns {
         let handle = tokio::spawn({
             let ipfs = ipfs.clone();
-            let ipns = ipns.to_string();
 
             async move {
-                let res = ipfs.name_resolve(Some(&ipns), false, false).await?;
+                let cid = ipfs.name_resolve(&ipns).await?;
 
-                ipfs.pin_rm(&res.path, false).await
+                ipfs.pin_rm(&cid, false).await
             }
         });
 
@@ -474,49 +437,37 @@ fn unpin(
 }
 
 async fn create_ipns_link<T>(
-    ipfs: &IpfsClient,
+    ipfs: &IpfsService,
     name: &str,
-    key: &str,
-    key_list: &ipfs_api::response::KeyPairList,
+    key: &'static str,
+    key_list: &ipfs_api::responses::KeyList,
     data: Option<T>,
 ) -> Result<Cid, Error>
 where
     T: Default + Serialize,
 {
-    let link = match search_keypairs(key, key_list) {
-        Some(kp) => kp.id.to_owned(),
+    let cid = match key_list.get(key) {
+        Some(kp) => *kp,
         None => {
             println!("Generating {} IPNS Key...", name);
 
-            let ipns_link = generate_key(ipfs, key).await?;
+            let key_pair = ipfs.key_gen(key).await?;
 
             println!("Updating {} IPNS Link...", name);
 
-            ipns_link
+            let cid = Cid::try_from(key_pair.id)?;
+
+            cid
         }
     };
 
-    let cid = Cid::try_from(link).expect("Cannot Serialize CID");
-
     if let Some(data) = data {
-        update_ipns(ipfs, key, &data).await?;
+        ipfs.ipns_put(key, false, &data).await?;
     } else {
-        update_ipns(ipfs, key, &T::default()).await?;
+        ipfs.ipns_put(key, false, &T::default()).await?;
     }
 
     println!("✅ {} IPNS Link => {}", name, &cid);
 
     Ok(cid)
-}
-
-async fn generate_key(ipfs: &IpfsClient, key: &str) -> Result<String, Error> {
-    let res = ipfs
-        .key_gen(
-            key,
-            KeyType::Ed25519,
-            64, /* Don't think this does anything... */
-        )
-        .await?;
-
-    Ok(res.id)
 }

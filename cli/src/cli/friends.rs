@@ -1,6 +1,6 @@
-use crate::utils::dag_nodes::{get_from_ipns, update_ipns};
+use std::io::ErrorKind;
 
-use ipfs_api::{response::Error, IpfsClient};
+use ipfs_api::{errors::Error, IpfsService};
 
 use linked_data::friends::{Friend, Friendlies};
 
@@ -52,7 +52,7 @@ pub struct AddFriend {
 }
 
 async fn add_friend(command: AddFriend) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let AddFriend { beacon, ens } = command;
 
@@ -63,28 +63,24 @@ async fn add_friend(command: AddFriend) -> Result<(), Error> {
         (None, Some(name)) => Friend {
             friend: Either::Left(name),
         },
-        (_, _) => {
-            return Err(Error::Uncategorized(
-                "Use either beacon Cid Or ENS domain name".into(),
-            ))
-        }
+        (_, _) => return Err(std::io::Error::from(ErrorKind::InvalidInput).into()),
     };
 
     println!("Adding Friend {:?}", &new_friend.friend);
 
-    let (old_friends_cid, mut list) = get_from_ipns::<Friendlies>(&ipfs, FRIENDS_KEY).await?;
+    let res = ipfs.ipns_get(FRIENDS_KEY).await?;
+    let (old_friends_cid, mut list): (Cid, Friendlies) = res.unwrap();
 
     list.friends.insert(new_friend);
 
     println!("Updating Friends List...");
 
-    update_ipns(&ipfs, FRIENDS_KEY, &list).await?;
+    ipfs.ipns_put(FRIENDS_KEY, false, &list).await?;
 
     println!("Unpinning Old List...");
 
-    let ofc = old_friends_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_friends_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_friends_cid, e);
     }
 
     println!("✅ Friend Added");
@@ -104,7 +100,7 @@ pub struct RemoveFriend {
 }
 
 async fn remove_friend(command: RemoveFriend) -> Result<(), Error> {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
     let RemoveFriend { beacon, ens } = command;
 
@@ -115,28 +111,24 @@ async fn remove_friend(command: RemoveFriend) -> Result<(), Error> {
         (None, Some(name)) => Friend {
             friend: Either::Left(name),
         },
-        (_, _) => {
-            return Err(Error::Uncategorized(
-                "Use either beacon Cid Or ENS domain name".into(),
-            ))
-        }
+        (_, _) => return Err(std::io::Error::from(ErrorKind::InvalidInput).into()),
     };
 
     println!("Removing Friend {:?}", &old_friend.friend);
 
-    let (old_friends_cid, mut list) = get_from_ipns::<Friendlies>(&ipfs, FRIENDS_KEY).await?;
+    let res = ipfs.ipns_get(FRIENDS_KEY).await?;
+    let (old_friends_cid, mut list): (Cid, Friendlies) = res.unwrap();
 
     list.friends.remove(&old_friend);
 
     println!("Updating Friends List...");
 
-    update_ipns(&ipfs, FRIENDS_KEY, &list).await?;
+    ipfs.ipns_put(FRIENDS_KEY, false, &list).await?;
 
     println!("Unpinning Old List...");
 
-    let ofc = old_friends_cid.to_string();
-    if let Err(e) = ipfs.pin_rm(&ofc, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", ofc, e);
+    if let Err(e) = ipfs.pin_rm(&old_friends_cid, false).await {
+        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_friends_cid, e);
     }
 
     println!("✅ Friend Removed");

@@ -1,12 +1,12 @@
 use crate::{
     actors::{Archivist, SetupAggregator, VideoAggregator},
+    config::Configuration,
     server::start_server,
-    utils::config::Configuration,
 };
 
 use tokio::sync::mpsc::unbounded_channel;
 
-use ipfs_api::IpfsClient;
+use ipfs_api::IpfsService;
 
 use structopt::StructOpt;
 
@@ -14,9 +14,9 @@ use structopt::StructOpt;
 pub struct File {}
 
 pub async fn file_cli(_file: File) {
-    let ipfs = IpfsClient::default();
+    let ipfs = IpfsService::default();
 
-    if let Err(e) = ipfs.id(None).await {
+    if let Err(e) = ipfs.peer_id().await {
         eprintln!("❗ IPFS must be started beforehand. {}", e);
         return;
     }
@@ -46,11 +46,9 @@ pub async fn file_cli(_file: File) {
 
     archive.archive_live_chat = false;
 
-    let mut archivist = Archivist::new(ipfs.clone(), archive_rx);
+    let archivist = Archivist::new(ipfs.clone(), archive_rx);
 
-    let archive_handle = tokio::spawn(async move {
-        archivist.start().await;
-    });
+    let archive_handle = tokio::spawn(archivist.start());
 
     handles.push(archive_handle);
 
@@ -58,35 +56,28 @@ pub async fn file_cli(_file: File) {
 
     video.pubsub_enable = false;
 
-    let mut video = VideoAggregator::new(ipfs.clone(), video_rx, Some(archive_tx.clone()), video);
+    let video = VideoAggregator::new(ipfs.clone(), video_rx, Some(archive_tx.clone()), video);
 
-    let video_handle = tokio::spawn(async move {
-        video.start().await;
-    });
+    let video_handle = tokio::spawn(video.start());
 
     handles.push(video_handle);
 
     let (setup_tx, setup_rx) = unbounded_channel();
 
-    let mut setup = SetupAggregator::new(ipfs.clone(), setup_rx, video_tx.clone());
+    let setup = SetupAggregator::new(ipfs.clone(), setup_rx, video_tx.clone());
 
-    let setup_handle = tokio::spawn(async move {
-        setup.start().await;
-    });
+    let setup_handle = tokio::spawn(setup.start());
 
     handles.push(setup_handle);
 
-    let server_handle = tokio::spawn(async move {
-        start_server(
-            input_socket_addr,
-            video_tx,
-            setup_tx,
-            Some(archive_tx),
-            ipfs,
-            chat.topic,
-        )
-        .await;
-    });
+    let server_handle = tokio::spawn(start_server(
+        input_socket_addr,
+        video_tx,
+        setup_tx,
+        Some(archive_tx),
+        ipfs,
+        chat.topic,
+    ));
 
     handles.push(server_handle);
 

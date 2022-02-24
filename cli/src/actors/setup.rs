@@ -1,4 +1,4 @@
-use crate::{actors::VideoData, utils::dag_nodes::ipfs_dag_put_node_async};
+use crate::actors::VideoData;
 
 use std::{
     collections::HashMap,
@@ -7,7 +7,7 @@ use std::{
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use ipfs_api::IpfsClient;
+use ipfs_api::IpfsService;
 
 use linked_data::{
     video::{SetupNode, Track},
@@ -27,7 +27,7 @@ pub enum SetupData {
 }
 
 pub struct SetupAggregator {
-    ipfs: IpfsClient,
+    ipfs: IpfsService,
 
     service_rx: UnboundedReceiver<SetupData>,
     video_tx: UnboundedSender<VideoData>,
@@ -39,7 +39,7 @@ pub struct SetupAggregator {
 
 impl SetupAggregator {
     pub fn new(
-        ipfs: IpfsClient,
+        ipfs: IpfsService,
         service_rx: UnboundedReceiver<SetupData>,
         video_tx: UnboundedSender<VideoData>,
     ) -> Self {
@@ -55,7 +55,7 @@ impl SetupAggregator {
         }
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(mut self) {
         println!("✅ Setup System Online");
 
         while let Some(msg) = self.service_rx.recv().await {
@@ -169,7 +169,9 @@ impl SetupAggregator {
 
         let setup_node = SetupNode { tracks };
 
-        let cid = ipfs_dag_put_node_async(&self.ipfs, &setup_node)
+        let cid = self
+            .ipfs
+            .dag_put(&setup_node)
             .await
             .expect("IPFS: SetupNode dag put failed"); // Panic because can't be recovered from anyway
 

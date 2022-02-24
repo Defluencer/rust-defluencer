@@ -1,23 +1,15 @@
-use crate::{
-    actors::{SetupData, VideoData},
-    utils::OPTIONS,
-};
+use crate::actors::{SetupData, VideoData};
 
-use std::{convert::TryFrom, fmt::Debug, path::Path};
-
-use futures_util::stream::TryStreamExt;
+use std::{fmt::Debug, path::Path};
 
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_util::io::StreamReader;
 
 use hyper::{
     header::{HeaderValue, LOCATION},
     Body, Error, Method, Request, Response, StatusCode,
 };
 
-use ipfs_api::IpfsClient;
-
-use cid::Cid;
+use ipfs_api::IpfsService;
 
 use m3u8_rs::playlist::Playlist;
 
@@ -29,7 +21,7 @@ pub async fn put_requests(
     req: Request<Body>,
     video_tx: UnboundedSender<VideoData>,
     setup_tx: UnboundedSender<SetupData>,
-    ipfs: IpfsClient,
+    ipfs: IpfsService,
 ) -> Result<Response<Body>, Error> {
     #[cfg(debug_assertions)]
     println!("Service: {:#?}", req);
@@ -53,15 +45,8 @@ pub async fn put_requests(
         return manifest_response(res, body, path, setup_tx).await;
     }
 
-    //Change error type
-    let stream =
-        body.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()));
-
-    //Stream to AsyncRead
-    let reader = StreamReader::new(stream);
-
-    let cid = match ipfs.add_with_options(reader, OPTIONS).await {
-        Ok(res) => Cid::try_from(res.hash).expect("Cid Validation"),
+    let cid = match ipfs.add(body).await {
+        Ok(res) => res,
         Err(error) => return internal_error_response(res, &error),
     };
 

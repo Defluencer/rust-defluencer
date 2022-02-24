@@ -12,10 +12,10 @@ use hyper::{
     Server,
 };
 
-use ipfs_api::IpfsClient;
+use ipfs_api::IpfsService;
 
 async fn shutdown_signal(
-    ipfs: IpfsClient,
+    ipfs: IpfsService,
     topic: String,
     archive_tx: Option<UnboundedSender<Archive>>,
 ) {
@@ -31,7 +31,7 @@ async fn shutdown_signal(
         }
 
         //Hacky way to shutdown chat actor. Send some msg to trigger a check
-        if let Err(e) = ipfs.pubsub_pub(&topic, "Stopping").await {
+        if let Err(e) = ipfs.pubsub_pub(&topic, "Stopping".as_bytes()).await {
             eprintln!("❗ Pubsub disabled. {}", e);
         }
     }
@@ -42,7 +42,7 @@ pub async fn start_server(
     video_tx: UnboundedSender<VideoData>,
     setup_tx: UnboundedSender<SetupData>,
     archive_tx: Option<UnboundedSender<Archive>>,
-    ipfs: IpfsClient,
+    ipfs: IpfsService,
     topic: String,
 ) {
     let ipfs_clone = ipfs.clone();
