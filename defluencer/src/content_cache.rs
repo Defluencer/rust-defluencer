@@ -1,42 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{
-    blog::{FullPost, MicroPost},
-    comments::Commentary,
-    identity::Identity,
-    video::VideoMetadata,
-    IPLDLink,
-};
-
-use serde::{Deserialize, Serialize};
+use linked_data::{comments::Comments, content::Content, identity::Identity};
 
 use cid::Cid;
-
-/// Content feed in chronological order.
-/// Direct pin.
-#[derive(Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
-pub struct FeedAnchor {
-    /// List of links to content ordered from oldest to newest.
-    pub content: Vec<IPLDLink>,
-}
-
-#[derive(Deserialize, PartialEq, Clone)]
-#[serde(untagged)]
-pub enum Media {
-    Statement(MicroPost),
-    Blog(FullPost),
-    Video(VideoMetadata),
-}
-
-impl Media {
-    pub fn timestamp(&self) -> u64 {
-        match self {
-            Media::Statement(metadata) => metadata.timestamp,
-            Media::Blog(metadata) => metadata.timestamp,
-            Media::Video(metadata) => metadata.timestamp,
-        }
-    }
-}
 
 /// Identity, Media & Comments Cache
 #[derive(Debug, PartialEq, Clone)]
@@ -113,7 +79,7 @@ impl ContentCache {
     }
 
     /// Idempotent way to add user media content.
-    pub fn insert_media_content(&mut self, beacon: Cid, feed: FeedAnchor) {
+    pub fn insert_media_content(&mut self, beacon: Cid, content: Content) {
         let beacon_idx = match self.beacons.iter().position(|item| *item == beacon) {
             Some(idx) => idx,
             None => {
@@ -124,7 +90,7 @@ impl ContentCache {
             }
         };
 
-        for ipld in feed.content.into_iter() {
+        for ipld in content.content.into_iter() {
             if !self.media_content.contains(&ipld.link) {
                 let idx = self.media_content.len();
 
@@ -152,7 +118,7 @@ impl ContentCache {
     }
 
     /// Idempotent way to add user comments.
-    pub fn insert_comments(&mut self, beacon: Cid, commentary: Commentary) {
+    pub fn insert_comments(&mut self, beacon: Cid, comments: Comments) {
         let beacon_idx = match self.beacons.iter().position(|item| *item == beacon) {
             Some(idx) => idx,
             None => {
@@ -163,7 +129,7 @@ impl ContentCache {
             }
         };
 
-        for (media_cid, comments) in commentary.comments.into_iter() {
+        for (media_cid, comments) in comments.comments.into_iter() {
             let media_idx = match self
                 .media_content
                 .iter()

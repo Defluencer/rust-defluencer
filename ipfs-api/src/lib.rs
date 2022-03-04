@@ -122,7 +122,7 @@ impl IpfsService {
     }
 
     /// Download content from block with this CID.
-    pub async fn cat<U>(&self, cid: &Cid, path: Option<U>) -> Result<Bytes>
+    pub async fn cat<U>(&self, cid: Cid, path: Option<U>) -> Result<Bytes>
     where
         U: Into<Cow<'static, str>>,
     {
@@ -147,7 +147,7 @@ impl IpfsService {
     }
 
     /// Pin a CID recursively or not.
-    pub async fn pin_add(&self, cid: &Cid, recursive: bool) -> Result<PinAddResponse> {
+    pub async fn pin_add(&self, cid: Cid, recursive: bool) -> Result<PinAddResponse> {
         let url = self.base_url.join("pin/add")?;
 
         let bytes = self
@@ -171,8 +171,32 @@ impl IpfsService {
         Err(error.into())
     }
 
+    pub async fn pin_update(&self, old: Cid, new: Cid) -> Result<PinRmResponse> {
+        let url = self.base_url.join("pin/update")?;
+
+        let bytes = self
+            .client
+            .post(url)
+            .query(&[("arg", old.to_string())])
+            .query(&[("arg", new.to_string())])
+            .send()
+            .await?
+            .bytes()
+            .await?;
+
+        //println!("pin_rm Raw => {}", std::str::from_utf8(&bytes).unwrap());
+
+        if let Ok(res) = serde_json::from_slice::<PinRmResponse>(&bytes) {
+            return Ok(res);
+        }
+
+        let error = serde_json::from_slice::<IPFSError>(&bytes)?;
+
+        Err(error.into())
+    }
+
     /// Remove Pinned CID.
-    pub async fn pin_rm(&self, cid: &Cid, recursive: bool) -> Result<PinRmResponse> {
+    pub async fn pin_rm(&self, cid: Cid, recursive: bool) -> Result<PinRmResponse> {
         let url = self.base_url.join("pin/rm")?;
 
         let bytes = self
@@ -254,7 +278,7 @@ impl IpfsService {
     }
 
     /// Deserialize dag node from IPFS path. Return dag node.
-    pub async fn dag_get<U, T>(&self, cid: &Cid, path: Option<U>) -> Result<T>
+    pub async fn dag_get<U, T>(&self, cid: Cid, path: Option<U>) -> Result<T>
     where
         U: Into<Cow<'static, str>>,
         T: ?Sized + DeserializeOwned,
@@ -337,7 +361,7 @@ impl IpfsService {
     }
 
     /// Publish new IPNS record.
-    pub async fn name_publish<U>(&self, cid: &Cid, key: U) -> Result<NamePublishResponse>
+    pub async fn name_publish<U>(&self, cid: Cid, key: U) -> Result<NamePublishResponse>
     where
         U: Into<Cow<'static, str>>,
     {
@@ -367,7 +391,7 @@ impl IpfsService {
     }
 
     /// Resolve IPNS name. Returns CID.
-    pub async fn name_resolve(&self, ipns: &Cid) -> Result<Cid> {
+    pub async fn name_resolve(&self, ipns: Cid) -> Result<Cid> {
         let url = self.base_url.join("name/resolve")?;
 
         let bytes = self
@@ -391,7 +415,7 @@ impl IpfsService {
     }
 
     /// Get node associated with IPNS key.
-    pub async fn ipns_get<T>(&self, key: impl Into<Cow<'static, str>>) -> Result<Option<(Cid, T)>>
+    pub async fn ipns_get<T>(&self, key: impl Into<Cow<'static, str>>) -> Result<(Cid, T)>
     where
         T: ?Sized + DeserializeOwned,
     {
@@ -401,14 +425,33 @@ impl IpfsService {
 
         let cid = match key_list.get(key) {
             Some(keypair) => *keypair,
-            None => return Ok(None),
+            None => return Err(Error::Ipns),
         };
 
-        let cid = self.name_resolve(&cid).await?;
+        let cid = self.name_resolve(cid).await?;
 
-        let node = self.dag_get(&cid, Option::<&str>::None).await?;
+        let node = self.dag_get(cid, Option::<&str>::None).await?;
 
-        Ok(Some((cid, node)))
+        Ok((cid, node))
+    }
+
+    /// Serialize the new node, update the pin then publish under this IPNS key.
+    pub async fn ipns_update<T>(
+        &self,
+        key: impl Into<Cow<'static, str>>,
+        old_cid: Cid,
+        content: &T,
+    ) -> Result<()>
+    where
+        T: ?Sized + Serialize,
+    {
+        let cid = self.dag_put(content).await?;
+
+        self.pin_update(cid, old_cid).await?;
+
+        self.name_publish(cid, key).await?;
+
+        Ok(())
     }
 
     /// Serialize the new node, pin then publish under this IPNS key.
@@ -423,9 +466,9 @@ impl IpfsService {
     {
         let cid = self.dag_put(content).await?;
 
-        self.pin_add(&cid, recursive).await?;
+        self.pin_add(cid, recursive).await?;
 
-        self.name_publish(&cid, key).await?;
+        self.name_publish(cid, key).await?;
 
         Ok(())
     }

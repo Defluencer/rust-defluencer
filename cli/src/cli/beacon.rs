@@ -24,8 +24,8 @@ use ipfs_api::{
 use linked_data::{
     beacon::Beacon,
     comments::Commentary,
-    feed::FeedAnchor,
-    friends::Friendlies,
+    content::FeedAnchor,
+    follows::Friendlies,
     identity::Identity,
     keccak256,
     live::Live,

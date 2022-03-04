@@ -1,15 +1,13 @@
 pub mod beacon;
-pub mod blog;
-pub mod chat;
 pub mod comments;
-pub mod feed;
-pub mod friends;
+pub mod content;
+pub mod follows;
 pub mod identity;
+pub mod indexes;
 pub mod live;
-pub mod mime_type;
+pub mod media;
 pub mod moderation;
 pub mod signature;
-pub mod video;
 
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};

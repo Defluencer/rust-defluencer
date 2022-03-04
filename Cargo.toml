@@ -1,7 +1,6 @@
 [workspace]
 
 members = [
-    "cli",
     "linked-data",
     "defluencer",
     "ipfs-api"

@@ -1,71 +1,21 @@
-use crate::IPNSAddress;
+use crate::{
+    comments::CommentIndexing, content::ContentIndexing, follows::Follows, identity::Identity,
+    live::LiveSettings, IPLDLink,
+};
 
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 
-/// Static links to content.
-/// Direct pin.
-#[serde_as]
-#[derive(Deserialize, Serialize, Default, Debug, PartialEq, Clone)]
+/// Non exhaustive list of links to various social media features.
+///
+/// The Cid of this object should be publicly available and trusted to be up to date.
+/// Blockchains are best suited for this.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct Beacon {
-    //TODO add cid of this beacon object ignoring serde and including a builder patern
-    /// Link to avatar, name, etc...
-    #[serde_as(as = "DisplayFromStr")]
-    pub identity: IPNSAddress,
-
-    /// Link to list of content metadata.
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub content_feed: Option<IPNSAddress>,
-
-    /// Link to list of comments.
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub comments: Option<IPNSAddress>,
-
-    /// Link to topics and Peer Id for streming live.
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub live: Option<IPNSAddress>,
-
-    /// Link to list of your friend's beacons.
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub friends: Option<IPNSAddress>,
-
-    /// Link to all chat banned addresses.
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub bans: Option<IPNSAddress>,
-
-    /// Link to all chat moderator addresses.
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub mods: Option<IPNSAddress>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use cid::Cid;
-    use std::str::FromStr;
-
-    #[test]
-    fn serde_test() {
-        let cid =
-            Cid::from_str("bafyreibjo4xmgaevkgud7mbifn3dzp4v4lyaui4yvqp3f2bqwtxcjrdqg4").unwrap();
-
-        let old_beacon = Beacon {
-            identity: cid,
-            content_feed: Some(Cid::default()),
-            comments: None,
-            friends: None,
-            live: None,
-            bans: None,
-            mods: None,
-        };
-
-        let json = serde_json::to_string_pretty(&old_beacon).expect("Cannot serialize");
-
-        println!("{}", json);
-
-        let new_beacon = serde_json::from_str(&json).expect("Cannot Deserialize");
-        println!("{:?}", new_beacon);
-
-        assert_eq!(old_beacon, new_beacon);
-    }
+    pub identity: Identity,
+    pub content: ContentIndexing,
+    pub comments: CommentIndexing,
+    pub live: Option<LiveSettings>,
+    pub follows: Option<Follows>,
+    pub bans: Option<IPLDLink>,
+    pub mods: Option<IPLDLink>,
 }

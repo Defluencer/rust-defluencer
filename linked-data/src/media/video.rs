@@ -1,20 +1,15 @@
 use crate::IPLDLink;
 
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-
-use cid::Cid;
 
 /// Metadata for video thumbnail and playback.
 /// Recursive pin.
 #[derive(Deserialize, Serialize, PartialEq, Clone)]
 pub struct VideoMetadata {
     /// Timestamp at the time of publication in Unix time.
-    pub timestamp: u64,
+    pub timestamp: i64,
 
     /// Duration in seconds.
     pub duration: f64,
@@ -27,52 +22,6 @@ pub struct VideoMetadata {
 
     /// Title of this video.
     pub title: String,
-}
-
-impl VideoMetadata {
-    pub fn create(title: String, duration: f64, image: Cid, video: Cid) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("SystemTime after UNIX EPOCH!")
-            .as_secs();
-
-        Self {
-            timestamp,
-            duration,
-            image: image.into(),
-            video: video.into(),
-            title,
-        }
-    }
-
-    pub fn update(
-        &mut self,
-        title: Option<String>,
-        image: Option<Cid>,
-        video: Option<Cid>,
-        duration: Option<f64>,
-    ) {
-        self.timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("SystemTime after UNIX EPOCH!")
-            .as_secs();
-
-        if let Some(title) = title {
-            self.title = title;
-        }
-
-        if let Some(img) = image {
-            self.image = img.into();
-        }
-
-        if let Some(vid) = video {
-            self.video = vid.into();
-        }
-
-        if let Some(dur) = duration {
-            self.duration = dur;
-        }
-    }
 }
 
 /// Root CID.

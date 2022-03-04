@@ -1,27 +1,34 @@
-use std::collections::HashSet;
+//use std::collections::HashSet;
 
-use crate::IPLDLink;
+//use crate::IPLDLink;
+
+use cid::Cid;
 
 use serde::{Deserialize, Serialize};
 
-use either::Either;
+use serde_with::{serde_as, DisplayFromStr};
 
-/// List of all your friends.
-/// Direct Pin.
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
-pub struct Friendlies {
-    pub friends: HashSet<Friend>,
+//use either::Either;
+
+/// List of who you follow.
+#[serde_as]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+pub struct Follows {
+    pub ens: Vec<String>,
+
+    #[serde_as(as = "Vec<DisplayFromStr>")]
+    pub ipns: Vec<Cid>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
+/* #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct Friend {
     /// Domain name on the Ethereum Name Service or
     /// Link to friend's beacon.
     #[serde(with = "either::serde_untagged")]
     pub friend: Either<String, IPLDLink>,
-}
+} */
 
-#[cfg(test)]
+/* #[cfg(test)]
 mod tests {
     use super::*;
     use cid::Cid;
@@ -48,4 +55,4 @@ mod tests {
 
         assert_eq!(old_friends, new_friends);
     }
-}
+} */

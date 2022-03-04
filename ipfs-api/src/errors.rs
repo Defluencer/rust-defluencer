@@ -20,6 +20,9 @@ pub enum Error {
     #[error("Ipfs: {0}")]
     Ipfs(#[from] IPFSError),
 
+    #[error("Ipns: Key not found")]
+    Ipns,
+
     #[error("Parse: {0}")]
     Parse(#[from] url::ParseError),
 

@@ -67,7 +67,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::ChatId;
+    use crate::media::chat::ChatId;
     use crate::peer_id_from_str;
 
     /// Real test done with my ledger nano S.
