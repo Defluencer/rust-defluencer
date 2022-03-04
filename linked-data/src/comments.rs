@@ -12,8 +12,6 @@ pub struct CommentIndexing {
     pub date_time: Option<IPLDLink>,
 }
 
-//TODO Implement a HAMT. It would scale to any size unlike the current solution.
-
 #[serde_as]
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct Comments {
@@ -23,7 +21,7 @@ pub struct Comments {
 }
 
 /// Comment metadata and text.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Comment {
     /// Timestamp at the time of publication in Unix time.
     pub timestamp: i64,

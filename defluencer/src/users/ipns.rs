@@ -4,19 +4,25 @@ use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
 use cid::Cid;
 
+use either::Either;
+use futures::{
+    stream::{self, StreamExt},
+    Stream,
+};
+
 use ipfs_api::IpfsService;
 
 use linked_data::{
     beacon::Beacon,
     comments::{Comment, Comments},
     content::{Content, Media},
-    indexes::*,
+    indexes::date_time::*,
     media::{
         blog::{FullPost, MicroPost},
         mime_type::MimeTyped,
         video::{DayNode, HourNode, MinuteNode, VideoMetadata},
     },
-    IPLDLink,
+    IPLDLink, PeerId,
 };
 
 use serde::Serialize;
@@ -35,48 +41,313 @@ impl IPNSUser {
         Self { ipfs, key }
     }
 
-    pub fn update_display_name(&self) {
-        todo!()
+    /// Lazily stream content starting from newest.
+    pub fn content_feed(&self, index: Cid) -> impl Stream<Item = Content> + '_ {
+        self.stream_years(index)
+            .flat_map(|year| self.stream_months(year))
+            .flat_map(|month| self.stream_days(month))
+            .flat_map(|day| self.stream_hours(day))
+            .flat_map(|hours| self.stream_minutes(hours))
+            .flat_map(|minutes| self.stream_seconds(minutes))
+            .flat_map(|seconds| self.stream_content(seconds))
     }
 
-    pub fn update_avatar(&self) {
-        todo!()
+    fn stream_years(&self, index: Cid) -> impl Stream<Item = Yearly> + '_ {
+        stream::unfold(index, move |cid| async move {
+            match self.ipfs.dag_get::<&str, Yearly>(cid, None).await {
+                Ok(years) => Some((years, cid)),
+                Err(_) => None,
+            }
+        })
     }
 
-    pub fn update_micro_blog_post(&self) {
-        todo!()
+    fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
+        stream::unfold(years.year.into_iter().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some((_, ipld)) => {
+                    match self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await {
+                        Ok(months) => Some((months, iter)),
+                        Err(_) => None,
+                    }
+                }
+                None => None,
+            }
+        })
     }
 
-    pub fn update_blog_post(&self) {
-        todo!()
+    fn stream_days(&self, months: Monthly) -> impl Stream<Item = Daily> + '_ {
+        stream::unfold(months.month.into_iter().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some((_, ipld)) => match self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await {
+                    Ok(days) => Some((days, iter)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
     }
 
-    pub fn update_video(&self) {
-        todo!()
+    fn stream_hours(&self, days: Daily) -> impl Stream<Item = Hourly> + '_ {
+        stream::unfold(days.day.into_iter().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some((_, ipld)) => match self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await {
+                    Ok(hours) => Some((hours, iter)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
     }
 
-    pub fn delete_content(&self) {
-        todo!()
+    fn stream_minutes(&self, hours: Hourly) -> impl Stream<Item = Minutes> + '_ {
+        stream::unfold(hours.hour.into_iter().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some((_, ipld)) => {
+                    match self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await {
+                        Ok(minutes) => Some((minutes, iter)),
+                        Err(_) => None,
+                    }
+                }
+                None => None,
+            }
+        })
     }
 
-    pub fn remove_comment(&self) {
-        todo!()
+    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Seconds> + '_ {
+        stream::unfold(
+            minutes.minute.into_iter().rev(),
+            move |mut iter| async move {
+                match iter.next() {
+                    Some((_, ipld)) => {
+                        match self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await {
+                            Ok(seconds) => Some((seconds, iter)),
+                            Err(_) => None,
+                        }
+                    }
+                    None => None,
+                }
+            },
+        )
     }
 
-    pub fn repair_content(&self) {
-        todo!()
+    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = Content> + '_ {
+        stream::unfold(
+            seconds.second.into_iter().rev(),
+            move |mut iter| async move {
+                match iter.next() {
+                    Some((_, ipld)) => {
+                        match self.ipfs.dag_get::<&str, Content>(ipld.link, None).await {
+                            Ok(content) => Some((content, iter)),
+                            Err(_) => None,
+                        }
+                    }
+                    None => None,
+                }
+            },
+        )
     }
 
-    pub fn add_friend(&self) {
-        todo!()
+    /// Update your identity data.
+    pub async fn update_identity(
+        &self,
+        display_name: Option<String>,
+        avatar: Option<ImageCid>,
+    ) -> Result<(), Error> {
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        if let Some(name) = display_name {
+            beacon.identity.display_name = name;
+        }
+
+        if let Some(avatar) = avatar {
+            beacon.identity.avatar = avatar.into();
+        }
+
+        self.ipfs
+            .ipns_update(self.key.clone(), beacon_cid, &beacon)
+            .await?;
+
+        Ok(())
     }
 
-    pub fn remove_friend(&self) {
-        todo!()
+    /// Remove a specific content.
+    ///
+    /// Note that this content is only remove from your list of content.
+    pub async fn remove_content(&self, content_cid: Cid) -> Result<(), Error> {
+        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
+        let date_time = Utc.timestamp(media.timestamp(), 0);
+
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        let index = match beacon.content.date_time {
+            Some(index) => index,
+            None => return Err(Error::RemoveContent),
+        };
+
+        let path = format!(
+            "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
+            date_time.year(),
+            date_time.month(),
+            date_time.day(),
+            date_time.hour(),
+            date_time.minute(),
+            date_time.second()
+        );
+
+        let mut contents: Content = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
+
+        if !contents.content.remove(&content_cid.into()) {
+            return Err(Error::RemoveContent);
+        }
+
+        let contents_cid = self.ipfs.dag_put(&contents).await?;
+
+        let index_cid = self
+            .update_date_time_index(date_time, beacon.content.date_time, contents_cid)
+            .await?;
+
+        beacon.content.date_time = Some(index_cid.into());
+
+        self.ipfs
+            .ipns_update(self.key.clone(), beacon_cid, &beacon)
+            .await?;
+
+        Ok(())
     }
 
-    pub fn update_live_settings(&self) {
-        todo!()
+    /// Remove a specific comment.
+    ///
+    /// Note that this comment is only remove from your list of comments.
+    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<(), Error> {
+        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
+        let content_cid = comment.origin.link;
+
+        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
+        let date_time = Utc.timestamp(media.timestamp(), 0);
+
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        let index = match beacon.comments.date_time {
+            Some(index) => index,
+            None => return Err(Error::RemoveComment),
+        };
+
+        let path = format!(
+            "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
+            date_time.year(),
+            date_time.month(),
+            date_time.day(),
+            date_time.hour(),
+            date_time.minute(),
+            date_time.second()
+        );
+
+        let mut comments: Comments = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
+
+        if !comments.comments.remove(&content_cid).is_some() {
+            return Err(Error::RemoveComment);
+        }
+
+        let comments_cid = self.ipfs.dag_put(&comments).await?;
+
+        let index_cid = self
+            .update_date_time_index(date_time, beacon.comments.date_time, comments_cid)
+            .await?;
+
+        beacon.comments.date_time = Some(index_cid.into());
+
+        self.ipfs
+            .ipns_update(self.key.clone(), beacon_cid, &beacon)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Follow a user.
+    ///
+    /// Theirs content will now be display in your feed.
+    pub async fn follow(&self, user: Either<String, Cid>) -> Result<(), Error> {
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        let mut follows = beacon.follows.unwrap_or_default();
+
+        let status = match user {
+            Either::Left(ens) => follows.ens.insert(ens),
+            Either::Right(ipns) => follows.ipns.insert(ipns),
+        };
+
+        if !status {
+            return Err(Error::Follow);
+        }
+
+        beacon.follows = Some(follows);
+
+        self.ipfs
+            .ipns_update(self.key.clone(), beacon_cid, &beacon)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Unfollow a user.
+    ///
+    /// Theirs content will no longer be display in your feed.
+    pub async fn unfollow(&self, user: Either<String, Cid>) -> Result<(), Error> {
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        let mut follows = match beacon.follows {
+            Some(f) => f,
+            None => return Err(Error::UnFollow),
+        };
+
+        let status = match user {
+            Either::Left(ens) => follows.ens.remove(&ens),
+            Either::Right(ipns) => follows.ipns.remove(&ipns),
+        };
+
+        if !status {
+            return Err(Error::UnFollow);
+        }
+
+        beacon.follows = Some(follows);
+
+        self.ipfs
+            .ipns_update(self.key.clone(), beacon_cid, &beacon)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Update live chat & streaming settings.
+    pub async fn update_live_settings(
+        &self,
+        peer_id: Option<PeerId>,
+        video_topic: Option<String>,
+        chat_topic: Option<String>,
+    ) -> Result<(), Error> {
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        let mut live = beacon.live.unwrap_or_default();
+
+        if let Some(peer_id) = peer_id {
+            live.peer_id = peer_id;
+        }
+
+        if let Some(video_topic) = video_topic {
+            live.video_topic = video_topic;
+        }
+
+        if let Some(chat_topic) = chat_topic {
+            live.chat_topic = chat_topic;
+        }
+
+        beacon.live = Some(live);
+
+        self.ipfs
+            .ipns_update(self.key.clone(), beacon_cid, &beacon)
+            .await?;
+
+        Ok(())
     }
 
     /// Create a new micro blog post.
@@ -192,11 +463,11 @@ impl IPNSUser {
     pub async fn add_image(&self, path: &std::path::Path) -> Result<ImageCid, Error> {
         let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
             Some(mime) => mime.to_owned(),
-            None => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
+            None => return Err(Error::Image),
         };
 
         if !(mime_type == "image/png" || mime_type == "image/jpeg") {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
+            return Err(Error::Image);
         };
 
         let file = tokio::fs::File::open(path).await?;
@@ -218,11 +489,11 @@ impl IPNSUser {
     pub async fn add_markdown(&self, path: &std::path::Path) -> Result<MarkdownCid, Error> {
         let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
             Some(mime) => mime.to_owned(),
-            None => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
+            None => return Err(Error::Markdown),
         };
 
         if mime_type != "text/markdown" {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
+            return Err(Error::Markdown);
         };
 
         let file = tokio::fs::File::open(path).await?;
@@ -242,7 +513,7 @@ impl IPNSUser {
         let mime_type = file.type_();
 
         if !(mime_type == "image/png" || mime_type == "image/jpeg") {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
+            return Err(Error::Image);
         };
 
         let size = file.size() as usize;
@@ -274,7 +545,7 @@ impl IPNSUser {
         use wasm_bindgen::JsCast;
 
         if file.type_() != "text/markdown" {
-            return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into());
+            return Err(Error::Markdown);
         };
 
         let size = file.size() as usize;
@@ -321,7 +592,7 @@ impl IPNSUser {
             Content::default()
         };
 
-        list.content.push(content_cid.into());
+        list.content.insert(content_cid.into());
         let list_cid = self.ipfs.dag_put(&list).await?;
 
         let index_cid = self

@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use crate::{
+    comments::Comment,
     media::{
         blog::{FullPost, MicroPost},
         video::VideoMetadata,
@@ -15,23 +18,25 @@ pub struct ContentIndexing {
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct Content {
-    pub content: Vec<IPLDLink>,
+    pub content: HashSet<IPLDLink>,
 }
 
 #[derive(Deserialize, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum Media {
-    Statement(MicroPost),
+    MicroBlog(MicroPost),
     Blog(FullPost),
     Video(VideoMetadata),
+    Comment(Comment),
 }
 
 impl Media {
     pub fn timestamp(&self) -> i64 {
         match self {
-            Media::Statement(metadata) => metadata.timestamp,
+            Media::MicroBlog(metadata) => metadata.timestamp,
             Media::Blog(metadata) => metadata.timestamp,
             Media::Video(metadata) => metadata.timestamp,
+            Media::Comment(metadata) => metadata.timestamp,
         }
     }
 }

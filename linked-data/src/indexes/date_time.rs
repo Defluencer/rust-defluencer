@@ -1,35 +1,37 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::IPLDLink;
 
 use serde::{Deserialize, Serialize};
 
+//TODO Implement a HAMT.
+
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct Yearly {
-    pub year: HashMap<i32, IPLDLink>,
+    pub year: BTreeMap<i32, IPLDLink>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct Monthly {
-    pub month: HashMap<u32, IPLDLink>,
+    pub month: BTreeMap<u32, IPLDLink>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct Daily {
-    pub day: HashMap<u32, IPLDLink>,
+    pub day: BTreeMap<u32, IPLDLink>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct Hourly {
-    pub hour: HashMap<u32, IPLDLink>,
+    pub hour: BTreeMap<u32, IPLDLink>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct Minutes {
-    pub minute: HashMap<u32, IPLDLink>,
+    pub minute: BTreeMap<u32, IPLDLink>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct Seconds {
-    pub second: HashMap<u32, IPLDLink>,
+    pub second: BTreeMap<u32, IPLDLink>,
 }
