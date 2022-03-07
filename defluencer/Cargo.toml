@@ -9,6 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+async-trait = "0.1"
 chrono = { version = "0.4", features = [] }
 cid = "0.8"
 either = "1"
@@ -30,3 +31,4 @@ bytes = "1"
 web-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-streams = "0.2"
+#web3 = { version = "0.18", default-features = false, features = ["eip-1193", "wasm"] }

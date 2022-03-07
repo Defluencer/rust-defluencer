@@ -8,6 +8,13 @@ use libsecp256k1::{recover, Message, RecoveryId, Signature};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+// TODO DAG-JOSE; build a specific type of JWS for ethereum keys.
+// https://ipld.io/specs/codecs/dag-jose/fixtures/
+// https://ipld.io/specs/codecs/dag-jose/spec/
+// https://www.rfc-editor.org/rfc/rfc7515
+// https://www.rfc-editor.org/rfc/rfc7517
+// https://www.rfc-editor.org/rfc/rfc7518
+
 /// Generic crypto-signed message.
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]

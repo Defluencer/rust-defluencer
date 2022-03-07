@@ -1,20 +1,24 @@
+pub mod anchoring_systems;
 pub mod content_cache;
 pub mod errors;
 pub mod moderation_cache;
-mod users;
+pub mod user;
 pub mod utils;
 
 use std::borrow::Cow;
 
+use anchoring_systems::IPNSAnchor;
 use cid::Cid;
+
 use futures::future;
 use linked_data::{beacon::Beacon, identity::Identity};
 
 use heck::{ToSnakeCase, ToTitleCase};
 
-use users::IPNSUser;
-
 use ipfs_api::{errors::Error, responses::KeyPair, IpfsService};
+use user::User;
+
+type IPNSUser = User<IPNSAnchor>;
 
 pub struct Defluencer {
     ipfs: IpfsService,
@@ -59,7 +63,10 @@ impl Defluencer {
             .into_iter()
             .zip(names.into_iter())
             .filter_map(|(result, name)| match result {
-                Ok(_) => Some(IPNSUser::new(self.ipfs.clone(), name)),
+                Ok(_) => Some(IPNSUser::new(
+                    self.ipfs.clone(),
+                    IPNSAnchor::new(self.ipfs.clone(), name),
+                )),
                 _ => None,
             })
             .collect();
@@ -67,7 +74,7 @@ impl Defluencer {
         Ok(users)
     }
 
-    /// Create a new user on this IPFS node.
+    /// Create a new IPNS user on this IPFS node.
     ///
     /// Names are converted to title case.
     pub async fn create_ipns_user(
@@ -77,9 +84,8 @@ impl Defluencer {
         let name = display_name.into();
         let key_name = name.to_snake_case();
         let display_name = name.to_title_case();
-        let avatar = Cid::default().into();
 
-        //TODO provide a default avatar Cid
+        let avatar = Cid::default().into(); //TODO provide a default avatar Cid
 
         let beacon = Beacon {
             identity: Identity {
@@ -97,18 +103,13 @@ impl Defluencer {
         let key_pair = self.ipfs.key_gen(key_name).await?;
         let KeyPair { id: _, name } = key_pair;
 
-        let user = IPNSUser::new(self.ipfs.clone(), name.clone());
+        let user = IPNSUser::new(
+            self.ipfs.clone(),
+            IPNSAnchor::new(self.ipfs.clone(), name.clone()),
+        );
 
         self.ipfs.ipns_put(name, false, &beacon).await?;
 
         Ok(user)
-    }
-
-    pub fn import_ipns_user(&self) {
-        todo!()
-    }
-
-    pub fn export_ipns_user(&self) {
-        todo!()
     }
 }

@@ -1,14 +1,12 @@
-use crate::errors::Error;
+use crate::{anchoring_systems::AnchoringSystem, errors::Error};
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
 use cid::Cid;
 
 use either::Either;
-use futures::{
-    stream::{self, StreamExt},
-    Stream,
-};
+
+use futures::{stream, Stream, StreamExt};
 
 use ipfs_api::IpfsService;
 
@@ -31,120 +29,38 @@ type MarkdownCid = Cid;
 type ImageCid = Cid;
 type VideoCid = Cid;
 
-pub struct IPNSUser {
+#[derive(Clone)]
+pub struct User<T>
+where
+    T: AnchoringSystem,
+{
+    anchor_sys: T,
     ipfs: IpfsService,
-    key: String,
 }
 
-impl IPNSUser {
-    pub fn new(ipfs: IpfsService, key: String) -> Self {
-        Self { ipfs, key }
+impl<T> User<T>
+where
+    T: AnchoringSystem,
+{
+    pub fn new(ipfs: IpfsService, anchor_sys: T) -> Self {
+        Self { ipfs, anchor_sys }
     }
 
-    /// Lazily stream content starting from newest.
-    pub fn content_feed(&self, index: Cid) -> impl Stream<Item = Content> + '_ {
-        self.stream_years(index)
-            .flat_map(|year| self.stream_months(year))
-            .flat_map(|month| self.stream_days(month))
-            .flat_map(|day| self.stream_hours(day))
-            .flat_map(|hours| self.stream_minutes(hours))
-            .flat_map(|minutes| self.stream_seconds(minutes))
-            .flat_map(|seconds| self.stream_content(seconds))
+    pub async fn get_beacon(&self) -> Result<(Cid, Beacon), Error> {
+        let cid = self.anchor_sys.retreive().await?;
+        let beacon: Beacon = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
+
+        Ok((cid, beacon))
     }
 
-    fn stream_years(&self, index: Cid) -> impl Stream<Item = Yearly> + '_ {
-        stream::unfold(index, move |cid| async move {
-            match self.ipfs.dag_get::<&str, Yearly>(cid, None).await {
-                Ok(years) => Some((years, cid)),
-                Err(_) => None,
-            }
-        })
-    }
+    async fn update_beacon(&self, old_cid: Cid, beacon: &Beacon) -> Result<(), Error> {
+        let new_cid = self.ipfs.dag_put(beacon).await?;
 
-    fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
-        stream::unfold(years.year.into_iter().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some((_, ipld)) => {
-                    match self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await {
-                        Ok(months) => Some((months, iter)),
-                        Err(_) => None,
-                    }
-                }
-                None => None,
-            }
-        })
-    }
+        self.ipfs.pin_update(old_cid, new_cid).await?;
 
-    fn stream_days(&self, months: Monthly) -> impl Stream<Item = Daily> + '_ {
-        stream::unfold(months.month.into_iter().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some((_, ipld)) => match self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await {
-                    Ok(days) => Some((days, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-    }
+        self.anchor_sys.anchor(new_cid).await?;
 
-    fn stream_hours(&self, days: Daily) -> impl Stream<Item = Hourly> + '_ {
-        stream::unfold(days.day.into_iter().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some((_, ipld)) => match self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await {
-                    Ok(hours) => Some((hours, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-    }
-
-    fn stream_minutes(&self, hours: Hourly) -> impl Stream<Item = Minutes> + '_ {
-        stream::unfold(hours.hour.into_iter().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some((_, ipld)) => {
-                    match self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await {
-                        Ok(minutes) => Some((minutes, iter)),
-                        Err(_) => None,
-                    }
-                }
-                None => None,
-            }
-        })
-    }
-
-    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Seconds> + '_ {
-        stream::unfold(
-            minutes.minute.into_iter().rev(),
-            move |mut iter| async move {
-                match iter.next() {
-                    Some((_, ipld)) => {
-                        match self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await {
-                            Ok(seconds) => Some((seconds, iter)),
-                            Err(_) => None,
-                        }
-                    }
-                    None => None,
-                }
-            },
-        )
-    }
-
-    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = Content> + '_ {
-        stream::unfold(
-            seconds.second.into_iter().rev(),
-            move |mut iter| async move {
-                match iter.next() {
-                    Some((_, ipld)) => {
-                        match self.ipfs.dag_get::<&str, Content>(ipld.link, None).await {
-                            Ok(content) => Some((content, iter)),
-                            Err(_) => None,
-                        }
-                    }
-                    None => None,
-                }
-            },
-        )
+        Ok(())
     }
 
     /// Update your identity data.
@@ -153,7 +69,7 @@ impl IPNSUser {
         display_name: Option<String>,
         avatar: Option<ImageCid>,
     ) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         if let Some(name) = display_name {
             beacon.identity.display_name = name;
@@ -163,11 +79,7 @@ impl IPNSUser {
             beacon.identity.avatar = avatar.into();
         }
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
-
-        Ok(())
+        self.update_beacon(beacon_cid, &beacon).await
     }
 
     /// Remove a specific content.
@@ -177,7 +89,7 @@ impl IPNSUser {
         let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
         let date_time = Utc.timestamp(media.timestamp(), 0);
 
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let index = match beacon.content.date_time {
             Some(index) => index,
@@ -208,11 +120,7 @@ impl IPNSUser {
 
         beacon.content.date_time = Some(index_cid.into());
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
-
-        Ok(())
+        self.update_beacon(beacon_cid, &beacon).await
     }
 
     /// Remove a specific comment.
@@ -225,7 +133,7 @@ impl IPNSUser {
         let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
         let date_time = Utc.timestamp(media.timestamp(), 0);
 
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let index = match beacon.comments.date_time {
             Some(index) => index,
@@ -256,18 +164,14 @@ impl IPNSUser {
 
         beacon.comments.date_time = Some(index_cid.into());
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
-
-        Ok(())
+        self.update_beacon(beacon_cid, &beacon).await
     }
 
     /// Follow a user.
     ///
     /// Theirs content will now be display in your feed.
     pub async fn follow(&self, user: Either<String, Cid>) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let mut follows = beacon.follows.unwrap_or_default();
 
@@ -282,18 +186,14 @@ impl IPNSUser {
 
         beacon.follows = Some(follows);
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
-
-        Ok(())
+        self.update_beacon(beacon_cid, &beacon).await
     }
 
     /// Unfollow a user.
     ///
     /// Theirs content will no longer be display in your feed.
     pub async fn unfollow(&self, user: Either<String, Cid>) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let mut follows = match beacon.follows {
             Some(f) => f,
@@ -311,11 +211,7 @@ impl IPNSUser {
 
         beacon.follows = Some(follows);
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
-
-        Ok(())
+        self.update_beacon(beacon_cid, &beacon).await
     }
 
     /// Update live chat & streaming settings.
@@ -325,7 +221,7 @@ impl IPNSUser {
         video_topic: Option<String>,
         chat_topic: Option<String>,
     ) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let mut live = beacon.live.unwrap_or_default();
 
@@ -343,11 +239,7 @@ impl IPNSUser {
 
         beacon.live = Some(live);
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
-
-        Ok(())
+        self.update_beacon(beacon_cid, &beacon).await
     }
 
     /// Create a new micro blog post.
@@ -374,7 +266,7 @@ impl IPNSUser {
         let comment_cid = self.ipfs.dag_put(&comment).await?;
         self.ipfs.pin_add(comment_cid, false).await?;
 
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let mut list = if let Some(index) = beacon.comments.date_time {
             let path = format!(
@@ -408,9 +300,7 @@ impl IPNSUser {
 
         beacon.content.date_time = Some(index_cid.into());
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
+        self.update_beacon(beacon_cid, &beacon).await?;
 
         Ok(comment_cid)
     }
@@ -564,14 +454,14 @@ impl IPNSUser {
         Ok(cid)
     }
 
-    async fn add_content<T>(&self, date_time: DateTime<Utc>, metadata: &T) -> Result<Cid, Error>
+    async fn add_content<U>(&self, date_time: DateTime<Utc>, metadata: &U) -> Result<Cid, Error>
     where
-        T: ?Sized + Serialize,
+        U: ?Sized + Serialize,
     {
         let content_cid = self.ipfs.dag_put(metadata).await?;
         self.ipfs.pin_add(content_cid, true).await?;
 
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.ipfs.ipns_get(self.key.clone()).await?;
+        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
         let mut list = if let Some(index) = beacon.content.date_time {
             let path = format!(
@@ -601,9 +491,7 @@ impl IPNSUser {
 
         beacon.content.date_time = Some(index_cid.into());
 
-        self.ipfs
-            .ipns_update(self.key.clone(), beacon_cid, &beacon)
-            .await?;
+        self.update_beacon(beacon_cid, &beacon).await?;
 
         Ok(content_cid)
     }
@@ -742,5 +630,136 @@ impl IPNSUser {
         }
 
         Ok(duration)
+    }
+
+    /// Lazily stream media starting from newest.
+    pub fn media_feed(&self, beacon: Beacon) -> impl Stream<Item = Media> + '_ {
+        stream::unfold(beacon, move |mut beacon| async move {
+            match beacon.content.date_time {
+                Some(ipld) => {
+                    beacon.content.date_time = None;
+
+                    Some((Some(ipld.link), beacon))
+                }
+                None => None,
+            }
+        })
+        .flat_map(|index| self.stream_years(index))
+        .flat_map(|year| self.stream_months(year))
+        .flat_map(|month| self.stream_days(month))
+        .flat_map(|day| self.stream_hours(day))
+        .flat_map(|hours| self.stream_minutes(hours))
+        .flat_map(|minutes| self.stream_seconds(minutes))
+        .flat_map(|seconds| self.stream_content(seconds))
+        .flat_map(|content| self.stream_media(content))
+    }
+
+    fn stream_years(&self, index: Option<Cid>) -> impl Stream<Item = Yearly> + '_ {
+        stream::unfold(index, move |mut index| async move {
+            match index {
+                Some(cid) => {
+                    index = None;
+
+                    match self.ipfs.dag_get::<&str, Yearly>(cid, None).await {
+                        Ok(years) => Some((years, index)),
+                        Err(_) => None,
+                    }
+                }
+                None => None,
+            }
+        })
+    }
+
+    fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
+        stream::unfold(years.year.into_values().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some(ipld) => match self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await {
+                    Ok(months) => Some((months, iter)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
+    }
+
+    fn stream_days(&self, months: Monthly) -> impl Stream<Item = Daily> + '_ {
+        stream::unfold(
+            months.month.into_values().rev(),
+            move |mut iter| async move {
+                match iter.next() {
+                    Some(ipld) => match self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await {
+                        Ok(days) => Some((days, iter)),
+                        Err(_) => None,
+                    },
+                    None => None,
+                }
+            },
+        )
+    }
+
+    fn stream_hours(&self, days: Daily) -> impl Stream<Item = Hourly> + '_ {
+        stream::unfold(days.day.into_values().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some(ipld) => match self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await {
+                    Ok(hours) => Some((hours, iter)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
+    }
+
+    fn stream_minutes(&self, hours: Hourly) -> impl Stream<Item = Minutes> + '_ {
+        stream::unfold(hours.hour.into_values().rev(), move |mut iter| async move {
+            match iter.next() {
+                Some(ipld) => match self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await {
+                    Ok(minutes) => Some((minutes, iter)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
+    }
+
+    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Seconds> + '_ {
+        stream::unfold(
+            minutes.minute.into_values().rev(),
+            move |mut iter| async move {
+                match iter.next() {
+                    Some(ipld) => match self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await {
+                        Ok(seconds) => Some((seconds, iter)),
+                        Err(_) => None,
+                    },
+                    None => None,
+                }
+            },
+        )
+    }
+
+    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = Content> + '_ {
+        stream::unfold(
+            seconds.second.into_values().rev(),
+            move |mut iter| async move {
+                match iter.next() {
+                    Some(ipld) => match self.ipfs.dag_get::<&str, Content>(ipld.link, None).await {
+                        Ok(content) => Some((content, iter)),
+                        Err(_) => None,
+                    },
+                    None => None,
+                }
+            },
+        )
+    }
+
+    fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
+        stream::unfold(content.content.into_iter(), move |mut iter| async move {
+            match iter.next() {
+                Some(ipld) => match self.ipfs.dag_get::<&str, Media>(ipld.link, None).await {
+                    Ok(media) => Some((media, iter)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
     }
 }
