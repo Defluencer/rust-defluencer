@@ -5,7 +5,10 @@ mod tests {
     use bytes::Bytes;
     use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
     use futures_util::{future::AbortHandle, future::FutureExt, stream, StreamExt};
-    use ipfs_api::{responses::PinMode, IpfsService};
+    use ipfs_api::{
+        responses::{Codec, PinMode},
+        IpfsService,
+    };
 
     const PEER_ID: &str = "12D3KooWRsEKtLGLW9FHw7t7dDhHrMDahw3VwssNgh55vksdvfmC";
 
@@ -71,7 +74,7 @@ mod tests {
             data: String::from("This is a test"),
         };
 
-        let cid = ipfs.dag_put(&node).await.unwrap();
+        let cid = ipfs.dag_put(&node, Codec::default()).await.unwrap();
 
         let new_node: TestBlock = ipfs.dag_get(cid, Option::<&str>::None).await.unwrap();
 

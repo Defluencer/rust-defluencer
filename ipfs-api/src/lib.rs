@@ -244,7 +244,7 @@ impl IpfsService {
     }
 
     /// Serialize then add dag node to IPFS. Return a CID.
-    pub async fn dag_put<T>(&self, node: &T) -> Result<Cid>
+    pub async fn dag_put<T>(&self, node: &T, store_codec: Codec) -> Result<Cid>
     where
         T: ?Sized + Serialize,
     {
@@ -257,7 +257,7 @@ impl IpfsService {
         let bytes = self
             .client
             .post(url)
-            .query(&[("store-codec", "dag-cbor")])
+            .query(&[("store-codec", store_codec.to_string())])
             .query(&[("input-codec", "dag-json")])
             .query(&[("pin", "false")])
             .multipart(form)
@@ -360,6 +360,39 @@ impl IpfsService {
         Err(error.into())
     }
 
+    /// Returns all IPNS keys on this IPFS node.
+    pub async fn key_import<U>(&self, name: U, key_file: String) -> Result<KeyPair>
+    where
+        U: Into<Cow<'static, str>>,
+    {
+        let url = self.base_url.join("key/import")?;
+
+        let part = Part::stream(key_file);
+
+        let form = Form::new().part("key", part);
+
+        let bytes = self
+            .client
+            .post(url)
+            .query(&[("arg", name.into())])
+            .query(&[("ipns-base", "base32")])
+            .multipart(form)
+            .send()
+            .await?
+            .bytes()
+            .await?;
+
+        //println!("{}", std::str::from_utf8(&bytes).unwrap());
+
+        if let Ok(res) = serde_json::from_slice::<KeyPair>(&bytes) {
+            return Ok(res);
+        }
+
+        let error = serde_json::from_slice::<IPFSError>(&bytes)?;
+
+        Err(error.into())
+    }
+
     /// Publish new IPNS record.
     pub async fn name_publish<U>(&self, cid: Cid, key: U) -> Result<NamePublishResponse>
     where
@@ -445,7 +478,7 @@ impl IpfsService {
     where
         T: ?Sized + Serialize,
     {
-        let cid = self.dag_put(content).await?;
+        let cid = self.dag_put(content, Codec::default()).await?;
 
         self.pin_update(cid, old_cid).await?;
 
@@ -464,7 +497,7 @@ impl IpfsService {
     where
         T: ?Sized + Serialize,
     {
-        let cid = self.dag_put(content).await?;
+        let cid = self.dag_put(content, Codec::default()).await?;
 
         self.pin_add(cid, recursive).await?;
 

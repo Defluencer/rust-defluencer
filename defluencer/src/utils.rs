@@ -1,6 +1,8 @@
+use crate::errors::Error;
+
 use cid::multibase::Base;
 
-use ipfs_api::{errors::Error, IpfsService};
+use ipfs_api::IpfsService;
 
 use linked_data::media::mime_type::MimeTyped;
 

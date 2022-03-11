@@ -1,4 +1,4 @@
-use crate::{anchoring_systems::AnchoringSystem, errors::Error};
+use crate::{anchoring_systems::AnchoringSystem, errors::Error, signature_system::SignatureSystem};
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
@@ -8,7 +8,7 @@ use either::Either;
 
 use futures::{stream, Stream, StreamExt};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
     beacon::Beacon,
@@ -30,20 +30,27 @@ type ImageCid = Cid;
 type VideoCid = Cid;
 
 #[derive(Clone)]
-pub struct User<T>
+pub struct User<T, U>
 where
     T: AnchoringSystem,
+    U: SignatureSystem,
 {
     anchor_sys: T,
+    sign_sys: U,
     ipfs: IpfsService,
 }
 
-impl<T> User<T>
+impl<T, U> User<T, U>
 where
     T: AnchoringSystem,
+    U: SignatureSystem,
 {
-    pub fn new(ipfs: IpfsService, anchor_sys: T) -> Self {
-        Self { ipfs, anchor_sys }
+    pub fn new(ipfs: IpfsService, anchor_sys: T, sign_sys: U) -> Self {
+        Self {
+            ipfs,
+            anchor_sys,
+            sign_sys,
+        }
     }
 
     pub async fn get_beacon(&self) -> Result<(Cid, Beacon), Error> {
@@ -54,7 +61,7 @@ where
     }
 
     async fn update_beacon(&self, old_cid: Cid, beacon: &Beacon) -> Result<(), Error> {
-        let new_cid = self.ipfs.dag_put(beacon).await?;
+        let new_cid = self.ipfs.dag_put(beacon, Codec::default()).await?;
 
         self.ipfs.pin_update(old_cid, new_cid).await?;
 
@@ -112,7 +119,7 @@ where
             return Err(Error::RemoveContent);
         }
 
-        let contents_cid = self.ipfs.dag_put(&contents).await?;
+        let contents_cid = self.ipfs.dag_put(&contents, Codec::default()).await?;
 
         let index_cid = self
             .update_date_time_index(date_time, beacon.content.date_time, contents_cid)
@@ -156,7 +163,7 @@ where
             return Err(Error::RemoveComment);
         }
 
-        let comments_cid = self.ipfs.dag_put(&comments).await?;
+        let comments_cid = self.ipfs.dag_put(&comments, Codec::default()).await?;
 
         let index_cid = self
             .update_date_time_index(date_time, beacon.comments.date_time, comments_cid)
@@ -263,7 +270,7 @@ where
             text,
         };
 
-        let comment_cid = self.ipfs.dag_put(&comment).await?;
+        let comment_cid = self.ipfs.dag_put(&comment, Codec::default()).await?;
         self.ipfs.pin_add(comment_cid, false).await?;
 
         let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
@@ -292,7 +299,7 @@ where
             .or_default()
             .push(comment_cid.into());
 
-        let list_cid = self.ipfs.dag_put(&list).await?;
+        let list_cid = self.ipfs.dag_put(&list, Codec::default()).await?;
 
         let index_cid = self
             .update_date_time_index(date_time, beacon.comments.date_time, list_cid)
@@ -369,7 +376,7 @@ where
             data: either::Either::Left(cid.into()),
         };
 
-        let cid = self.ipfs.dag_put(&mime_typed).await?;
+        let cid = self.ipfs.dag_put(&mime_typed, Codec::default()).await?;
 
         Ok(cid)
     }
@@ -454,12 +461,13 @@ where
         Ok(cid)
     }
 
-    async fn add_content<U>(&self, date_time: DateTime<Utc>, metadata: &U) -> Result<Cid, Error>
+    async fn add_content<V>(&self, date_time: DateTime<Utc>, metadata: &V) -> Result<Cid, Error>
     where
-        U: ?Sized + Serialize,
+        V: ?Sized + Serialize,
     {
-        let content_cid = self.ipfs.dag_put(metadata).await?;
-        self.ipfs.pin_add(content_cid, true).await?;
+        let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
+        let signed_cid = self.sign_sys.sign(content_cid).await?;
+        self.ipfs.pin_add(signed_cid, true).await?;
 
         let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
 
@@ -482,8 +490,8 @@ where
             Content::default()
         };
 
-        list.content.insert(content_cid.into());
-        let list_cid = self.ipfs.dag_put(&list).await?;
+        list.content.insert(signed_cid.into());
+        let list_cid = self.ipfs.dag_put(&list, Codec::default()).await?;
 
         let index_cid = self
             .update_date_time_index(date_time, beacon.content.date_time, list_cid)
@@ -523,7 +531,7 @@ where
         seconds
             .second
             .insert(date_time.second(), content_cid.into());
-        let seconds_cid = self.ipfs.dag_put(&seconds).await?;
+        let seconds_cid = self.ipfs.dag_put(&seconds, Codec::default()).await?;
 
         let mut minutes: Minutes = if let Some(index) = index {
             let path = format!(
@@ -545,7 +553,7 @@ where
         minutes
             .minute
             .insert(date_time.minute(), seconds_cid.into());
-        let minutes_cid = self.ipfs.dag_put(&minutes).await?;
+        let minutes_cid = self.ipfs.dag_put(&minutes, Codec::default()).await?;
 
         let mut hours: Hourly = if let Some(index) = index {
             let path = format!(
@@ -564,7 +572,7 @@ where
         };
 
         hours.hour.insert(date_time.hour(), minutes_cid.into());
-        let hours_cid = self.ipfs.dag_put(&hours).await?;
+        let hours_cid = self.ipfs.dag_put(&hours, Codec::default()).await?;
 
         let mut days: Daily = if let Some(index) = index {
             let path = format!("year/{}/month/{}", date_time.year(), date_time.month());
@@ -578,7 +586,7 @@ where
         };
 
         days.day.insert(date_time.day(), hours_cid.into());
-        let days_cid = self.ipfs.dag_put(&days).await?;
+        let days_cid = self.ipfs.dag_put(&days, Codec::default()).await?;
 
         let mut months: Monthly = if let Some(index) = index {
             let path = format!("year/{}", date_time.year());
@@ -592,7 +600,7 @@ where
         };
 
         months.month.insert(date_time.month(), days_cid.into());
-        let months_cid = self.ipfs.dag_put(&months).await?;
+        let months_cid = self.ipfs.dag_put(&months, Codec::default()).await?;
 
         let mut years: Yearly = if let Some(index) = index {
             self.ipfs
@@ -604,7 +612,7 @@ where
         };
 
         years.year.insert(date_time.year(), months_cid.into());
-        let years_cid = self.ipfs.dag_put(&years).await?;
+        let years_cid = self.ipfs.dag_put(&years, Codec::default()).await?;
 
         Ok(years_cid)
     }
@@ -633,7 +641,7 @@ where
     }
 
     /// Lazily stream media starting from newest.
-    pub fn media_feed(&self, beacon: Beacon) -> impl Stream<Item = Media> + '_ {
+    pub fn media_feed(&self, beacon: Beacon) -> impl Stream<Item = Content> + '_ {
         stream::unfold(beacon, move |mut beacon| async move {
             match beacon.content.date_time {
                 Some(ipld) => {
@@ -651,7 +659,8 @@ where
         .flat_map(|hours| self.stream_minutes(hours))
         .flat_map(|minutes| self.stream_seconds(minutes))
         .flat_map(|seconds| self.stream_content(seconds))
-        .flat_map(|content| self.stream_media(content))
+        //TODO verify JWS
+        //.flat_map(|content| self.stream_media(content))
     }
 
     fn stream_years(&self, index: Option<Cid>) -> impl Stream<Item = Yearly> + '_ {
@@ -751,7 +760,7 @@ where
         )
     }
 
-    fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
+    /* fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
         stream::unfold(content.content.into_iter(), move |mut iter| async move {
             match iter.next() {
                 Some(ipld) => match self.ipfs.dag_get::<&str, Media>(ipld.link, None).await {
@@ -761,5 +770,5 @@ where
                 None => None,
             }
         })
-    }
+    } */
 }

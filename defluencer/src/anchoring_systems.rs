@@ -7,7 +7,7 @@ use crate::errors::Error;
 
 /// Anchoring Systems take beacon cids and "anchor" them.
 ///
-/// The methods used varies but blockchain or cryptography can be used.
+/// The methods used varies but blockchain or cryptography are usually used.
 #[async_trait(?Send)]
 pub trait AnchoringSystem {
     async fn anchor(&self, beacon_cid: Cid) -> Result<(), Error>;
