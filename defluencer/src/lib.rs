@@ -6,7 +6,7 @@ pub mod signature_system;
 pub mod user;
 pub mod utils;
 
-use std::borrow::Cow;
+/* use std::borrow::Cow;
 
 use anchoring_systems::IPNSAnchor;
 use cid::Cid;
@@ -19,9 +19,9 @@ use ipfs_api::{errors::Error, responses::KeyPair, IpfsService};
 use signature_system::IPNSSignature;
 use user::User;
 
-type IPNSUser = User<IPNSAnchor, IPNSSignature>;
+type IPNSUser = User<IPNSAnchor, IPNSSignature>; */
 
-pub struct Defluencer {
+/* pub struct Defluencer {
     ipfs: IpfsService,
 }
 
@@ -32,7 +32,7 @@ impl Defluencer {
         Self { ipfs }
     }
 
-    /* /// Create a new IPNS user on this IPFS node.
+    /// Create a new IPNS user on this IPFS node.
     ///
     /// Names are converted to title case.
     pub async fn create_ipns_user(
@@ -71,9 +71,9 @@ impl Defluencer {
         self.ipfs.ipns_put(name, false, &beacon).await?;
 
         Ok(user)
-    } */
+    }
 
-    /* /// Search this IPFS node for users.
+    /// Search this IPFS node for users.
     ///
     /// IPNS records that resolve to beacons are considered local users.
     pub async fn get_ipns_users(&self) -> Result<Vec<IPNSUser>, Error> {
@@ -115,5 +115,6 @@ impl Defluencer {
             .collect();
 
         Ok(users)
-    } */
+    }
 }
+ */

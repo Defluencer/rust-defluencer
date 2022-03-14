@@ -430,7 +430,7 @@ where
             data: either::Either::Right(bytes),
         };
 
-        let cid = self.ipfs.dag_put(&mime_typed).await?;
+        let cid = self.ipfs.dag_put(&mime_typed, Codec::default()).await?;
 
         Ok(cid)
     }

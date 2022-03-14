@@ -5,41 +5,45 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
-async-trait = "0.1"
-bip39 = "1"
-chrono = { version = "0.4", features = [] }
-cid = "0.8"
-ecdsa = { version = "0.13", features = [] }
-ed25519 = { version = "1", features = ["pkcs8"] }
-ed25519-dalek = { version = "1", features = [] }
-either = "1"
-elliptic-curve = { version = "0.11", features = ["serde", "jwk"] }
-futures = { version = "0.3", features = [] }
-futures-util = { version = "0.3", features = [] }
-heck = { version = "0.4", features = [] }
+async-trait = { version = "0.1", default-features = false, features = [] }
+#bip39 = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+cid = { version = "0.8", default-features = false, features = [] }
+ecdsa = { version = "0.13", default-features = false, features = ["sign", "verify"] }
+ed25519 = { version = "1", default-features = false, features = ["pkcs8"] }
+ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek.git", branch = "update-deps", default-features = false, features = ["u64_backend"] }
+either = { version = "1", default-features = false, features = [] }
+elliptic-curve = { version = "0.11", default-features = false, features = ["std", "serde", "jwk"] }
+futures = { version = "0.3", default-features = false, features = [] }
+futures-util = { version = "0.3", default-features = false, features = [] }
+heck = { version = "0.4", default-features = false, features = [] }
 ipfs-api = { path = "../ipfs-api" }
-k256 = { version = "0.10", features = ["ecdsa", "keccak256", "jwk"] }
+k256 = { version = "0.10", default-features = false, features = ["ecdsa", "keccak256", "jwk", "sha256"] }
 linked-data = { path = "../linked-data" }
-mime_guess = "2.0"
-multibase = "0.9"
-rand_core = { version = "^0.5", features = ["getrandom"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha3 = { version = "0.10", features = [] }
-signature = { version = "1", features = [] }
-thiserror = "1"
+mime_guess = { version = "2.0", default-features = false, features = [] }
+multibase = { version = "0.9", default-features = false, features = [] }
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = [] }
+signature = { version = "1", default-features = false, features = ["std"] }
+thiserror = { version = "1", default-features = false, features = [] }
+zeroize = { version = "1", default-features = false, features = [] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ['full']}
-tokio-util = { version = "0.7", features = ["io"] }
+ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek.git", branch = "update-deps", default-features = false, features = ["rand", "u64_backend"] }
+tokio = { version = "1", default-features = false, features = ["fs"]}
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-bytes = "1"
-web-sys = "0.3"
+bytes = { version = "1", default-features = false, features = [] }
+web3 = { version = "0.18", default-features = false, features = ["eip-1193", "wasm"] }
+web-sys = { version = "0.3", features = ['console']}
 wasm-bindgen = "0.2"
 wasm-streams = "0.2"
-web3 = { version = "0.18", default-features = false, features = ["eip-1193", "wasm"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", features = ['full']}
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
