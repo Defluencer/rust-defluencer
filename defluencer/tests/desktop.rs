@@ -4,7 +4,7 @@
 mod tests {
     use cid::Cid;
 
-    use defluencer::signature_system::{dag_jose::verify_jws, IPNSSignature, SignatureSystem};
+    use defluencer::signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer};
 
     use ipfs_api::IpfsService;
 
@@ -21,7 +21,7 @@ mod tests {
         let mut csprng = OsRng::default();
         let keypair = Keypair::generate(&mut csprng);
 
-        let system = IPNSSignature::new(ipfs.clone(), keypair);
+        let system = EdDSASigner::new(ipfs.clone(), keypair);
 
         let cid =
             Cid::try_from("bafybeig6xv5nwphfmvcnektpnojts33jqcuam7bmye2pb54adnrtccjlsu").unwrap();
@@ -32,7 +32,9 @@ mod tests {
 
         let raw: RawJWS = ipfs.dag_get(result, Option::<&str>::None).await.unwrap();
 
-        let result = verify_jws(raw);
+        let jws: JsonWebSignature = raw.try_into().unwrap();
+
+        let result = jws.verify();
 
         assert!(result.is_ok());
     }

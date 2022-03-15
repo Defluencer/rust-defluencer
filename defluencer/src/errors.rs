@@ -45,9 +45,9 @@ pub enum Error {
     #[error("Defluencer: Cannot process file, please use a markdown file")]
     Markdown,
 
-    #[error("Defluencer: Cannot remove content, content not found")]
-    RemoveContent,
+    #[error("Defluencer: Content not found")]
+    ContentNotFound,
 
-    #[error("Defluencer: Cannot remove comment, comment not found")]
-    RemoveComment,
+    #[error("Defluencer: Comment not found")]
+    CommentNotFound,
 }

@@ -1,12 +1,10 @@
-use crate::{anchoring_systems::AnchoringSystem, errors::Error, signature_system::SignatureSystem};
+use crate::{anchors::Anchor, errors::Error, signatures::Signer};
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
 use cid::Cid;
 
 use either::Either;
-
-use futures::{stream, Stream, StreamExt};
 
 use ipfs_api::{responses::Codec, IpfsService};
 
@@ -32,29 +30,29 @@ type VideoCid = Cid;
 #[derive(Clone)]
 pub struct User<T, U>
 where
-    T: AnchoringSystem,
-    U: SignatureSystem,
+    T: Anchor,
+    U: Signer,
 {
-    anchor_sys: T,
-    sign_sys: U,
+    anchor: T,
+    signer: U,
     ipfs: IpfsService,
 }
 
 impl<T, U> User<T, U>
 where
-    T: AnchoringSystem,
-    U: SignatureSystem,
+    T: Anchor,
+    U: Signer,
 {
-    pub fn new(ipfs: IpfsService, anchor_sys: T, sign_sys: U) -> Self {
+    pub fn new(ipfs: IpfsService, anchor: T, signer: U) -> Self {
         Self {
             ipfs,
-            anchor_sys,
-            sign_sys,
+            anchor,
+            signer,
         }
     }
 
-    pub async fn get_beacon(&self) -> Result<(Cid, Beacon), Error> {
-        let cid = self.anchor_sys.retreive().await?;
+    async fn get_beacon(&self) -> Result<(Cid, Beacon), Error> {
+        let cid = self.anchor.retreive().await?;
         let beacon: Beacon = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
 
         Ok((cid, beacon))
@@ -65,7 +63,7 @@ where
 
         self.ipfs.pin_update(old_cid, new_cid).await?;
 
-        self.anchor_sys.anchor(new_cid).await?;
+        self.anchor.anchor(new_cid).await?;
 
         Ok(())
     }
@@ -100,7 +98,7 @@ where
 
         let index = match beacon.content.date_time {
             Some(index) => index,
-            None => return Err(Error::RemoveContent),
+            None => return Err(Error::ContentNotFound),
         };
 
         let path = format!(
@@ -116,7 +114,7 @@ where
         let mut contents: Content = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
 
         if !contents.content.remove(&content_cid.into()) {
-            return Err(Error::RemoveContent);
+            return Err(Error::ContentNotFound);
         }
 
         let contents_cid = self.ipfs.dag_put(&contents, Codec::default()).await?;
@@ -144,7 +142,7 @@ where
 
         let index = match beacon.comments.date_time {
             Some(index) => index,
-            None => return Err(Error::RemoveComment),
+            None => return Err(Error::CommentNotFound),
         };
 
         let path = format!(
@@ -160,7 +158,7 @@ where
         let mut comments: Comments = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
 
         if !comments.comments.remove(&content_cid).is_some() {
-            return Err(Error::RemoveComment);
+            return Err(Error::CommentNotFound);
         }
 
         let comments_cid = self.ipfs.dag_put(&comments, Codec::default()).await?;
@@ -466,7 +464,7 @@ where
         V: ?Sized + Serialize,
     {
         let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
-        let signed_cid = self.sign_sys.sign(content_cid).await?;
+        let signed_cid = self.signer.sign(content_cid).await?;
         self.ipfs.pin_add(signed_cid, true).await?;
 
         let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
@@ -639,136 +637,4 @@ where
 
         Ok(duration)
     }
-
-    /// Lazily stream media starting from newest.
-    pub fn media_feed(&self, beacon: Beacon) -> impl Stream<Item = Content> + '_ {
-        stream::unfold(beacon, move |mut beacon| async move {
-            match beacon.content.date_time {
-                Some(ipld) => {
-                    beacon.content.date_time = None;
-
-                    Some((Some(ipld.link), beacon))
-                }
-                None => None,
-            }
-        })
-        .flat_map(|index| self.stream_years(index))
-        .flat_map(|year| self.stream_months(year))
-        .flat_map(|month| self.stream_days(month))
-        .flat_map(|day| self.stream_hours(day))
-        .flat_map(|hours| self.stream_minutes(hours))
-        .flat_map(|minutes| self.stream_seconds(minutes))
-        .flat_map(|seconds| self.stream_content(seconds))
-        //TODO verify JWS
-        //.flat_map(|content| self.stream_media(content))
-    }
-
-    fn stream_years(&self, index: Option<Cid>) -> impl Stream<Item = Yearly> + '_ {
-        stream::unfold(index, move |mut index| async move {
-            match index {
-                Some(cid) => {
-                    index = None;
-
-                    match self.ipfs.dag_get::<&str, Yearly>(cid, None).await {
-                        Ok(years) => Some((years, index)),
-                        Err(_) => None,
-                    }
-                }
-                None => None,
-            }
-        })
-    }
-
-    fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
-        stream::unfold(years.year.into_values().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await {
-                    Ok(months) => Some((months, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-    }
-
-    fn stream_days(&self, months: Monthly) -> impl Stream<Item = Daily> + '_ {
-        stream::unfold(
-            months.month.into_values().rev(),
-            move |mut iter| async move {
-                match iter.next() {
-                    Some(ipld) => match self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await {
-                        Ok(days) => Some((days, iter)),
-                        Err(_) => None,
-                    },
-                    None => None,
-                }
-            },
-        )
-    }
-
-    fn stream_hours(&self, days: Daily) -> impl Stream<Item = Hourly> + '_ {
-        stream::unfold(days.day.into_values().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await {
-                    Ok(hours) => Some((hours, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-    }
-
-    fn stream_minutes(&self, hours: Hourly) -> impl Stream<Item = Minutes> + '_ {
-        stream::unfold(hours.hour.into_values().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await {
-                    Ok(minutes) => Some((minutes, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-    }
-
-    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Seconds> + '_ {
-        stream::unfold(
-            minutes.minute.into_values().rev(),
-            move |mut iter| async move {
-                match iter.next() {
-                    Some(ipld) => match self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await {
-                        Ok(seconds) => Some((seconds, iter)),
-                        Err(_) => None,
-                    },
-                    None => None,
-                }
-            },
-        )
-    }
-
-    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = Content> + '_ {
-        stream::unfold(
-            seconds.second.into_values().rev(),
-            move |mut iter| async move {
-                match iter.next() {
-                    Some(ipld) => match self.ipfs.dag_get::<&str, Content>(ipld.link, None).await {
-                        Ok(content) => Some((content, iter)),
-                        Err(_) => None,
-                    },
-                    None => None,
-                }
-            },
-        )
-    }
-
-    /* fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
-        stream::unfold(content.content.into_iter(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Media>(ipld.link, None).await {
-                    Ok(media) => Some((media, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-    } */
 }

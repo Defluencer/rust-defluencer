@@ -1,92 +1,42 @@
+#![cfg(target_arch = "wasm32")]
+
 use async_trait::async_trait;
 
 use cid::Cid;
+
 use ipfs_api::{responses::Codec, IpfsService};
+
 use linked_data::signature::{
     AlgorithmType, CurveType, Header, JsonWebKey, KeyType, RawJWS, RawSignature,
 };
+
 use multibase::Base;
 
 use crate::errors::Error;
 
 use ed25519::signature::Signature;
+
 use ed25519_dalek::{Keypair, Signer};
 
-/// Signature systems are responsable for signing & authenticating content.
-#[async_trait(?Send)]
-pub trait SignatureSystem {
-    /// Create a DAG-JOSE block linking to this cid.
-    async fn sign(&self, cid: Cid) -> Result<Cid, Error>;
-}
-
-pub struct IPNSSignature {
-    ipfs: IpfsService,
-    key_pair: Keypair,
-}
-
-impl IPNSSignature {
-    pub fn new(ipfs: IpfsService, key_pair: Keypair) -> Self {
-        Self { ipfs, key_pair }
-    }
-}
-
-#[async_trait(?Send)]
-impl SignatureSystem for IPNSSignature {
-    async fn sign(&self, cid: Cid) -> Result<Cid, Error> {
-        let header = Some(Header {
-            algorithm: None,
-            json_web_key: Some(JsonWebKey {
-                key_type: KeyType::OctetString,
-                curve: CurveType::Ed25519,
-                x: Base::Base64Url.encode(self.key_pair.public.as_bytes()),
-                y: None,
-            }),
-        });
-
-        let payload = cid.to_bytes();
-        let payload = Base::Base64Url.encode(payload);
-
-        let protected = Header {
-            algorithm: Some(AlgorithmType::EdDSA),
-            json_web_key: None,
-        };
-        let protected = serde_json::to_vec(&protected).unwrap();
-        let protected = Base::Base64Url.encode(protected);
-
-        let signing_input = format!("{}.{}", payload, protected);
-
-        let signature = self.key_pair.sign(signing_input.as_bytes());
-        let signature = Base::Base64Url.encode(signature.as_bytes());
-
-        let json = RawJWS {
-            payload,
-            signatures: vec![RawSignature {
-                header,
-                protected,
-                signature,
-            }],
-            link: cid.into(),
-        };
-
-        let cid = self.ipfs.dag_put(&json, Codec::DagJose).await?;
-
-        Ok(cid)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 use web3::{transports::eip_1193::Eip1193, types::Address, Web3};
 
-#[cfg(target_arch = "wasm32")]
-pub struct ENSSignature {
+/// Create DAG-Jose blocks with the EcDSA.
+///
+/// Should use the same address (key) as the ENS domain owner.
+pub struct EthereumSigner {
     ipfs: IpfsService,
     addr: Address,
     web3: Web3<Eip1193>,
 }
 
-#[cfg(target_arch = "wasm32")]
+impl EthereumSigner {
+    pub fn new(ipfs: IpfsService, addr: Address, web3: Web3<Eip1193>) -> Self {
+        Self { ipfs, addr, web3 }
+    }
+}
+
 #[async_trait(?Send)]
-impl SignatureSystem for ENSSignature {
+impl super::Signer for EthereumSigner {
     async fn sign(&self, cid: Cid) -> Result<Cid, Error> {
         let payload = cid.to_bytes();
         let payload = Base::Base64Url.encode(payload);
@@ -133,7 +83,6 @@ impl SignatureSystem for ENSSignature {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 fn k256_recover(message: &[u8], signature: &[u8]) -> Result<JsonWebKey, Error> {
     let mut eth_message = format!("\x19Ethereum Signed Message:\n{}", message.len()).into_bytes();
     eth_message.extend_from_slice(&message);
