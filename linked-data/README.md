@@ -1,51 +1,47 @@
 # Linked Data
 
-IPLD schemas and what to do with them.
+Defluencer IPLD schemas.
 
 ## Beacon
 
-Directory of user content and metadata.
-Since this object should not change it can be used as a unique identifier.
-Always resolve the IPNS address to get the most up to date content.
-If using IPNS over PubSub, you can also subscribe to a IPNS topic for live update.
-Use friend list to crawl the social web.
+Metadata, content and comment indexes.
 
 ### IPLD Schemas
 ```
 type Beacon struct {
-    identity IPNS
-    content_feed optional IPNS
-    comments optional IPNS
-    live optional IPNS
-    friends optional IPNS
-    bans optional IPNS
-    mods optional IPNS
+    identity Identity
+    content_feed ContentIndexing
+    comments CommentIndexing
+    live optional LiveSettings
+    friends optional Follows
+    bans optional &Bans
+    mods optional &Moderators
 }
-
-type IPNS string # IPNS address
 ```
 ## Identity
 
-A user name and avatar.
+User name and avatar.
 
 ### IPLD Schemas
 ```
 type Identity struct {
-    display_name String # Your choosen name
-    avatar Link # Link to an image
+    display_name String 
+    avatar &MimeTyped
 }
 ```
 
-## Content Feed
+## Content
 
-An anchor for a user's content.
-Chronological order is used.
-Other indexing methods could be used.
+List of indexes for content search.
 
 ### IPLD Schemas
 ```
-type FeedAnchor struct {
-    content [Media]
+type ContentIndexing struct {
+    date_time optional &Yearly
+}
+
+type Content struct {
+    content [&Media]
 }
 
 type Media union {
@@ -56,13 +52,17 @@ type Media union {
 ```
 ## Comments
 
-An anchor for a user's comments.
-Indexed by the content they commented on.
-Other indexing methods could be used.
+List of indexes for comment search.
+
+The date & time of the content being commented on is used.
 
 ### IPLD Schemas
 ```
-type Commentary struct {
+type CommentIndexing {
+    date_time optional &Yearly
+}
+
+type Comments struct {
     "comments": {String:[&Comment]} # Keys are CIDs of the content being commented on.
 }
 
@@ -72,23 +72,58 @@ type Comment struct {
     comment String
 }
 ```
-## Friends
+## Indexes
 
-A list of friends you follow.
+Only date & time ATM. Other indexing methods could be added.
 
 ### IPLD Schemas
 ```
-type Friendlies struct {
-  friends [Friend] 
+type Yearly struct {
+  year [Int:&Monthly] 
 }
 
-type Friend union {
-    | ENS string # ENS domain name linked to Beacon
-    | Beacon link # Link to Beacon
-} representation kinded
+type Monthly struct {
+  month [Int:&Daily] 
+}
 
-type ENS string
-type Beacon link
+type Daily struct {
+  day [Int:&Hourly] 
+}
+
+type Hourly struct {
+  hour [Int:&Minutes] 
+}
+
+type Minutes struct {
+  minute [Int:&Seconds] 
+}
+
+type Seconds struct {
+  second [Int:Link] # Can link to content or comments 
+}
+
+```
+## Live Settings
+
+Metadata needed for live streaming.
+
+```
+type LiveSettings struct {
+    peer_id String
+    video_topic String
+    chat_topic String
+}
+```
+## Follows
+
+A list of user you follow.
+
+### IPLD Schemas
+```
+type Follows struct {
+  ens [String] # ENS domain names
+  ipns [String] # IPNS addresses
+}
 ```
 ## Chat Moderation
 
@@ -231,6 +266,28 @@ type FullPost struct {
     image Link
     title String
 }
+```
+
+## Mime Typed Data
+
+Mime typed data.
+
+If the data fit in a single block inline otherwise link to it.
+
+### IPLD Schemas
+```
+type MimeTyped struct {
+    mime_type String
+    data EitherInlineOrLink
+}
+
+type EitherInlineOrLink union {
+  | Inline bytes
+  | Linked link
+} representation kinded
+
+type Inline Bytes
+type Linked Link
 ```
 
 ## License

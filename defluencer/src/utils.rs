@@ -1,5 +1,7 @@
 use crate::errors::Error;
 
+use chrono::{DateTime, Datelike, Timelike, Utc};
+
 use cid::multibase::Base;
 
 use ipfs_api::IpfsService;
@@ -26,4 +28,17 @@ pub async fn data_url(ipfs: &IpfsService, mime_type: &MimeTyped) -> Result<Strin
     data_url.push_str(&data);
 
     Ok(data_url)
+}
+
+/// Retrun a path from date time
+pub fn get_path(date_time: DateTime<Utc>) -> String {
+    format!(
+        "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
+        date_time.year(),
+        date_time.month(),
+        date_time.day(),
+        date_time.hour(),
+        date_time.minute(),
+        date_time.second()
+    )
 }

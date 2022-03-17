@@ -8,14 +8,14 @@ use serde_with::{serde_as, DisplayFromStr};
 
 /// List of banned users.
 /// Direct pin.
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Bans {
     pub banned_addrs: HashSet<Address>,
 }
 
 /// List of moderators.
 /// Direct pin.
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Moderators {
     pub moderator_addrs: HashSet<Address>,
 }
@@ -23,7 +23,7 @@ pub struct Moderators {
 /// Message to ban/unban a user.
 /// Should be signed by a moderator.
 #[serde_as]
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Ban {
     #[serde_as(as = "DisplayFromStr")]
     pub ban_peer: PeerId,
@@ -34,7 +34,7 @@ pub struct Ban {
 /// Message to mod/unmod a user.
 /// Should be signed by an administrator.
 #[serde_as]
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Moderator {
     #[serde_as(as = "DisplayFromStr")]
     pub mod_peer: PeerId,

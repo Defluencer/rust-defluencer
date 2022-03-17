@@ -1,4 +1,4 @@
-pub mod beacon;
+pub mod channel;
 pub mod comments;
 pub mod content;
 pub mod follows;

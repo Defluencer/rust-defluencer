@@ -50,4 +50,10 @@ pub enum Error {
 
     #[error("Defluencer: Comment not found")]
     CommentNotFound,
+
+    #[error("Defluencer: Content already present")]
+    ContentAdded,
+
+    #[error("Defluencer: Comment already present")]
+    CommentAdded,
 }

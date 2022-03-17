@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 
 /// Non exhaustive list of links to various social media features.
 ///
-/// The Cid of this object should be publicly available and trusted to be up to date.
+/// The Cid of this object should be publicly available and trusted to be the latest version.
 /// Blockchains are best suited for this.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct Beacon {
+pub struct ChannelMetadata {
     pub identity: Identity,
-    pub content: ContentIndexing,
-    pub comments: CommentIndexing,
+    pub content_index: ContentIndexing,
+    pub comment_index: CommentIndexing,
     pub live: Option<LiveSettings>,
     pub follows: Option<Follows>,
     pub bans: Option<IPLDLink>,

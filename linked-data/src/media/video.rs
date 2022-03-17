@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Metadata for video thumbnail and playback.
 /// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
 pub struct VideoMetadata {
     /// Timestamp at the time of publication in Unix time.
     pub timestamp: i64,

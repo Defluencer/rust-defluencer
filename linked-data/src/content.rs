@@ -21,7 +21,7 @@ pub struct Content {
     pub content: HashSet<IPLDLink>,
 }
 
-#[derive(Deserialize, PartialEq, Clone)]
+#[derive(Deserialize, PartialEq, Clone, Debug)]
 #[serde(untagged)]
 pub enum Media {
     MicroBlog(MicroPost),

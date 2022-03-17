@@ -1,4 +1,5 @@
 pub mod anchors;
+pub mod channel;
 pub mod content_cache;
 pub mod errors;
 pub mod moderation_cache;
@@ -6,7 +7,7 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
-use chrono::{Datelike, TimeZone, Timelike, Utc};
+use chrono::{TimeZone, Utc};
 use cid::Cid;
 
 use errors::Error;
@@ -14,7 +15,7 @@ use errors::Error;
 use futures::{stream, Stream, StreamExt};
 
 use linked_data::{
-    beacon::Beacon,
+    channel::ChannelMetadata,
     comments::{Comment, Comments},
     content::{Content, Media},
     indexes::date_time::{Daily, Hourly, Minutes, Monthly, Seconds, Yearly},
@@ -25,6 +26,7 @@ use linked_data::{
 use ipfs_api::IpfsService;
 
 use signatures::dag_jose::JsonWebSignature;
+use utils::get_path;
 
 pub struct Defluencer {
     ipfs: IpfsService,
@@ -37,27 +39,19 @@ impl Defluencer {
         Self { ipfs }
     }
 
-    pub async fn get_comments(
+    pub async fn stream_comments(
         &self,
         content_cid: Cid,
-        origin: Beacon,
+        origin: ChannelMetadata,
     ) -> impl Stream<Item = Comment> + '_ {
         stream::unfold(origin, move |mut beacon| async move {
-            if let Some(index) = beacon.comments.date_time {
-                beacon.comments.date_time = None;
+            if let Some(index) = beacon.comment_index.date_time {
+                beacon.comment_index.date_time = None;
 
                 if let Ok(media) = self.ipfs.dag_get::<&str, Media>(content_cid, None).await {
                     let date_time = Utc.timestamp(media.timestamp(), 0);
 
-                    let path = format!(
-                        "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
-                        date_time.year(),
-                        date_time.month(),
-                        date_time.day(),
-                        date_time.hour(),
-                        date_time.minute(),
-                        date_time.second()
-                    );
+                    let path = get_path(date_time);
 
                     if let Ok(mut comments) = self
                         .ipfs
@@ -79,10 +73,10 @@ impl Defluencer {
                 None
             }
         })
-        .flat_map(|comments| self.stream_comments(comments))
+        .flat_map(|comments| self.get_comments(comments))
     }
 
-    fn stream_comments(&self, comments: Vec<IPLDLink>) -> impl Stream<Item = Comment> + '_ {
+    fn get_comments(&self, comments: Vec<IPLDLink>) -> impl Stream<Item = Comment> + '_ {
         stream::unfold(comments.into_iter(), move |mut iter| async move {
             if let Some(ipld) = iter.next() {
                 if let Ok(comment) = self.ipfs.dag_get::<&str, Comment>(ipld.link, None).await {
@@ -97,11 +91,11 @@ impl Defluencer {
     }
 
     /// Lazily stream media starting from newest.
-    pub fn stream_media_feed(&self, origin: Beacon) -> impl Stream<Item = Media> + '_ {
+    pub fn stream_media_feed(&self, origin: ChannelMetadata) -> impl Stream<Item = Media> + '_ {
         stream::unfold(origin, move |mut beacon| async move {
-            match beacon.content.date_time {
+            match beacon.content_index.date_time {
                 Some(ipld) => {
-                    beacon.content.date_time = None;
+                    beacon.content_index.date_time = None;
 
                     Some((Some(ipld.link), beacon))
                 }

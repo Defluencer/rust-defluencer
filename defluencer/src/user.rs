@@ -1,24 +1,18 @@
-use crate::{anchors::Anchor, errors::Error, signatures::Signer};
+use crate::{errors::Error, signatures::Signer};
 
-use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+use chrono::Utc;
 
 use cid::Cid;
-
-use either::Either;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
-    beacon::Beacon,
-    comments::{Comment, Comments},
-    content::{Content, Media},
-    indexes::date_time::*,
+    comments::Comment,
     media::{
         blog::{FullPost, MicroPost},
         mime_type::MimeTyped,
         video::{DayNode, HourNode, MinuteNode, VideoMetadata},
     },
-    IPLDLink, PeerId,
 };
 
 use serde::Serialize;
@@ -28,225 +22,18 @@ type ImageCid = Cid;
 type VideoCid = Cid;
 
 #[derive(Clone)]
-pub struct User<T, U>
+pub struct Channel<T>
 where
-    T: Anchor,
-    U: Signer,
+    T: Signer,
 {
-    anchor: T,
-    signer: U,
+    signer: T,
     ipfs: IpfsService,
 }
 
-impl<T, U> User<T, U>
+impl<T> Channel<T>
 where
-    T: Anchor,
-    U: Signer,
+    T: Signer,
 {
-    pub fn new(ipfs: IpfsService, anchor: T, signer: U) -> Self {
-        Self {
-            ipfs,
-            anchor,
-            signer,
-        }
-    }
-
-    async fn get_beacon(&self) -> Result<(Cid, Beacon), Error> {
-        let cid = self.anchor.retreive().await?;
-        let beacon: Beacon = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
-
-        Ok((cid, beacon))
-    }
-
-    async fn update_beacon(&self, old_cid: Cid, beacon: &Beacon) -> Result<(), Error> {
-        let new_cid = self.ipfs.dag_put(beacon, Codec::default()).await?;
-
-        self.ipfs.pin_update(old_cid, new_cid).await?;
-
-        self.anchor.anchor(new_cid).await?;
-
-        Ok(())
-    }
-
-    /// Update your identity data.
-    pub async fn update_identity(
-        &self,
-        display_name: Option<String>,
-        avatar: Option<ImageCid>,
-    ) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        if let Some(name) = display_name {
-            beacon.identity.display_name = name;
-        }
-
-        if let Some(avatar) = avatar {
-            beacon.identity.avatar = avatar.into();
-        }
-
-        self.update_beacon(beacon_cid, &beacon).await
-    }
-
-    /// Remove a specific content.
-    ///
-    /// Note that this content is only remove from your list of content.
-    pub async fn remove_content(&self, content_cid: Cid) -> Result<(), Error> {
-        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
-        let date_time = Utc.timestamp(media.timestamp(), 0);
-
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let index = match beacon.content.date_time {
-            Some(index) => index,
-            None => return Err(Error::ContentNotFound),
-        };
-
-        let path = format!(
-            "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
-            date_time.year(),
-            date_time.month(),
-            date_time.day(),
-            date_time.hour(),
-            date_time.minute(),
-            date_time.second()
-        );
-
-        let mut contents: Content = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
-
-        if !contents.content.remove(&content_cid.into()) {
-            return Err(Error::ContentNotFound);
-        }
-
-        let contents_cid = self.ipfs.dag_put(&contents, Codec::default()).await?;
-
-        let index_cid = self
-            .update_date_time_index(date_time, beacon.content.date_time, contents_cid)
-            .await?;
-
-        beacon.content.date_time = Some(index_cid.into());
-
-        self.update_beacon(beacon_cid, &beacon).await
-    }
-
-    /// Remove a specific comment.
-    ///
-    /// Note that this comment is only remove from your list of comments.
-    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<(), Error> {
-        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
-        let content_cid = comment.origin.link;
-
-        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
-        let date_time = Utc.timestamp(media.timestamp(), 0);
-
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let index = match beacon.comments.date_time {
-            Some(index) => index,
-            None => return Err(Error::CommentNotFound),
-        };
-
-        let path = format!(
-            "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
-            date_time.year(),
-            date_time.month(),
-            date_time.day(),
-            date_time.hour(),
-            date_time.minute(),
-            date_time.second()
-        );
-
-        let mut comments: Comments = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
-
-        if !comments.comments.remove(&content_cid).is_some() {
-            return Err(Error::CommentNotFound);
-        }
-
-        let comments_cid = self.ipfs.dag_put(&comments, Codec::default()).await?;
-
-        let index_cid = self
-            .update_date_time_index(date_time, beacon.comments.date_time, comments_cid)
-            .await?;
-
-        beacon.comments.date_time = Some(index_cid.into());
-
-        self.update_beacon(beacon_cid, &beacon).await
-    }
-
-    /// Follow a user.
-    ///
-    /// Theirs content will now be display in your feed.
-    pub async fn follow(&self, user: Either<String, Cid>) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let mut follows = beacon.follows.unwrap_or_default();
-
-        let status = match user {
-            Either::Left(ens) => follows.ens.insert(ens),
-            Either::Right(ipns) => follows.ipns.insert(ipns),
-        };
-
-        if !status {
-            return Err(Error::Follow);
-        }
-
-        beacon.follows = Some(follows);
-
-        self.update_beacon(beacon_cid, &beacon).await
-    }
-
-    /// Unfollow a user.
-    ///
-    /// Theirs content will no longer be display in your feed.
-    pub async fn unfollow(&self, user: Either<String, Cid>) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let mut follows = match beacon.follows {
-            Some(f) => f,
-            None => return Err(Error::UnFollow),
-        };
-
-        let status = match user {
-            Either::Left(ens) => follows.ens.remove(&ens),
-            Either::Right(ipns) => follows.ipns.remove(&ipns),
-        };
-
-        if !status {
-            return Err(Error::UnFollow);
-        }
-
-        beacon.follows = Some(follows);
-
-        self.update_beacon(beacon_cid, &beacon).await
-    }
-
-    /// Update live chat & streaming settings.
-    pub async fn update_live_settings(
-        &self,
-        peer_id: Option<PeerId>,
-        video_topic: Option<String>,
-        chat_topic: Option<String>,
-    ) -> Result<(), Error> {
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let mut live = beacon.live.unwrap_or_default();
-
-        if let Some(peer_id) = peer_id {
-            live.peer_id = peer_id;
-        }
-
-        if let Some(video_topic) = video_topic {
-            live.video_topic = video_topic;
-        }
-
-        if let Some(chat_topic) = chat_topic {
-            live.chat_topic = chat_topic;
-        }
-
-        beacon.live = Some(live);
-
-        self.update_beacon(beacon_cid, &beacon).await
-    }
-
     /// Create a new micro blog post.
     pub async fn create_micro_blog_post(&self, content: String) -> Result<Cid, Error> {
         let date_time = Utc::now();
@@ -254,69 +41,20 @@ where
 
         let micro_post = MicroPost { timestamp, content };
 
-        self.add_content(date_time, &micro_post).await
-    }
-
-    /// Create a new comment on the specified media.
-    pub async fn create_comment(&self, origin: Cid, text: String) -> Result<Cid, Error> {
-        let media: Media = self.ipfs.dag_get(origin, Option::<&str>::None).await?;
-        let date_time = Utc.timestamp(media.timestamp(), 0);
-
-        let comment = Comment {
-            timestamp: Utc::now().timestamp(),
-            origin: origin.into(),
-            text,
-        };
-
-        let comment_cid = self.ipfs.dag_put(&comment, Codec::default()).await?;
-        self.ipfs.pin_add(comment_cid, false).await?;
-
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let mut list = if let Some(index) = beacon.comments.date_time {
-            let path = format!(
-                "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
-                date_time.year(),
-                date_time.month(),
-                date_time.day(),
-                date_time.hour(),
-                date_time.minute(),
-                date_time.second()
-            );
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Comments::default()
-        };
-
-        list.comments
-            .entry(origin)
-            .or_default()
-            .push(comment_cid.into());
-
-        let list_cid = self.ipfs.dag_put(&list, Codec::default()).await?;
-
-        let index_cid = self
-            .update_date_time_index(date_time, beacon.comments.date_time, list_cid)
-            .await?;
-
-        beacon.content.date_time = Some(index_cid.into());
-
-        self.update_beacon(beacon_cid, &beacon).await?;
-
-        Ok(comment_cid)
+        self.add_content(&micro_post, true).await
     }
 
     /// Create a new blog post.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn create_blog_post(
         &self,
         title: String,
-        image: ImageCid,
-        markdown: MarkdownCid,
+        image: &std::path::Path,
+        markdown: &std::path::Path,
     ) -> Result<Cid, Error> {
+        let (image, markdown) =
+            tokio::try_join!(self.add_image(image), self.add_markdown(markdown))?;
+
         let date_time = Utc::now();
         let timestamp = date_time.timestamp();
 
@@ -327,20 +65,46 @@ where
             title,
         };
 
-        self.add_content(date_time, &full_post).await
+        self.add_content(&full_post, true).await
     }
 
-    /// Create a new video post.
-    pub async fn create_video_post(
+    /// Create a new blog post.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn create_blog_post(
         &self,
         title: String,
-        image: ImageCid,
-        video: VideoCid,
+        image: web_sys::File,
+        markdown: web_sys::File,
     ) -> Result<Cid, Error> {
+        let (image, markdown) =
+            futures::try_join!(self.add_image(image), self.add_markdown(markdown))?;
+
         let date_time = Utc::now();
         let timestamp = date_time.timestamp();
 
-        let duration = self.video_duration(video).await?;
+        let full_post = FullPost {
+            timestamp,
+            content: markdown.into(),
+            image: image.into(),
+            title,
+        };
+
+        self.add_content(&full_post, true).await
+    }
+
+    /// Create a new video post.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn create_video_post(
+        &self,
+        title: String,
+        video: VideoCid,
+        thumbnail: &std::path::Path,
+    ) -> Result<Cid, Error> {
+        let (image, duration) =
+            tokio::try_join!(self.add_image(thumbnail), self.video_duration(video))?;
+
+        let date_time = Utc::now();
+        let timestamp = date_time.timestamp();
 
         let video_post = VideoMetadata {
             timestamp,
@@ -350,12 +114,84 @@ where
             video: video.into(),
         };
 
-        self.add_content(date_time, &video_post).await
+        self.add_content(&video_post, true).await
+    }
+
+    /// Create a new video post.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn create_video_post(
+        &self,
+        title: String,
+        video: VideoCid,
+        thumbnail: web_sys::File,
+    ) -> Result<Cid, Error> {
+        let (image, duration) =
+            futures::try_join!(self.add_image(thumbnail), self.video_duration(video))?;
+
+        let date_time = Utc::now();
+        let timestamp = date_time.timestamp();
+
+        let video_post = VideoMetadata {
+            timestamp,
+            image: image.into(),
+            title,
+            duration,
+            video: video.into(),
+        };
+
+        self.add_content(&video_post, true).await
+    }
+
+    /// Create a new comment on the specified media.
+    pub async fn create_comment(&self, origin: Cid, text: String) -> Result<Cid, Error> {
+        let comment = Comment {
+            timestamp: Utc::now().timestamp(),
+            origin: origin.into(),
+            text,
+        };
+
+        self.add_content(&comment, false).await
+    }
+
+    async fn add_content<V>(&self, metadata: &V, pin: bool) -> Result<Cid, Error>
+    where
+        V: ?Sized + Serialize,
+    {
+        let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
+
+        let signed_cid = self.signer.sign(content_cid).await?;
+
+        self.ipfs.pin_add(signed_cid, pin).await?;
+
+        Ok(signed_cid)
+    }
+
+    async fn video_duration(&self, video: Cid) -> Result<f64, Error> {
+        let days: DayNode = self.ipfs.dag_get(video, Some("/time")).await?;
+
+        let mut duration = 0.0;
+
+        for (i, ipld) in days.links_to_hours.iter().enumerate().rev().take(1) {
+            duration += (i * 3600) as f64; // 3600 second in 1 hour
+
+            let hours: HourNode = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
+
+            for (i, ipld) in hours.links_to_minutes.iter().enumerate().rev().take(1) {
+                duration += (i * 60) as f64; // 60 second in 1 minute
+
+                let minutes: MinuteNode =
+                    self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
+
+                duration += (minutes.links_to_seconds.len() - 1) as f64;
+            }
+        }
+
+        Ok(duration)
     }
 
     /// Add an image to IPFS and return the CID
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn add_image(&self, path: &std::path::Path) -> Result<ImageCid, Error> {
+    async fn add_image(&self, path: &std::path::Path) -> Result<ImageCid, Error> {
         let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
             Some(mime) => mime.to_owned(),
             None => return Err(Error::Image),
@@ -381,7 +217,7 @@ where
 
     /// Add a markdown file to IPFS and return the CID
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn add_markdown(&self, path: &std::path::Path) -> Result<MarkdownCid, Error> {
+    async fn add_markdown(&self, path: &std::path::Path) -> Result<MarkdownCid, Error> {
         let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
             Some(mime) => mime.to_owned(),
             None => return Err(Error::Markdown),
@@ -401,7 +237,7 @@ where
 
     /// Add an image to IPFS and return the CID
     #[cfg(target_arch = "wasm32")]
-    pub async fn add_image(&self, file: web_sys::File) -> Result<ImageCid, Error> {
+    async fn add_image(&self, file: web_sys::File) -> Result<ImageCid, Error> {
         use futures::AsyncReadExt;
         use wasm_bindgen::JsCast;
 
@@ -435,7 +271,7 @@ where
 
     /// Add a markdown file to IPFS and return the CID
     #[cfg(target_arch = "wasm32")]
-    pub async fn add_markdown(&self, file: web_sys::File) -> Result<MarkdownCid, Error> {
+    async fn add_markdown(&self, file: web_sys::File) -> Result<MarkdownCid, Error> {
         use futures::AsyncReadExt;
         use wasm_bindgen::JsCast;
 
@@ -457,184 +293,5 @@ where
         let cid = self.ipfs.add(bytes).await?;
 
         Ok(cid)
-    }
-
-    async fn add_content<V>(&self, date_time: DateTime<Utc>, metadata: &V) -> Result<Cid, Error>
-    where
-        V: ?Sized + Serialize,
-    {
-        let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
-        let signed_cid = self.signer.sign(content_cid).await?;
-        self.ipfs.pin_add(signed_cid, true).await?;
-
-        let (beacon_cid, mut beacon): (Cid, Beacon) = self.get_beacon().await?;
-
-        let mut list = if let Some(index) = beacon.content.date_time {
-            let path = format!(
-                "year/{}/month/{}/day/{}/hour/{}/minute/{}/second/{}",
-                date_time.year(),
-                date_time.month(),
-                date_time.day(),
-                date_time.hour(),
-                date_time.minute(),
-                date_time.second()
-            );
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Content::default()
-        };
-
-        list.content.insert(signed_cid.into());
-        let list_cid = self.ipfs.dag_put(&list, Codec::default()).await?;
-
-        let index_cid = self
-            .update_date_time_index(date_time, beacon.content.date_time, list_cid)
-            .await?;
-
-        beacon.content.date_time = Some(index_cid.into());
-
-        self.update_beacon(beacon_cid, &beacon).await?;
-
-        Ok(content_cid)
-    }
-
-    async fn update_date_time_index(
-        &self,
-        date_time: DateTime<Utc>,
-        index: Option<IPLDLink>,
-        content_cid: Cid,
-    ) -> Result<Cid, Error> {
-        let mut seconds: Seconds = if let Some(index) = index {
-            let path = format!(
-                "year/{}/month/{}/day/{}/hour/{}/minute/{}",
-                date_time.year(),
-                date_time.month(),
-                date_time.day(),
-                date_time.hour(),
-                date_time.minute()
-            );
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Seconds::default()
-        };
-
-        seconds
-            .second
-            .insert(date_time.second(), content_cid.into());
-        let seconds_cid = self.ipfs.dag_put(&seconds, Codec::default()).await?;
-
-        let mut minutes: Minutes = if let Some(index) = index {
-            let path = format!(
-                "year/{}/month/{}/day/{}/hour/{}",
-                date_time.year(),
-                date_time.month(),
-                date_time.day(),
-                date_time.hour()
-            );
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Minutes::default()
-        };
-
-        minutes
-            .minute
-            .insert(date_time.minute(), seconds_cid.into());
-        let minutes_cid = self.ipfs.dag_put(&minutes, Codec::default()).await?;
-
-        let mut hours: Hourly = if let Some(index) = index {
-            let path = format!(
-                "year/{}/month/{}/day/{}",
-                date_time.year(),
-                date_time.month(),
-                date_time.day()
-            );
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Hourly::default()
-        };
-
-        hours.hour.insert(date_time.hour(), minutes_cid.into());
-        let hours_cid = self.ipfs.dag_put(&hours, Codec::default()).await?;
-
-        let mut days: Daily = if let Some(index) = index {
-            let path = format!("year/{}/month/{}", date_time.year(), date_time.month());
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Daily::default()
-        };
-
-        days.day.insert(date_time.day(), hours_cid.into());
-        let days_cid = self.ipfs.dag_put(&days, Codec::default()).await?;
-
-        let mut months: Monthly = if let Some(index) = index {
-            let path = format!("year/{}", date_time.year());
-
-            self.ipfs
-                .dag_get(index.link, Some(path.clone()))
-                .await
-                .unwrap_or_default()
-        } else {
-            Monthly::default()
-        };
-
-        months.month.insert(date_time.month(), days_cid.into());
-        let months_cid = self.ipfs.dag_put(&months, Codec::default()).await?;
-
-        let mut years: Yearly = if let Some(index) = index {
-            self.ipfs
-                .dag_get(index.link, Option::<&str>::None)
-                .await
-                .unwrap_or_default()
-        } else {
-            Yearly::default()
-        };
-
-        years.year.insert(date_time.year(), months_cid.into());
-        let years_cid = self.ipfs.dag_put(&years, Codec::default()).await?;
-
-        Ok(years_cid)
-    }
-
-    async fn video_duration(&self, video: Cid) -> Result<f64, Error> {
-        let days: DayNode = self.ipfs.dag_get(video, Some("/time")).await?;
-
-        let mut duration = 0.0;
-
-        for (i, ipld) in days.links_to_hours.iter().enumerate().rev().take(1) {
-            duration += (i * 3600) as f64; // 3600 second in 1 hour
-
-            let hours: HourNode = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
-
-            for (i, ipld) in hours.links_to_minutes.iter().enumerate().rev().take(1) {
-                duration += (i * 60) as f64; // 60 second in 1 minute
-
-                let minutes: MinuteNode =
-                    self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
-
-                duration += (minutes.links_to_seconds.len() - 1) as f64;
-            }
-        }
-
-        Ok(duration)
     }
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// A micro blog post (Twitter-sytle).
 ///
 /// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
 pub struct MicroPost {
     /// Timestamp at the time of publication in Unix time.
     pub timestamp: i64,
@@ -17,7 +17,7 @@ pub struct MicroPost {
 /// Metadata for a long blog post.
 ///
 /// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
 pub struct FullPost {
     /// Timestamp at the time of publication in Unix time.
     pub timestamp: i64,
