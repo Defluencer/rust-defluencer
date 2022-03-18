@@ -1,7 +1,4 @@
-use crate::{
-    comments::CommentIndexing, content::ContentIndexing, follows::Follows, identity::Identity,
-    live::LiveSettings, IPLDLink,
-};
+use crate::{follows::Follows, identity::Identity, live::LiveSettings, IPLDLink};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,13 +6,18 @@ use serde::{Deserialize, Serialize};
 ///
 /// The Cid of this object should be publicly available and trusted to be the latest version.
 /// Blockchains are best suited for this.
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct ChannelMetadata {
-    pub identity: Identity,
-    pub content_index: ContentIndexing,
-    pub comment_index: CommentIndexing,
+    pub identity: Option<Identity>,
+    pub content_index: Option<Indexing>,
+    pub comment_index: Option<Indexing>,
     pub live: Option<LiveSettings>,
     pub follows: Option<Follows>,
     pub bans: Option<IPLDLink>,
     pub mods: Option<IPLDLink>,
+}
+
+#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+pub struct Indexing {
+    pub date_time: IPLDLink,
 }

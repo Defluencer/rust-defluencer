@@ -1,10 +1,13 @@
 pub mod dag_jose;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod eddsa;
+
+#[cfg(target_arch = "wasm32")]
 mod ethereum;
 
 #[cfg(target_arch = "wasm32")]
-pub use ethereum::ENSSignature;
+pub use ethereum::EthereumSigner;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use eddsa::EdDSASigner;

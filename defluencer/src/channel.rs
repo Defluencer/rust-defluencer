@@ -1,4 +1,8 @@
-use crate::{anchors::Anchor, errors::Error, utils::get_path};
+use crate::{
+    anchors::Anchor,
+    errors::Error,
+    utils::{add_image, get_path},
+};
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
@@ -9,17 +13,18 @@ use either::Either;
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
-    channel::ChannelMetadata,
+    channel::{ChannelMetadata, Indexing},
     comments::{Comment, Comments},
     content::{Content, Media},
     indexes::date_time::*,
-    IPLDLink, PeerId,
+    moderation::{Bans, Moderators},
+    Address, PeerId,
 };
 
 #[derive(Clone)]
 pub struct Channel<T>
 where
-    T: Anchor,
+    T: Anchor + Clone,
 {
     anchor: T,
     ipfs: IpfsService,
@@ -27,92 +32,56 @@ where
 
 impl<T> Channel<T>
 where
-    T: Anchor,
+    T: Anchor + Clone,
 {
     pub fn new(ipfs: IpfsService, anchor: T) -> Self {
         Self { ipfs, anchor }
     }
 
     /// Update your identity data.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn update_identity(
         &self,
         display_name: Option<String>,
-        avatar: Option<Cid>,
+        avatar: Option<&std::path::Path>,
     ) -> Result<(), Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
+        let mut identity = channel.identity.unwrap_or_default();
+
         if let Some(name) = display_name {
-            channel.identity.display_name = name;
+            identity.display_name = name;
         }
 
         if let Some(avatar) = avatar {
-            channel.identity.avatar = avatar.into();
+            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
         }
+
+        channel.identity = Some(identity);
 
         self.update_channel(channel_cid, &channel).await
     }
 
-    /// Remove a specific content.
-    pub async fn remove_content(&self, content_cid: Cid) -> Result<(), Error> {
-        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
-        let date_time = Utc.timestamp(media.timestamp(), 0);
-
+    /// Update your identity data.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn update_identity(
+        &self,
+        display_name: Option<String>,
+        avatar: Option<web_sys::File>,
+    ) -> Result<(), Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let index = match channel.content_index.date_time {
-            Some(index) => index,
-            None => return Err(Error::ContentNotFound),
-        };
+        let mut identity = channel.identity.unwrap_or_default();
 
-        let path = get_path(date_time);
-
-        let mut contents: Content = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
-
-        if !contents.content.remove(&content_cid.into()) {
-            return Err(Error::ContentNotFound);
+        if let Some(name) = display_name {
+            identity.display_name = name;
         }
 
-        let contents_cid = self.ipfs.dag_put(&contents, Codec::default()).await?;
-
-        let index_cid = self
-            .update_date_time_index(date_time, channel.content_index.date_time, contents_cid)
-            .await?;
-
-        channel.content_index.date_time = Some(index_cid.into());
-
-        self.update_channel(channel_cid, &channel).await
-    }
-
-    /// Remove a specific comment.
-    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<(), Error> {
-        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
-        let content_cid = comment.origin.link;
-
-        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
-        let date_time = Utc.timestamp(media.timestamp(), 0);
-
-        let (channel_cid, mut channel) = self.get_channel().await?;
-
-        let index = match channel.comment_index.date_time {
-            Some(index) => index,
-            None => return Err(Error::CommentNotFound),
-        };
-
-        let path = get_path(date_time);
-
-        let mut comments: Comments = self.ipfs.dag_get(index.link, Some(path.clone())).await?;
-
-        if !comments.comments.remove(&content_cid).is_some() {
-            return Err(Error::CommentNotFound);
+        if let Some(avatar) = avatar {
+            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
         }
 
-        let comments_cid = self.ipfs.dag_put(&comments, Codec::default()).await?;
-
-        let index_cid = self
-            .update_date_time_index(date_time, channel.comment_index.date_time, comments_cid)
-            .await?;
-
-        channel.comment_index.date_time = Some(index_cid.into());
+        channel.identity = Some(identity);
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -129,7 +98,7 @@ where
         };
 
         if !status {
-            return Err(Error::Follow);
+            return Err(Error::AlreadyAdded);
         }
 
         channel.follows = Some(follows);
@@ -143,7 +112,7 @@ where
 
         let mut follows = match channel.follows {
             Some(f) => f,
-            None => return Err(Error::UnFollow),
+            None => return Err(Error::NotFound),
         };
 
         let status = match user {
@@ -152,7 +121,7 @@ where
         };
 
         if !status {
-            return Err(Error::UnFollow);
+            return Err(Error::NotFound);
         }
 
         channel.follows = Some(follows);
@@ -188,16 +157,96 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn ban_user(&self) {
-        todo!()
+    pub async fn ban_user(&self, user: Address) -> Result<(), Error> {
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        let mut bans: Bans = match channel.bans {
+            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            None => Bans::default(),
+        };
+
+        if !bans.banned_addrs.insert(user) {
+            return Err(Error::AlreadyAdded);
+        }
+
+        let bans_cid = self.ipfs.dag_put(&bans, Codec::default()).await?;
+
+        channel.bans = Some(bans_cid.into());
+
+        self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn unban_user(&self) {
-        todo!()
+    pub async fn unban_user(&self, user: &Address) -> Result<(), Error> {
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        let mut bans: Bans = match channel.bans {
+            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            None => return Err(Error::NotFound),
+        };
+
+        if !bans.banned_addrs.remove(user) {
+            return Err(Error::NotFound);
+        }
+
+        let bans_cid = self.ipfs.dag_put(&bans, Codec::default()).await?;
+
+        channel.bans = Some(bans_cid.into());
+
+        self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn replace_ban_list(&self) {
-        todo!()
+    pub async fn replace_ban_list(&self, bans_cid: Cid) -> Result<(), Error> {
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        channel.bans = Some(bans_cid.into());
+
+        self.update_channel(channel_cid, &channel).await
+    }
+
+    pub async fn add_moderator(&self, user: Address) -> Result<(), Error> {
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        let mut mods: Moderators = match channel.mods {
+            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            None => Moderators::default(),
+        };
+
+        if !mods.moderator_addrs.insert(user) {
+            return Err(Error::AlreadyAdded);
+        }
+
+        let mods_cid = self.ipfs.dag_put(&mods, Codec::default()).await?;
+
+        channel.mods = Some(mods_cid.into());
+
+        self.update_channel(channel_cid, &channel).await
+    }
+
+    pub async fn remove_moderator(&self, user: &Address) -> Result<(), Error> {
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        let mut mods: Moderators = match channel.mods {
+            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            None => return Err(Error::NotFound),
+        };
+
+        if !mods.moderator_addrs.remove(user) {
+            return Err(Error::NotFound);
+        }
+
+        let mods_cid = self.ipfs.dag_put(&mods, Codec::default()).await?;
+
+        channel.mods = Some(mods_cid.into());
+
+        self.update_channel(channel_cid, &channel).await
+    }
+
+    pub async fn replace_moderator_list(&self, moderators_cid: Cid) -> Result<(), Error> {
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        channel.mods = Some(moderators_cid.into());
+
+        self.update_channel(channel_cid, &channel).await
     }
 
     /// Add new content.
@@ -209,22 +258,27 @@ where
 
         let path = get_path(date_time);
 
-        let mut contents: Content = match channel.content_index.date_time {
-            Some(index) => self.ipfs.dag_get(index.link, Some(path)).await?,
-            None => Content::default(),
+        let (mut contents, index) = match channel.content_index {
+            Some(index) => (
+                self.ipfs.dag_get(index.date_time.link, Some(path)).await?,
+                Some(index.date_time.link),
+            ),
+            None => (Content::default(), None),
         };
 
         if !contents.content.insert(content_cid.into()) {
-            return Err(Error::ContentAdded);
+            return Err(Error::AlreadyAdded);
         }
 
         let contents_cid = self.ipfs.dag_put(&contents, Codec::default()).await?;
 
-        let index_cid = self
-            .update_date_time_index(date_time, channel.content_index.date_time, contents_cid)
+        let date_time_cid = self
+            .update_date_time_index(date_time, index, contents_cid)
             .await?;
 
-        channel.content_index.date_time = Some(index_cid.into());
+        channel.content_index = Some(Indexing {
+            date_time: date_time_cid.into(),
+        });
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -238,9 +292,12 @@ where
 
         let path = get_path(date_time);
 
-        let mut comments: Comments = match channel.comment_index.date_time {
-            Some(index) => self.ipfs.dag_get(index.link, Some(path)).await?,
-            None => Comments::default(),
+        let (mut comments, index) = match channel.comment_index {
+            Some(index) => (
+                self.ipfs.dag_get(index.date_time.link, Some(path)).await?,
+                Some(index.date_time.link),
+            ),
+            None => (Comments::default(), None),
         };
 
         comments
@@ -251,11 +308,86 @@ where
 
         let comments_cid = self.ipfs.dag_put(&comments, Codec::default()).await?;
 
-        let index_cid = self
-            .update_date_time_index(date_time, channel.comment_index.date_time, comments_cid)
+        let date_time_cid = self
+            .update_date_time_index(date_time, index, comments_cid)
             .await?;
 
-        channel.comment_index.date_time = Some(index_cid.into());
+        channel.comment_index = Some(Indexing {
+            date_time: date_time_cid.into(),
+        });
+
+        self.update_channel(channel_cid, &channel).await
+    }
+
+    /// Remove a specific content.
+    pub async fn remove_content(&self, content_cid: Cid) -> Result<(), Error> {
+        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
+        let date_time = Utc.timestamp(media.timestamp(), 0);
+
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        let path = get_path(date_time);
+
+        let (mut contents, index): (Content, _) = match channel.content_index {
+            Some(index) => (
+                self.ipfs.dag_get(index.date_time.link, Some(path)).await?,
+                Some(index.date_time.link),
+            ),
+            None => return Err(Error::NotFound),
+        };
+
+        if !contents.content.remove(&content_cid.into()) {
+            return Err(Error::NotFound);
+        }
+
+        let contents_cid = self.ipfs.dag_put(&contents, Codec::default()).await?;
+
+        let date_time_cid = self
+            .update_date_time_index(date_time, index, contents_cid)
+            .await?;
+
+        channel.content_index = Some(Indexing {
+            date_time: date_time_cid.into(),
+        });
+
+        self.update_channel(channel_cid, &channel).await
+    }
+
+    /// Remove a specific comment.
+    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<(), Error> {
+        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
+        let content_cid = comment.origin.link;
+
+        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
+        let date_time = Utc.timestamp(media.timestamp(), 0);
+
+        let (channel_cid, mut channel) = self.get_channel().await?;
+
+        let path = get_path(date_time);
+
+        let (mut comments, index): (Comments, _) = match channel.comment_index {
+            Some(index) => (
+                self.ipfs
+                    .dag_get(index.date_time.link, Some(path.clone()))
+                    .await?,
+                Some(index.date_time.link),
+            ),
+            None => return Err(Error::NotFound),
+        };
+
+        if !comments.comments.remove(&content_cid).is_some() {
+            return Err(Error::NotFound);
+        }
+
+        let comments_cid = self.ipfs.dag_put(&comments, Codec::default()).await?;
+
+        let date_time_cid = self
+            .update_date_time_index(date_time, index, comments_cid)
+            .await?;
+
+        channel.comment_index = Some(Indexing {
+            date_time: date_time_cid.into(),
+        });
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -280,7 +412,7 @@ where
     async fn update_date_time_index(
         &self,
         date_time: DateTime<Utc>,
-        index: Option<IPLDLink>,
+        index: Option<Cid>,
         content_cid: Cid,
     ) -> Result<Cid, Error> {
         let mut seconds: Seconds = if let Some(index) = index {
@@ -294,7 +426,7 @@ where
             );
 
             self.ipfs
-                .dag_get(index.link, Some(path))
+                .dag_get(index, Some(path))
                 .await
                 .unwrap_or_default()
         } else {
@@ -316,7 +448,7 @@ where
             );
 
             self.ipfs
-                .dag_get(index.link, Some(path))
+                .dag_get(index, Some(path))
                 .await
                 .unwrap_or_default()
         } else {
@@ -337,7 +469,7 @@ where
             );
 
             self.ipfs
-                .dag_get(index.link, Some(path))
+                .dag_get(index, Some(path))
                 .await
                 .unwrap_or_default()
         } else {
@@ -351,7 +483,7 @@ where
             let path = format!("year/{}/month/{}", date_time.year(), date_time.month());
 
             self.ipfs
-                .dag_get(index.link, Some(path))
+                .dag_get(index, Some(path))
                 .await
                 .unwrap_or_default()
         } else {
@@ -365,7 +497,7 @@ where
             let path = format!("year/{}", date_time.year());
 
             self.ipfs
-                .dag_get(index.link, Some(path))
+                .dag_get(index, Some(path))
                 .await
                 .unwrap_or_default()
         } else {
@@ -377,7 +509,7 @@ where
 
         let mut years: Yearly = if let Some(index) = index {
             self.ipfs
-                .dag_get(index.link, Option::<&str>::None)
+                .dag_get(index, Option::<&str>::None)
                 .await
                 .unwrap_or_default()
         } else {

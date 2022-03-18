@@ -7,18 +7,16 @@ use cid::Cid;
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::signature::{
-    AlgorithmType, CurveType, Header, JsonWebKey, KeyType, RawJWS, RawSignature,
+    AlgorithmType,  Header, JsonWebKey,  RawJWS, RawSignature,
 };
 
 use multibase::Base;
 
 use crate::errors::Error;
 
-use ed25519::signature::Signature;
-
-use ed25519_dalek::{Keypair, Signer};
-
 use web3::{transports::eip_1193::Eip1193, types::Address, Web3};
+
+use signature::Signature;
 
 /// Create DAG-Jose blocks with the EcDSA.
 ///

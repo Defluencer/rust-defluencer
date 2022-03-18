@@ -7,11 +7,6 @@ use serde::{Deserialize, Serialize};
 use cid::Cid;
 use serde_with::{serde_as, DisplayFromStr};
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
-pub struct CommentIndexing {
-    pub date_time: Option<IPLDLink>,
-}
-
 #[serde_as]
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct Comments {

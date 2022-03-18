@@ -2,6 +2,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("BIP-39: {0}")]
+    BIP29(#[from] anyhow::Error),
+
+    #[error("PKCS8: {0}")]
+    PKCS8(#[from] pkcs8::Error),
+
     #[error("Elliptic Curve: {0}")]
     EllipticCurve(#[from] elliptic_curve::Error),
 
@@ -33,27 +39,15 @@ pub enum Error {
     #[error("Jose: Cannot verify signature")]
     Jose,
 
-    #[error("Defluencer: Cannot follow user, was already following")]
-    Follow,
+    #[error("Defluencer: Could not find")]
+    NotFound,
 
-    #[error("Defluencer: Cannot unfollow user, was not following")]
-    UnFollow,
+    #[error("Defluencer: Already present")]
+    AlreadyAdded,
 
     #[error("Defluencer: Cannot process image, please use a supported image type")]
     Image,
 
     #[error("Defluencer: Cannot process file, please use a markdown file")]
     Markdown,
-
-    #[error("Defluencer: Content not found")]
-    ContentNotFound,
-
-    #[error("Defluencer: Comment not found")]
-    CommentNotFound,
-
-    #[error("Defluencer: Content already present")]
-    ContentAdded,
-
-    #[error("Defluencer: Comment already present")]
-    CommentAdded,
 }

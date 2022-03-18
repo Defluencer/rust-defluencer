@@ -6,12 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = { version = "1", default-features = false, features = [] }
 async-trait = { version = "0.1", default-features = false, features = [] }
-#bip39 = "1"
+tiny-bip39 = { version = "0.8.2", default-features = false, features = [] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cid = { version = "0.8", default-features = false, features = [] }
 ecdsa = { version = "0.13", default-features = false, features = ["sign", "verify"] }
-ed25519 = { version = "1", default-features = false, features = ["pkcs8"] }
+ed25519 = { version = "1", default-features = false, features = ["pkcs8", "alloc"] }
 ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek.git", branch = "update-deps", default-features = false, features = ["u64_backend"] }
 either = { version = "1", default-features = false, features = [] }
 elliptic-curve = { version = "0.11", default-features = false, features = ["std", "serde", "jwk"] }
@@ -23,6 +24,7 @@ k256 = { version = "0.10", default-features = false, features = ["ecdsa", "kecca
 linked-data = { path = "../linked-data" }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = [] }
+pkcs8 = { version = "0.8", default-features = false, features = ["std", "alloc", "pem"] }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = [] }

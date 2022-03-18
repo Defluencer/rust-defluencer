@@ -7,12 +7,27 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
+use std::borrow::Cow;
+
+use anchors::IPNSAnchor;
+
+use bip39::{Language, Mnemonic};
+
+use channel::Channel;
+
 use chrono::{TimeZone, Utc};
+
 use cid::Cid;
+
+use ed25519::KeypairBytes;
+
+use ed25519_dalek::{PublicKey, SecretKey};
 
 use errors::Error;
 
 use futures::{stream, Stream, StreamExt};
+
+use heck::{ToSnakeCase, ToTitleCase};
 
 use linked_data::{
     channel::ChannelMetadata,
@@ -23,9 +38,13 @@ use linked_data::{
     IPLDLink,
 };
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::KeyPair, IpfsService};
+
+use pkcs8::{EncodePrivateKey, LineEnding};
+use rand_core::{OsRng, RngCore};
 
 use signatures::dag_jose::JsonWebSignature;
+
 use utils::get_path;
 
 pub struct Defluencer {
@@ -39,14 +58,96 @@ impl Defluencer {
         Self { ipfs }
     }
 
+    /// Create an new channel on this node.
+    ///
+    /// Returns channel and a mnemonic passphrase useful to recreate this channel elsewhere.
+    pub async fn create_channel(
+        &self,
+        channel_name: impl Into<Cow<'static, str>>,
+    ) -> Result<(Mnemonic, Channel<IPNSAnchor>), Error> {
+        let name = channel_name.into();
+        let key_name = name.to_snake_case();
+        let display_name = name.to_title_case();
+
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+
+        let secret_key = SecretKey::from_bytes(&bytes)?;
+        let public_key: PublicKey = (&secret_key).into();
+
+        let key_pair_bytes = KeypairBytes {
+            secret_key: secret_key.to_bytes(),
+            public_key: Some(public_key.to_bytes()),
+        };
+
+        let mnemonic = Mnemonic::from_entropy(&bytes, Language::English)?;
+
+        let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
+        let KeyPair { id: _, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
+
+        let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
+        let channel = Channel::new(self.ipfs.clone(), anchor);
+
+        channel.update_identity(Some(display_name), None).await?;
+
+        Ok((mnemonic, channel))
+    }
+
+    /// Returns channel by name previously created on this node.
+    pub async fn get_channel(
+        &self,
+        channel_name: impl Into<Cow<'static, str>>,
+    ) -> Result<Channel<IPNSAnchor>, Error> {
+        let list = self.ipfs.key_list().await?;
+
+        let name = channel_name.into();
+        let key_name = name.to_snake_case();
+
+        if !list.contains_key(&key_name) {
+            return Err(Error::NotFound);
+        }
+
+        let anchor = IPNSAnchor::new(self.ipfs.clone(), key_name);
+        let channel = Channel::new(self.ipfs.clone(), anchor);
+
+        Ok(channel)
+    }
+
+    /// Recreate a channel on this node from a passphrase.
+    ///
+    /// Note that having the same channel on multiple nodes is NOT recommended.
+    pub async fn import_channel(
+        &self,
+        passphrase: impl Into<Cow<'static, str>>,
+    ) -> Result<Channel<IPNSAnchor>, Error> {
+        todo!()
+    }
+
+    /// Pin a channel to this local node.
+    ///
+    /// WARNING!
+    /// This function pin ALL content from the channel.
+    /// The amout of data could be massive.
+    pub async fn pin_channel(&self) -> Result<(), Error> {
+        todo!()
+    }
+
+    /// Unpin a channel from this local node.
+    ///
+    /// This function unpin everyting; content, comment, etc...
+    pub async fn unpin_channel(&self) -> Result<(), Error> {
+        todo!()
+    }
+
+    // Lazily stream all the comments for some content on the channel
     pub async fn stream_comments(
         &self,
+        channel: ChannelMetadata,
         content_cid: Cid,
-        origin: ChannelMetadata,
     ) -> impl Stream<Item = Comment> + '_ {
-        stream::unfold(origin, move |mut beacon| async move {
-            if let Some(index) = beacon.comment_index.date_time {
-                beacon.comment_index.date_time = None;
+        stream::unfold(channel, move |mut beacon| async move {
+            if let Some(idx) = beacon.comment_index {
+                beacon.comment_index = None;
 
                 if let Ok(media) = self.ipfs.dag_get::<&str, Media>(content_cid, None).await {
                     let date_time = Utc.timestamp(media.timestamp(), 0);
@@ -55,7 +156,7 @@ impl Defluencer {
 
                     if let Ok(mut comments) = self
                         .ipfs
-                        .dag_get::<String, Comments>(index.link, Some(path))
+                        .dag_get::<String, Comments>(idx.date_time.link, Some(path))
                         .await
                     {
                         if let Some(comments) = comments.comments.remove(&content_cid) {
@@ -90,14 +191,14 @@ impl Defluencer {
         })
     }
 
-    /// Lazily stream media starting from newest.
-    pub fn stream_media_feed(&self, origin: ChannelMetadata) -> impl Stream<Item = Media> + '_ {
-        stream::unfold(origin, move |mut beacon| async move {
-            match beacon.content_index.date_time {
-                Some(ipld) => {
-                    beacon.content_index.date_time = None;
+    // Lazily stream all media starting from newest on the channel.
+    pub fn stream_media_feed(&self, channel: ChannelMetadata) -> impl Stream<Item = Media> + '_ {
+        stream::unfold(channel, move |mut beacon| async move {
+            match beacon.content_index {
+                Some(idx) => {
+                    beacon.content_index = None;
 
-                    Some((Some(ipld.link), beacon))
+                    Some((Some(idx.date_time.link), beacon))
                 }
                 None => None,
             }
@@ -240,93 +341,4 @@ impl Defluencer {
             }
         })
     }
-
-    /* /// Create a new IPNS user on this IPFS node.
-    ///
-    /// Names are converted to title case.
-    pub async fn create_ipns_user(
-        &self,
-        display_name: impl Into<Cow<'static, str>>,
-    ) -> Result<IPNSUser, Error> {
-        let name = display_name.into();
-        let key_name = name.to_snake_case();
-        let display_name = name.to_title_case();
-
-        let avatar = Cid::default().into(); //TODO provide a default avatar Cid
-
-        let beacon = Beacon {
-            identity: Identity {
-                display_name,
-                avatar,
-            },
-            content: Default::default(),
-            comments: Default::default(),
-            live: Default::default(),
-            follows: Default::default(),
-            bans: Default::default(),
-            mods: Default::default(),
-        };
-
-        //TODO generate ed25519 key pair
-
-        //TODO format key for import into IPFS.
-
-        //TODO use bip-39 to export the key as passphrase.
-
-        let KeyPair { id: _, name } = self.ipfs.key_import(key_name, key_pair).await?;
-
-        let user = IPNSUser::new(
-            self.ipfs.clone(),
-            IPNSAnchor::new(self.ipfs.clone(), name.clone()),
-            EdDSASigner::new(self.ipfs.clone(), key_pair),
-        );
-
-        self.ipfs.ipns_put(name, false, &beacon).await?;
-
-        Ok(user)
-    } */
-
-    /* /// Search this IPFS node for users.
-    ///
-    /// IPNS records that resolve to beacons are considered local users.
-    pub async fn get_ipns_users(&self) -> Result<Vec<IPNSUser>, Error> {
-        let list = self.ipfs.key_list().await?;
-
-        let (names, keys): (Vec<String>, Vec<Cid>) = list.into_iter().unzip();
-
-        let futs: Vec<_> = keys
-            .into_iter()
-            .map(|key| self.ipfs.name_resolve(key))
-            .collect();
-
-        let results: Vec<Result<Cid, Error>> = future::join_all(futs).await;
-
-        let list: Vec<(String, _)> = results
-            .into_iter()
-            .zip(names.into_iter())
-            .filter_map(|(result, name)| match result {
-                Ok(cid) => Some((name, self.ipfs.dag_get::<&str, Beacon>(cid, Option::None))),
-                _ => None,
-            })
-            .collect();
-
-        let (names, futs): (Vec<String>, Vec<_>) = list.into_iter().unzip();
-
-        let results: Vec<Result<Beacon, Error>> = future::join_all(futs).await;
-
-        let users: Vec<IPNSUser> = results
-            .into_iter()
-            .zip(names.into_iter())
-            .filter_map(|(result, name)| match result {
-                Ok(_) => Some(IPNSUser::new(
-                    self.ipfs.clone(),
-                    IPNSAnchor::new(self.ipfs.clone(), name),
-                    IPNSSignature::new(self.ipfs.clone(), key_pair),
-                )),
-                _ => None,
-            })
-            .collect();
-
-        Ok(users)
-    } */
 }

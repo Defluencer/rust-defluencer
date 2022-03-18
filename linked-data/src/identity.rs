@@ -10,3 +10,5 @@ pub struct Identity {
     /// Link to your avatar. egg an image.
     pub avatar: IPLDLink,
 }
+
+//TODO impl default with generic avatar

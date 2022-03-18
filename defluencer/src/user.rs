@@ -1,4 +1,8 @@
-use crate::{errors::Error, signatures::Signer};
+use crate::{
+    errors::Error,
+    signatures::Signer,
+    utils::{add_image, add_markdown},
+};
 
 use chrono::Utc;
 
@@ -10,16 +14,11 @@ use linked_data::{
     comments::Comment,
     media::{
         blog::{FullPost, MicroPost},
-        mime_type::MimeTyped,
         video::{DayNode, HourNode, MinuteNode, VideoMetadata},
     },
 };
 
 use serde::Serialize;
-
-type MarkdownCid = Cid;
-type ImageCid = Cid;
-type VideoCid = Cid;
 
 #[derive(Clone)]
 pub struct Channel<T>
@@ -52,8 +51,10 @@ where
         image: &std::path::Path,
         markdown: &std::path::Path,
     ) -> Result<Cid, Error> {
-        let (image, markdown) =
-            tokio::try_join!(self.add_image(image), self.add_markdown(markdown))?;
+        let (image, markdown) = tokio::try_join!(
+            add_image(&self.ipfs, image),
+            add_markdown(&self.ipfs, markdown)
+        )?;
 
         let date_time = Utc::now();
         let timestamp = date_time.timestamp();
@@ -76,8 +77,10 @@ where
         image: web_sys::File,
         markdown: web_sys::File,
     ) -> Result<Cid, Error> {
-        let (image, markdown) =
-            futures::try_join!(self.add_image(image), self.add_markdown(markdown))?;
+        let (image, markdown) = futures::try_join!(
+            add_image(&self.ipfs, image),
+            add_markdown(&self.ipfs, markdown)
+        )?;
 
         let date_time = Utc::now();
         let timestamp = date_time.timestamp();
@@ -97,11 +100,11 @@ where
     pub async fn create_video_post(
         &self,
         title: String,
-        video: VideoCid,
+        video: Cid,
         thumbnail: &std::path::Path,
     ) -> Result<Cid, Error> {
         let (image, duration) =
-            tokio::try_join!(self.add_image(thumbnail), self.video_duration(video))?;
+            tokio::try_join!(add_image(&self.ipfs, thumbnail), self.video_duration(video))?;
 
         let date_time = Utc::now();
         let timestamp = date_time.timestamp();
@@ -122,11 +125,11 @@ where
     pub async fn create_video_post(
         &self,
         title: String,
-        video: VideoCid,
+        video: Cid,
         thumbnail: web_sys::File,
     ) -> Result<Cid, Error> {
         let (image, duration) =
-            futures::try_join!(self.add_image(thumbnail), self.video_duration(video))?;
+            futures::try_join!(add_image(&self.ipfs, thumbnail), self.video_duration(video))?;
 
         let date_time = Utc::now();
         let timestamp = date_time.timestamp();
@@ -187,111 +190,5 @@ where
         }
 
         Ok(duration)
-    }
-
-    /// Add an image to IPFS and return the CID
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn add_image(&self, path: &std::path::Path) -> Result<ImageCid, Error> {
-        let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
-            Some(mime) => mime.to_owned(),
-            None => return Err(Error::Image),
-        };
-
-        if !(mime_type == "image/png" || mime_type == "image/jpeg") {
-            return Err(Error::Image);
-        };
-
-        let file = tokio::fs::File::open(path).await?;
-        let stream = tokio_util::io::ReaderStream::new(file);
-        let cid = self.ipfs.add(stream).await?;
-
-        let mime_typed = MimeTyped {
-            mime_type,
-            data: either::Either::Left(cid.into()),
-        };
-
-        let cid = self.ipfs.dag_put(&mime_typed, Codec::default()).await?;
-
-        Ok(cid)
-    }
-
-    /// Add a markdown file to IPFS and return the CID
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn add_markdown(&self, path: &std::path::Path) -> Result<MarkdownCid, Error> {
-        let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
-            Some(mime) => mime.to_owned(),
-            None => return Err(Error::Markdown),
-        };
-
-        if mime_type != "text/markdown" {
-            return Err(Error::Markdown);
-        };
-
-        let file = tokio::fs::File::open(path).await?;
-        let stream = tokio_util::io::ReaderStream::new(file);
-
-        let cid = self.ipfs.add(stream).await?;
-
-        Ok(cid)
-    }
-
-    /// Add an image to IPFS and return the CID
-    #[cfg(target_arch = "wasm32")]
-    async fn add_image(&self, file: web_sys::File) -> Result<ImageCid, Error> {
-        use futures::AsyncReadExt;
-        use wasm_bindgen::JsCast;
-
-        let mime_type = file.type_();
-
-        if !(mime_type == "image/png" || mime_type == "image/jpeg") {
-            return Err(Error::Image);
-        };
-
-        let size = file.size() as usize;
-
-        // TODO disallow image that are too big.
-
-        let readable_stream =
-            wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
-
-        let mut async_read = readable_stream.into_async_read();
-
-        let mut bytes = Vec::with_capacity(size);
-        async_read.read_to_end(&mut bytes).await?;
-
-        let mime_typed = MimeTyped {
-            mime_type,
-            data: either::Either::Right(bytes),
-        };
-
-        let cid = self.ipfs.dag_put(&mime_typed, Codec::default()).await?;
-
-        Ok(cid)
-    }
-
-    /// Add a markdown file to IPFS and return the CID
-    #[cfg(target_arch = "wasm32")]
-    async fn add_markdown(&self, file: web_sys::File) -> Result<MarkdownCid, Error> {
-        use futures::AsyncReadExt;
-        use wasm_bindgen::JsCast;
-
-        if file.type_() != "text/markdown" {
-            return Err(Error::Markdown);
-        };
-
-        let size = file.size() as usize;
-
-        let readable_stream =
-            wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
-
-        let mut async_read = readable_stream.into_async_read();
-
-        let mut bytes = Vec::with_capacity(size);
-        async_read.read_to_end(&mut bytes).await?;
-        let bytes = bytes::Bytes::from(bytes);
-
-        let cid = self.ipfs.add(bytes).await?;
-
-        Ok(cid)
     }
 }

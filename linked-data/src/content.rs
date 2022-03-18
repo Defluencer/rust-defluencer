@@ -12,11 +12,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
-pub struct ContentIndexing {
-    pub date_time: Option<IPLDLink>,
-}
-
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct Content {
     pub content: HashSet<IPLDLink>,
 }

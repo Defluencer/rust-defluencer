@@ -4,11 +4,115 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 
 use cid::multibase::Base;
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::media::mime_type::MimeTyped;
 
 use either::Either;
+
+use cid::Cid;
+
+#[cfg(target_arch = "wasm32")]
+pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, Error> {
+    use futures::AsyncReadExt;
+    use wasm_bindgen::JsCast;
+
+    let mime_type = file.type_();
+
+    if !(mime_type == "image/png" || mime_type == "image/jpeg") {
+        return Err(Error::Image);
+    };
+
+    let size = file.size() as usize;
+
+    // TODO disallow image that are too big.
+
+    let readable_stream = wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
+
+    let mut async_read = readable_stream.into_async_read();
+
+    let mut bytes = Vec::with_capacity(size);
+    async_read.read_to_end(&mut bytes).await?;
+
+    let mime_typed = MimeTyped {
+        mime_type,
+        data: either::Either::Right(bytes),
+    };
+
+    let cid = ipfs.dag_put(&mime_typed, Codec::default()).await?;
+
+    Ok(cid)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid, Error> {
+    let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
+        Some(mime) => mime.to_owned(),
+        None => return Err(Error::Image),
+    };
+
+    if !(mime_type == "image/png" || mime_type == "image/jpeg") {
+        return Err(Error::Image);
+    };
+
+    let file = tokio::fs::File::open(path).await?;
+    let stream = tokio_util::io::ReaderStream::new(file);
+    let cid = ipfs.add(stream).await?;
+
+    let mime_typed = MimeTyped {
+        mime_type,
+        data: either::Either::Left(cid.into()),
+    };
+
+    let cid = ipfs.dag_put(&mime_typed, Codec::default()).await?;
+
+    Ok(cid)
+}
+
+/// Add a markdown file to IPFS and return the CID
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn add_markdown(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid, Error> {
+    let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
+        Some(mime) => mime.to_owned(),
+        None => return Err(Error::Markdown),
+    };
+
+    if mime_type != "text/markdown" {
+        return Err(Error::Markdown);
+    };
+
+    let file = tokio::fs::File::open(path).await?;
+    let stream = tokio_util::io::ReaderStream::new(file);
+
+    let cid = ipfs.add(stream).await?;
+
+    Ok(cid)
+}
+
+/// Add a markdown file to IPFS and return the CID
+#[cfg(target_arch = "wasm32")]
+pub async fn add_markdown(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, Error> {
+    use futures::AsyncReadExt;
+    use wasm_bindgen::JsCast;
+
+    if file.type_() != "text/markdown" {
+        return Err(Error::Markdown);
+    };
+
+    let size = file.size() as usize;
+
+    let readable_stream = wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
+
+    let mut async_read = readable_stream.into_async_read();
+
+    let mut bytes = Vec::with_capacity(size);
+    async_read.read_to_end(&mut bytes).await?;
+    let bytes = bytes::Bytes::from(bytes);
+
+    let cid = ipfs.add(bytes).await?;
+
+    Ok(cid)
+}
 
 pub async fn data_url(ipfs: &IpfsService, mime_type: &MimeTyped) -> Result<String, Error> {
     let mut data_url = String::from("data:");

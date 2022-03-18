@@ -19,8 +19,6 @@ use ed25519::signature::Signature;
 use ed25519_dalek::{Keypair, Signer};
 
 /// Create DAG-Jose blocks with the EdDSA.
-///
-/// Should use the same key as the IPNS address of a Beacon.
 pub struct EdDSASigner {
     ipfs: IpfsService,
     key_pair: Keypair,
