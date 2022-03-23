@@ -1,37 +1,13 @@
-use std::collections::HashSet;
+//use std::collections::HashSet;
 
-use crate::{
-    comments::Comment,
-    media::{
-        blog::{FullPost, MicroPost},
-        video::VideoMetadata,
-    },
-    IPLDLink,
-};
+//use crate::IPLDLink;
 
-use serde::{Deserialize, Serialize};
+//use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+/* #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct Content {
+    /// List of media.
     pub content: HashSet<IPLDLink>,
-}
-
-#[derive(Deserialize, PartialEq, Clone, Debug)]
-#[serde(untagged)]
-pub enum Media {
-    MicroBlog(MicroPost),
-    Blog(FullPost),
-    Video(VideoMetadata),
-    Comment(Comment),
-}
-
-impl Media {
-    pub fn timestamp(&self) -> i64 {
-        match self {
-            Media::MicroBlog(metadata) => metadata.timestamp,
-            Media::Blog(metadata) => metadata.timestamp,
-            Media::Video(metadata) => metadata.timestamp,
-            Media::Comment(metadata) => metadata.timestamp,
-        }
-    }
-}
+    // Link to previous content.
+    //pub previous: Option<IPLDLink>,
+} */

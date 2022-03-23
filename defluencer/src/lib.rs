@@ -7,7 +7,7 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use anchors::IPNSAnchor;
 
@@ -15,13 +15,10 @@ use bip39::{Language, Mnemonic};
 
 use channel::Channel;
 
-use chrono::{TimeZone, Utc};
-
 use cid::Cid;
-
 use ed25519::KeypairBytes;
 
-use ed25519_dalek::{PublicKey, SecretKey};
+use ed25519_dalek::SecretKey;
 
 use errors::Error;
 
@@ -31,21 +28,15 @@ use heck::{ToSnakeCase, ToTitleCase};
 
 use linked_data::{
     channel::ChannelMetadata,
-    comments::{Comment, Comments},
-    content::{Content, Media},
-    indexes::date_time::{Daily, Hourly, Minutes, Monthly, Seconds, Yearly},
-    signature::RawJWS,
+    indexes::{date_time::*, log::ChainLink},
     IPLDLink,
 };
 
 use ipfs_api::{responses::KeyPair, IpfsService};
 
 use pkcs8::{EncodePrivateKey, LineEnding};
+
 use rand_core::{OsRng, RngCore};
-
-use signatures::dag_jose::JsonWebSignature;
-
-use utils::get_path;
 
 pub struct Defluencer {
     ipfs: IpfsService,
@@ -60,7 +51,7 @@ impl Defluencer {
 
     /// Create an new channel on this node.
     ///
-    /// Returns channel and a mnemonic passphrase useful to recreate this channel elsewhere.
+    /// Returns channel and a secret passphrase useful to recreate this channel elsewhere.
     pub async fn create_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
@@ -73,27 +64,29 @@ impl Defluencer {
         OsRng.fill_bytes(&mut bytes);
 
         let secret_key = SecretKey::from_bytes(&bytes)?;
-        let public_key: PublicKey = (&secret_key).into();
 
         let key_pair_bytes = KeypairBytes {
             secret_key: secret_key.to_bytes(),
-            public_key: Some(public_key.to_bytes()),
+            public_key: None,
         };
 
         let mnemonic = Mnemonic::from_entropy(&bytes, Language::English)?;
 
         let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
-        let KeyPair { id: _, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
+        let KeyPair { id, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
+        let ipns = Cid::try_from(id)?;
 
         let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
         let channel = Channel::new(self.ipfs.clone(), anchor);
 
-        channel.update_identity(Some(display_name), None).await?;
+        channel
+            .update_identity(Some(display_name), None, Some(ipns), None)
+            .await?;
 
         Ok((mnemonic, channel))
     }
 
-    /// Returns channel by name previously created on this node.
+    /// Returns a channel by name previously created or imported on this node.
     pub async fn get_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
@@ -113,14 +106,33 @@ impl Defluencer {
         Ok(channel)
     }
 
-    /// Recreate a channel on this node from a passphrase.
+    /// Recreate a channel on this node from a secret passphrase.
     ///
     /// Note that having the same channel on multiple nodes is NOT recommended.
     pub async fn import_channel(
         &self,
+        channel_name: impl Into<Cow<'static, str>>,
         passphrase: impl Into<Cow<'static, str>>,
     ) -> Result<Channel<IPNSAnchor>, Error> {
-        todo!()
+        let name = channel_name.into();
+        let key_name = name.to_snake_case();
+
+        let mnemonic = Mnemonic::from_phrase(&passphrase.into(), Language::English)?;
+
+        let secret_key = SecretKey::from_bytes(&mnemonic.entropy())?;
+
+        let key_pair_bytes = KeypairBytes {
+            secret_key: secret_key.to_bytes(),
+            public_key: None,
+        };
+
+        let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
+        let KeyPair { id: _, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
+
+        let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
+        let channel = Channel::new(self.ipfs.clone(), anchor);
+
+        Ok(channel)
     }
 
     /// Pin a channel to this local node.
@@ -128,81 +140,52 @@ impl Defluencer {
     /// WARNING!
     /// This function pin ALL content from the channel.
     /// The amout of data could be massive.
-    pub async fn pin_channel(&self) -> Result<(), Error> {
+    pub async fn pin_channel(&self, channel: &ChannelMetadata) -> Result<(), Error> {
         todo!()
     }
 
     /// Unpin a channel from this local node.
     ///
     /// This function unpin everyting; content, comment, etc...
-    pub async fn unpin_channel(&self) -> Result<(), Error> {
+    pub async fn unpin_channel(&self, channel: &ChannelMetadata) -> Result<(), Error> {
         todo!()
     }
 
-    // Lazily stream all the comments for some content on the channel
-    pub async fn stream_comments(
+    pub fn stream_content_log(
         &self,
-        channel: ChannelMetadata,
-        content_cid: Cid,
-    ) -> impl Stream<Item = Comment> + '_ {
-        stream::unfold(channel, move |mut beacon| async move {
-            if let Some(idx) = beacon.comment_index {
-                beacon.comment_index = None;
+        channel: &ChannelMetadata,
+    ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+        stream::try_unfold(channel.content_index.log, move |mut previous| async move {
+            let cid = match previous {
+                Some(ipld) => ipld.link,
+                None => return Ok(None),
+            };
 
-                if let Ok(media) = self.ipfs.dag_get::<&str, Media>(content_cid, None).await {
-                    let date_time = Utc.timestamp(media.timestamp(), 0);
+            let chainlink = self.ipfs.dag_get::<&str, ChainLink>(cid, None).await?;
 
-                    let path = get_path(date_time);
+            previous = chainlink.previous;
 
-                    if let Ok(mut comments) = self
-                        .ipfs
-                        .dag_get::<String, Comments>(idx.date_time.link, Some(path))
-                        .await
-                    {
-                        if let Some(comments) = comments.comments.remove(&content_cid) {
-                            Some((comments, beacon))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+            return Ok(Some((chainlink.media.link, previous)));
+        })
+    }
+
+    pub fn stream_content_chronologically(
+        &self,
+        channel: &ChannelMetadata,
+    ) -> impl Stream<Item = Cid> + '_ {
+        stream::unfold(
+            channel.content_index.date_time,
+            move |mut datetime| async move {
+                match datetime {
+                    Some(index) => {
+                        datetime = None;
+
+                        Some((Some(index.link), datetime))
                     }
-                } else {
-                    None
+                    None => None,
                 }
-            } else {
-                None
-            }
-        })
-        .flat_map(|comments| self.get_comments(comments))
-    }
-
-    fn get_comments(&self, comments: Vec<IPLDLink>) -> impl Stream<Item = Comment> + '_ {
-        stream::unfold(comments.into_iter(), move |mut iter| async move {
-            if let Some(ipld) = iter.next() {
-                if let Ok(comment) = self.ipfs.dag_get::<&str, Comment>(ipld.link, None).await {
-                    Some((comment, iter))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-    }
-
-    // Lazily stream all media starting from newest on the channel.
-    pub fn stream_media_feed(&self, channel: ChannelMetadata) -> impl Stream<Item = Media> + '_ {
-        stream::unfold(channel, move |mut beacon| async move {
-            match beacon.content_index {
-                Some(idx) => {
-                    beacon.content_index = None;
-
-                    Some((Some(idx.date_time.link), beacon))
-                }
-                None => None,
-            }
-        })
+            },
+        )
         .flat_map(|index| self.stream_years(index))
         .flat_map(|year| self.stream_months(year))
         .flat_map(|month| self.stream_days(month))
@@ -210,9 +193,7 @@ impl Defluencer {
         .flat_map(|hours| self.stream_minutes(hours))
         .flat_map(|minutes| self.stream_seconds(minutes))
         .flat_map(|seconds| self.stream_content(seconds))
-        .flat_map(|content| self.stream_media(content))
-
-        //TODO verify that JWS match the media content
+        .flat_map(|sets| self.stream_sets(sets))
     }
 
     fn stream_years(&self, index: Option<Cid>) -> impl Stream<Item = Yearly> + '_ {
@@ -297,22 +278,80 @@ impl Defluencer {
         )
     }
 
-    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = Content> + '_ {
+    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = HashSet<IPLDLink>> + '_ {
         stream::unfold(
             seconds.second.into_values().rev(),
             move |mut iter| async move {
                 match iter.next() {
-                    Some(ipld) => match self.ipfs.dag_get::<&str, Content>(ipld.link, None).await {
-                        Ok(content) => Some((content, iter)),
-                        Err(_) => None,
-                    },
+                    Some(set) => Some((set, iter)),
                     None => None,
                 }
             },
         )
     }
 
-    fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
+    fn stream_sets(&self, sets: HashSet<IPLDLink>) -> impl Stream<Item = Cid> + '_ {
+        stream::unfold(sets.into_iter(), move |mut iter| async move {
+            match iter.next() {
+                Some(ipld) => Some((ipld.link, iter)),
+                None => None,
+            }
+        })
+    }
+
+    /* // Lazily stream all the comments for some content on the channel
+    pub async fn stream_comments(
+        &self,
+        channel: ChannelMetadata,
+        content_cid: Cid,
+    ) -> impl Stream<Item = Comment> + '_ {
+        stream::unfold(channel, move |mut beacon| async move {
+            if let Some(idx) = beacon.comment_index {
+                beacon.comment_index = None;
+
+                if let Ok(media) = self.ipfs.dag_get::<&str, Media>(content_cid, None).await {
+                    let date_time = Utc.timestamp(media.timestamp(), 0);
+
+                    let path = get_path(date_time);
+
+                    if let Ok(mut comments) = self
+                        .ipfs
+                        .dag_get::<String, Comments>(idx.date_time.link, Some(path))
+                        .await
+                    {
+                        if let Some(comments) = comments.comments.remove(&content_cid) {
+                            Some((comments, beacon))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .flat_map(|comments| self.get_comments(comments))
+    } */
+
+    /* fn get_comments(&self, comments: Vec<IPLDLink>) -> impl Stream<Item = Comment> + '_ {
+        stream::unfold(comments.into_iter(), move |mut iter| async move {
+            if let Some(ipld) = iter.next() {
+                if let Ok(comment) = self.ipfs.dag_get::<&str, Comment>(ipld.link, None).await {
+                    Some((comment, iter))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+    } */
+
+    /* fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
         stream::unfold(content.content.into_iter(), move |mut iter| async move {
             if let Some(ipld) = iter.next() {
                 if let Ok(raw_jws) = self.ipfs.dag_get::<&str, RawJWS>(ipld.link, None).await {
@@ -340,5 +379,5 @@ impl Defluencer {
                 None
             }
         })
-    }
+    } */
 }

@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 /// Recursive pin.
 #[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
 pub struct MicroPost {
+    pub identity: IPLDLink,
+
     /// Timestamp at the time of publication in Unix time.
-    pub timestamp: i64,
+    pub user_timestamp: i64,
 
     /// Text as content of the blog post.
     pub content: String,
@@ -19,8 +21,10 @@ pub struct MicroPost {
 /// Recursive pin.
 #[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
 pub struct FullPost {
+    pub identity: IPLDLink,
+
     /// Timestamp at the time of publication in Unix time.
-    pub timestamp: i64,
+    pub user_timestamp: i64,
 
     /// Link to markdown file
     pub content: IPLDLink,

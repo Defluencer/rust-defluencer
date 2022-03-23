@@ -1,4 +1,4 @@
-use crate::{follows::Follows, identity::Identity, live::LiveSettings, IPLDLink};
+use crate::{indexes::Indexing, IPLDLink};
 
 use serde::{Deserialize, Serialize};
 
@@ -8,16 +8,21 @@ use serde::{Deserialize, Serialize};
 /// Blockchains are best suited for this.
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct ChannelMetadata {
-    pub identity: Option<Identity>,
-    pub content_index: Option<Indexing>,
-    pub comment_index: Option<Indexing>,
-    pub live: Option<LiveSettings>,
-    pub follows: Option<Follows>,
-    pub bans: Option<IPLDLink>,
-    pub mods: Option<IPLDLink>,
-}
+    pub identity: IPLDLink,
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
-pub struct Indexing {
-    pub date_time: IPLDLink,
+    pub content_index: Indexing,
+
+    pub comment_index: Indexing,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live: Option<IPLDLink>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follows: Option<IPLDLink>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bans: Option<IPLDLink>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mods: Option<IPLDLink>,
 }
