@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
-use crate::{anchors::Anchor, errors::Error, utils::add_image};
+use crate::{
+    anchors::{Anchor, IPNSAnchor},
+    errors::Error,
+    utils::add_image,
+};
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
@@ -13,11 +17,12 @@ use ipfs_api::{responses::Codec, IpfsService};
 use linked_data::{
     channel::ChannelMetadata,
     follows::Follows,
+    identity::Identity,
     indexes::{date_time::*, log::ChainLink},
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
-    Address, IPLDLink, PeerId,
+    Address, IPLDLink, IPNSAddress, PeerId,
 };
 
 #[derive(Clone)]
@@ -43,11 +48,9 @@ where
         &self,
         display_name: Option<String>,
         avatar: Option<&std::path::Path>,
-        channel_ipns: Option<Cid>,
+        channel_ipns: Option<IPNSAddress>,
         channel_ens: Option<String>,
     ) -> Result<Cid, Error> {
-        use linked_data::identity::Identity;
-
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let mut identity = self
@@ -126,7 +129,7 @@ where
     }
 
     /// Follow a channel.
-    pub async fn follow(&self, user: Either<String, Cid>) -> Result<Cid, Error> {
+    pub async fn follow(&self, user_identity: Cid) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let mut follows = match channel.follows {
@@ -134,12 +137,7 @@ where
             None => Follows::default(),
         };
 
-        let status = match user {
-            Either::Left(ens) => follows.ens.insert(ens),
-            Either::Right(ipns) => follows.ipns.insert(ipns),
-        };
-
-        if !status {
+        if !follows.followees.insert(user_identity.into()) {
             return Err(Error::AlreadyAdded);
         }
 
@@ -151,7 +149,7 @@ where
     }
 
     /// Unfollow a channel.
-    pub async fn unfollow(&self, user: Either<String, Cid>) -> Result<Cid, Error> {
+    pub async fn unfollow(&self, user_identity: Cid) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let mut follows = match channel.follows {
@@ -159,12 +157,7 @@ where
             None => return Err(Error::NotFound),
         };
 
-        let status = match user {
-            Either::Left(ens) => follows.ens.remove(&ens),
-            Either::Right(ipns) => follows.ipns.remove(&ipns),
-        };
-
-        if !status {
+        if !follows.followees.remove(&user_identity.into()) {
             return Err(Error::NotFound);
         }
 
@@ -396,6 +389,30 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
+    /// Pin a channel to this local node.
+    ///
+    /// WARNING!
+    /// This function pin ALL content from the channel.
+    /// The amout of data could be massive.
+    pub async fn pin_channel(&self) -> Result<(), Error> {
+        let cid = self.anchor.retreive().await?;
+
+        self.ipfs.pin_add(cid, true).await?;
+
+        Ok(())
+    }
+
+    /// Unpin a channel from this local node.
+    ///
+    /// This function unpin everyting; metadata, content, comment, etc...
+    pub async fn unpin_channel(&self) -> Result<(), Error> {
+        let cid = self.anchor.retreive().await?;
+
+        self.ipfs.pin_rm(cid, true).await?;
+
+        Ok(())
+    }
+
     async fn get_channel(&self) -> Result<(Cid, ChannelMetadata), Error> {
         let cid = self.anchor.retreive().await?;
         let channel: ChannelMetadata = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
@@ -411,14 +428,6 @@ where
         self.anchor.anchor(new_cid).await?;
 
         Ok(new_cid)
-    }
-
-    async fn hamt_index_add(&self, index: Option<IPLDLink>, add_cid: Cid) -> Result<Cid, Error> {
-        todo!()
-    }
-
-    async fn hamt_index_remove(&self, index: IPLDLink, remove_cid: Cid) -> Result<Cid, Error> {
-        todo!()
     }
 
     async fn log_index_add(&self, index: Option<IPLDLink>, add_cid: Cid) -> Result<Cid, Error> {
@@ -626,6 +635,27 @@ where
         }
 
         let cid = self.ipfs.dag_put(&yearly, Codec::default()).await?;
+
+        Ok(cid)
+    }
+
+    async fn hamt_index_add(&self, index: Option<IPLDLink>, add_cid: Cid) -> Result<Cid, Error> {
+        todo!()
+    }
+
+    async fn hamt_index_remove(&self, index: IPLDLink, remove_cid: Cid) -> Result<Cid, Error> {
+        todo!()
+    }
+}
+
+impl Channel<IPNSAnchor> {
+    pub async fn get_ipns_address(&self) -> Result<IPNSAddress, Error> {
+        let key_list = self.ipfs.key_list().await?;
+
+        let cid = match key_list.get(self.anchor.get_name()) {
+            Some(keypair) => *keypair,
+            None => return Err(ipfs_api::errors::Error::Ipns.into()),
+        };
 
         Ok(cid)
     }

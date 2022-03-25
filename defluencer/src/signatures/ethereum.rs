@@ -19,8 +19,6 @@ use web3::{transports::eip_1193::Eip1193, types::Address, Web3};
 use signature::Signature;
 
 /// Create DAG-Jose blocks with the EcDSA.
-///
-/// Should use the same address (key) as the ENS domain owner.
 pub struct EthereumSigner {
     ipfs: IpfsService,
     addr: Address,

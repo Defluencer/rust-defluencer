@@ -21,7 +21,6 @@ use linked_data::{
 
 use serde::Serialize;
 
-#[derive(Clone)]
 pub struct User<T>
 where
     T: Signer,

@@ -7,7 +7,10 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
-use std::{borrow::Cow, collections::HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use anchors::IPNSAnchor;
 
@@ -16,27 +19,39 @@ use bip39::{Language, Mnemonic};
 use channel::Channel;
 
 use cid::Cid;
-use ed25519::KeypairBytes;
 
+use ed25519::KeypairBytes;
 use ed25519_dalek::SecretKey;
 
 use errors::Error;
 
-use futures::{stream, Stream, StreamExt};
+use futures::{
+    stream::{self, FuturesUnordered},
+    Stream, StreamExt, TryStreamExt,
+};
 
 use heck::{ToSnakeCase, ToTitleCase};
 
 use linked_data::{
     channel::ChannelMetadata,
+    follows::Follows,
+    identity::Identity,
     indexes::{date_time::*, log::ChainLink},
-    IPLDLink,
+    IPLDLink, IPNSAddress,
 };
 
-use ipfs_api::{responses::KeyPair, IpfsService};
+use ipfs_api::{
+    responses::{Codec, KeyPair},
+    IpfsService,
+};
 
 use pkcs8::{EncodePrivateKey, LineEnding};
 
 use rand_core::{OsRng, RngCore};
+
+use signatures::Signer;
+
+use user::User;
 
 pub struct Defluencer {
     ipfs: IpfsService,
@@ -49,9 +64,31 @@ impl Defluencer {
         Self { ipfs }
     }
 
+    pub async fn create_user<T>(
+        &self,
+        user_name: impl Into<Cow<'static, str>>,
+        signer: T,
+    ) -> Result<User<T>, Error>
+    where
+        T: Signer,
+    {
+        let identity = Identity {
+            display_name: user_name.into().into_owned(),
+            avatar: Cid::default().into(), //TODO generic avatar cid
+            channel_ipns: None,
+            channel_ens: None,
+        };
+
+        let identity = self.ipfs.dag_put(&identity, Codec::default()).await?.into();
+
+        let user = User::new(self.ipfs.clone(), signer, identity);
+
+        Ok(user)
+    }
+
     /// Create an new channel on this node.
     ///
-    /// Returns channel and a secret passphrase useful to recreate this channel elsewhere.
+    /// Returns channel and a secret passphrase used to recreate this channel elsewhere.
     pub async fn create_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
@@ -109,10 +146,12 @@ impl Defluencer {
     /// Recreate a channel on this node from a secret passphrase.
     ///
     /// Note that having the same channel on multiple nodes is NOT recommended.
+    /// Use this to transfer a channel from one node to another.
     pub async fn import_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
         passphrase: impl Into<Cow<'static, str>>,
+        pin_content: bool,
     ) -> Result<Channel<IPNSAnchor>, Error> {
         let name = channel_name.into();
         let key_name = name.to_snake_case();
@@ -132,24 +171,114 @@ impl Defluencer {
         let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
         let channel = Channel::new(self.ipfs.clone(), anchor);
 
+        if pin_content {
+            channel.pin_channel().await?;
+        }
+
         Ok(channel)
     }
 
-    /// Pin a channel to this local node.
-    ///
-    /// WARNING!
-    /// This function pin ALL content from the channel.
-    /// The amout of data could be massive.
-    pub async fn pin_channel(&self, channel: &ChannelMetadata) -> Result<(), Error> {
-        todo!()
+    /// Return all the cids and channels of all the identities provided.
+    pub async fn get_channels(
+        &self,
+        identities: impl Iterator<Item = &Identity>,
+    ) -> HashMap<Cid, ChannelMetadata> {
+        let stream: FuturesUnordered<_> = identities
+            .filter_map(|identity| match identity.channel_ipns {
+                Some(ipns) => Some(self.ipfs.name_resolve(ipns)),
+                None => None,
+            })
+            .collect();
+
+        stream
+            .filter_map(|result| async move {
+                match result {
+                    Ok(cid) => match self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await {
+                        Ok(channel) => Some((cid, channel)),
+                        Err(_) => None,
+                    },
+                    Err(_) => None,
+                }
+            })
+            .collect()
+            .await
     }
 
-    /// Unpin a channel from this local node.
-    ///
-    /// This function unpin everyting; content, comment, etc...
-    pub async fn unpin_channel(&self, channel: &ChannelMetadata) -> Result<(), Error> {
-        todo!()
+    /// Returns all the cids and identities of all the followees of all the channels provided.
+    pub async fn get_followees_identity(
+        &self,
+        channels: impl Iterator<Item = &ChannelMetadata>,
+    ) -> HashMap<Cid, Identity> {
+        let stream: FuturesUnordered<_> = channels
+            .filter_map(|channel| match channel.follows {
+                Some(ipld) => Some(self.ipfs.dag_get::<&str, Follows>(ipld.link, None)),
+                None => None,
+            })
+            .collect();
+
+        stream
+            .filter_map(|result| async move {
+                match result {
+                    Ok(follows) => Some(stream::iter(follows.followees)),
+                    Err(_) => None,
+                }
+            })
+            .flatten_unordered(0)
+            .filter_map(|ipld| async move {
+                match self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await {
+                    Ok(identity) => Some((ipld.link, identity)),
+                    Err(_) => None,
+                }
+            })
+            .collect()
+            .await
     }
+
+    /* async fn web_crawl_step(&self, ipns_addresses: HashSet<IPNSAddress>) -> HashSet<IPNSAddress> {
+        let stream: FuturesUnordered<_> = ipns_addresses
+            .iter()
+            .map(|ipns| self.ipfs.name_resolve(*ipns))
+            .collect();
+
+        let set: HashSet<IPNSAddress> = stream
+            .filter_map(|result| async move {
+                match result {
+                    Ok(cid) => Some(self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await),
+                    Err(e) => Some(Err(e)),
+                }
+            })
+            .filter_map(|result| async move {
+                match result {
+                    Ok(channel) => match channel.follows {
+                        Some(ipld) => {
+                            match self.ipfs.dag_get::<&str, Follows>(ipld.link, None).await {
+                                Ok(follows) => Some(stream::iter(follows.followees)),
+                                Err(_) => None,
+                            }
+                        }
+                        None => None,
+                    },
+                    Err(_) => None,
+                }
+            })
+            .flatten()
+            .filter_map(|ipld| async move {
+                match self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await {
+                    Ok(identity) => match identity.channel_ipns {
+                        Some(ipns) => Some(ipns),
+                        None => None,
+                    },
+                    Err(_) => None,
+                }
+            })
+            .collect()
+            .await;
+
+        // Set of addresses to crawl next
+        let unknown = &set - &ipns_addresses;
+
+        unknown
+    } */
 
     pub fn stream_content_log(
         &self,
@@ -177,39 +306,23 @@ impl Defluencer {
             channel.content_index.date_time,
             move |mut datetime| async move {
                 match datetime {
-                    Some(index) => {
+                    Some(ipld) => {
                         datetime = None;
 
-                        Some((Some(index.link), datetime))
+                        match self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await {
+                            Ok(yearly) => Some((yearly, datetime)),
+                            Err(_) => None,
+                        }
                     }
                     None => None,
                 }
             },
         )
-        .flat_map(|index| self.stream_years(index))
-        .flat_map(|year| self.stream_months(year))
-        .flat_map(|month| self.stream_days(month))
-        .flat_map(|day| self.stream_hours(day))
-        .flat_map(|hours| self.stream_minutes(hours))
-        .flat_map(|minutes| self.stream_seconds(minutes))
-        .flat_map(|seconds| self.stream_content(seconds))
-        .flat_map(|sets| self.stream_sets(sets))
-    }
-
-    fn stream_years(&self, index: Option<Cid>) -> impl Stream<Item = Yearly> + '_ {
-        stream::unfold(index, move |mut index| async move {
-            match index {
-                Some(cid) => {
-                    index = None;
-
-                    match self.ipfs.dag_get::<&str, Yearly>(cid, None).await {
-                        Ok(years) => Some((years, index)),
-                        Err(_) => None,
-                    }
-                }
-                None => None,
-            }
-        })
+        .flat_map_unordered(0, |year| self.stream_months(year).boxed_local())
+        .flat_map_unordered(0, |month| self.stream_days(month).boxed_local())
+        .flat_map_unordered(0, |day| self.stream_hours(day).boxed_local())
+        .flat_map_unordered(0, |hours| self.stream_minutes(hours).boxed_local())
+        .flat_map_unordered(0, |minutes| self.stream_seconds(minutes).boxed_local())
     }
 
     fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
@@ -263,22 +376,29 @@ impl Defluencer {
         })
     }
 
-    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Seconds> + '_ {
+    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Cid> + '_ {
         stream::unfold(
             minutes.minute.into_values().rev(),
             move |mut iter| async move {
                 match iter.next() {
                     Some(ipld) => match self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await {
-                        Ok(seconds) => Some((seconds, iter)),
+                        Ok(seconds) => {
+                            let stream = stream::iter(seconds.second.into_values().rev());
+
+                            Some((stream, iter))
+                        }
                         Err(_) => None,
                     },
                     None => None,
                 }
             },
         )
+        .flatten()
+        .flat_map(|set| stream::iter(set))
+        .map(|ipld| ipld.link)
     }
 
-    fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = HashSet<IPLDLink>> + '_ {
+    /* fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = HashSet<IPLDLink>> + '_ {
         stream::unfold(
             seconds.second.into_values().rev(),
             move |mut iter| async move {
@@ -288,16 +408,16 @@ impl Defluencer {
                 }
             },
         )
-    }
+    } */
 
-    fn stream_sets(&self, sets: HashSet<IPLDLink>) -> impl Stream<Item = Cid> + '_ {
+    /* fn stream_sets(&self, sets: HashSet<IPLDLink>) -> impl Stream<Item = Cid> + '_ {
         stream::unfold(sets.into_iter(), move |mut iter| async move {
             match iter.next() {
                 Some(ipld) => Some((ipld.link, iter)),
                 None => None,
             }
         })
-    }
+    } */
 
     /* // Lazily stream all the comments for some content on the channel
     pub async fn stream_comments(

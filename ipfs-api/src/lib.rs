@@ -360,7 +360,6 @@ impl IpfsService {
         Err(error.into())
     }
 
-    /// Returns all IPNS keys on this IPFS node.
     pub async fn key_import<U>(&self, name: U, key_file: String) -> Result<KeyPair>
     where
         U: Into<Cow<'static, str>>,

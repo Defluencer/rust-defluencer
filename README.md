@@ -13,17 +13,17 @@ Thanks to IPFS, every user who consume media content also redistribute it, resul
 
 Users following users create a social web that can be crawled for more content.
 
-If instead of creating, a user only share, they become de facto a content aggregator. Users can be individuals or organisations. Organisation who filer, aggregate and moderate content are called platforms and works similarily to curent social media giants.
+If instead of creating, a user only share, they become de facto a content aggregator. Users can be individuals or organisations. Organisation who filter, aggregate and moderate content are called platforms and works similarily to curent social media giants.
 
 ### Storage
 
-Defluencer communicates to a local IPFS node via the HTTP API. Metadata and content are added to IPFS and are cryptographically signed. The end result is a DAG representing an entire social media presence (videos, photos, comments, blog posts, etc...). The root of this DAG is called a "Beacon" and changes with every update.
+Defluencer communicates to a local IPFS node via the HTTP API. Metadata and content are added to IPFS and are cryptographically signed. The end result is a DAG representing an entire social media presence (videos, photos, comments, blog posts, etc...). The root of this DAG is called a "Channel" and changes with every update.
 
 ### Anchoring
 
-Having a constantly changing Beacon is not very useful, we need a permanent but mutable link.
+Having a constantly changing Channel is not very useful, we need a permanent but mutable link.
 
-IPNS is used for this purpose. An IPNS address is the hash of a public key, does not change and points to an IPNS record. In this record a link and a signature, allow anyone to verify and fetch the most up to date beacon of the owner of the secret key.
+IPNS is used for this purpose. An IPNS address is the hash of a public key, does not change and points to an IPNS record. In this record a link and a signature, allow anyone to verify and fetch the most up to date Channel of the owner of the secret key.
 
 The protocol is agnostic to this anchoring system. Blockchains, DIDs or even web server could be used.
 

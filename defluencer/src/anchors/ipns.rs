@@ -20,14 +20,16 @@ impl IPNSAnchor {
 
         Self { ipfs, name }
     }
+
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
 }
 
 #[async_trait(?Send)]
 impl super::Anchor for IPNSAnchor {
-    async fn anchor(&self, beacon_cid: Cid) -> Result<(), Error> {
-        self.ipfs
-            .name_publish(beacon_cid, self.name.clone())
-            .await?;
+    async fn anchor(&self, cid: Cid) -> Result<(), Error> {
+        self.ipfs.name_publish(cid, self.name.clone()).await?;
 
         Ok(())
     }

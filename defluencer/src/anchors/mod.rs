@@ -8,7 +8,7 @@ use cid::Cid;
 
 use crate::errors::Error;
 
-/// Anchoring Systems take beacon cids and "anchor" them.
+/// Anchoring Systems take channel cids and "anchor" them.
 ///
 /// The methods used varies but blockchain or cryptography are usually used.
 #[async_trait(?Send)]
