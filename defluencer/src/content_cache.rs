@@ -1,204 +1,188 @@
 use std::collections::HashMap;
 
-use linked_data::identity::Identity;
-
 use cid::Cid;
 
 /// Identity, Media & Comments Cache
 #[derive(Debug, PartialEq, Clone)]
 pub struct ContentCache {
-    /// Comments CIDs
+    identities: Vec<Cid>,
+    channels: Vec<Cid>,
+    media: Vec<Cid>,
     comments: Vec<Cid>,
 
-    /// Comment index mapped to channel index.
-    comment_to_channel: HashMap<usize, usize>,
-
-    /// Channel CIDs.
-    channels: Vec<Cid>,
-
-    /// Channel index mapped to identity index.
+    /// One channel to One identity
     channel_to_identity: HashMap<usize, usize>,
 
-    /// Identity CIDs
-    identities: Vec<Cid>,
+    /// One content to One identity
+    media_to_identity: HashMap<usize, usize>,
 
-    /// Comment index mapped to media index.
+    /// One comment to One content
     comment_to_media: HashMap<usize, usize>,
 
-    /// Media CIDs.
-    media_content: Vec<Cid>,
+    /// One comment to One identity
+    comment_to_identity: HashMap<usize, usize>,
 
-    /// Media index mapped to channel index.
-    media_to_channel: HashMap<usize, usize>,
+    /// Channel indices sync with content_indices
+    channel_indices: Vec<usize>,
+    /// Content indices sync with channel_indices
+    media_indices: Vec<usize>,
 }
 
 impl ContentCache {
     pub fn create() -> Self {
         Self {
-            comments: Vec::with_capacity(100),
-            comment_to_channel: HashMap::with_capacity(100),
-            channels: Vec::with_capacity(100),
-            channel_to_identity: HashMap::with_capacity(100),
-            identities: Vec::with_capacity(100),
-            comment_to_media: HashMap::with_capacity(100),
-            media_content: Vec::with_capacity(100),
-            media_to_channel: HashMap::with_capacity(100),
+            identities: Default::default(),
+            channels: Default::default(),
+            media: Default::default(),
+            comments: Default::default(),
+
+            channel_to_identity: Default::default(),
+            media_to_identity: Default::default(),
+            comment_to_media: Default::default(),
+            comment_to_identity: Default::default(),
+
+            channel_indices: Default::default(),
+            media_indices: Default::default(),
         }
     }
 
-    /* /// Idempotent way to add a user's identity.
-    pub fn insert_identity(&mut self, channel: Cid, identity: Identity) {
-        let channel_idx = match self.channels.iter().position(|item| *item == channel) {
-            Some(idx) => idx,
-            None => {
-                let idx = self.channels.len();
-                self.channels.push(channel);
+    /// Idempotent way to add channel identity.
+    pub fn insert_channel_identity(&mut self, identity: Cid, channel: Cid) {
+        let channel_idx = self.channel_index(channel);
+        let id_idx = self.identity_index(identity);
 
-                idx
+        self.channel_to_identity.insert(channel_idx, id_idx);
+    }
+
+    /// Idempotent way to add channel content.
+    ///
+    /// Note that the identity is the media creator's not the channel's
+    pub fn insert_channel_media(&mut self, channel: Cid, media: Cid, identity: Cid) {
+        let id_idx = self.identity_index(identity);
+        let media_idx = self.media_index(media);
+        let channel_idx = self.channel_index(channel);
+
+        self.media_to_identity.insert(media_idx, id_idx);
+
+        for (i, idx) in self.channel_indices.iter().enumerate() {
+            if *idx != channel_idx {
+                // skip if wrong channel
+                continue;
             }
-        };
 
-        match self.channel_to_identity.get(&channel_idx) {
-            Some(name_idx) => {
-                self.names[*name_idx] = identity.display_name;
-                self.avatars[*name_idx] = identity.avatar.link;
-            }
-            None => {
-                let name_idx = self.names.len();
-
-                self.names.push(identity.display_name);
-                self.avatars.push(identity.avatar.link);
-
-                self.channel_to_identity.insert(channel_idx, name_idx);
-            }
-        }
-    } */
-
-    /* /// Idempotent way to add user media content.
-    pub fn insert_media_content(&mut self, channel: Cid, content: Content) {
-        let channel_idx = match self.channels.iter().position(|item| *item == channel) {
-            Some(idx) => idx,
-            None => {
-                let idx = self.channels.len();
-                self.channels.push(channel);
-
-                idx
-            }
-        };
-
-        for ipld in content.content.into_iter() {
-            if !self.media_content.contains(&ipld.link) {
-                let idx = self.media_content.len();
-
-                self.media_content.push(ipld.link);
-
-                self.media_to_channel.insert(idx, channel_idx);
+            if media_idx == self.media_indices[i] {
+                // return if content already added
+                return;
             }
         }
-    } */
 
-    /* pub fn iter_media_content(&self) -> impl Iterator<Item = &Cid> {
-        self.media_content.iter()
-    } */
+        self.channel_indices.push(channel_idx);
+        self.media_indices.push(media_idx);
+    }
 
-    /* pub fn media_content_author(&self, media: &Cid) -> Option<&str> {
-        let media_idx = self.media_content.iter().position(|item| *item == *media)?;
+    /// Idempotent way to add comments.
+    ///
+    /// Note that the identity is the comment creator's not the media's
+    pub fn insert_media_comments(&mut self, media: Cid, comment: Cid, identity: Cid) {
+        let comment_idx = self.comment_index(comment);
+        let media_idx = self.media_index(media);
+        let id_idx = self.identity_index(identity);
 
-        let channel_idx = self.media_to_channel.get(&media_idx)?;
+        self.comment_to_media.insert(comment_idx, media_idx);
+        self.comment_to_identity.insert(comment_idx, id_idx);
+    }
 
-        let name_idx = self.channel_to_identity.get(channel_idx)?;
+    pub fn iter_media(&self) -> impl Iterator<Item = Cid> + '_ {
+        self.media.iter().map(|media| *media)
+    }
 
-        let name = self.names.get(*name_idx)?;
-
-        Some(name)
-    } */
-
-    /* /// Idempotent way to add user comments.
-    pub fn insert_comments(&mut self, channel: Cid, comments: Comments) {
-        let channel_idx = match self.channels.iter().position(|item| *item == channel) {
-            Some(idx) => idx,
-            None => {
-                let idx = self.channels.len();
-                self.channels.push(channel);
-
-                idx
-            }
-        };
-
-        for (media_cid, comments) in comments.comments.into_iter() {
-            let media_idx = match self
-                .media_content
-                .iter()
-                .position(|item| *item == media_cid)
-            {
-                Some(idx) => idx,
-                None => {
-                    let idx = self.media_content.len();
-
-                    self.media_content.push(media_cid);
-
-                    idx
-                }
-            };
-
-            for comment in comments.into_iter() {
-                if !self.comments.contains(&comment.link) {
-                    let comment_idx = self.comments.len();
-
-                    self.comments.push(comment.link);
-
-                    self.comment_to_channel.insert(comment_idx, channel_idx);
-
-                    self.comment_to_media.insert(comment_idx, media_idx);
-                }
-            }
-        }
-    } */
-
-    /* pub fn iter_comments(&self, media: &Cid) -> Option<impl Iterator<Item = &Cid>> {
-        let media_idx = self.media_content.iter().position(|item| *item == *media)?;
-
-        let iterator = self
-            .comment_to_media
+    pub fn iter_media_comments(&self, media: Cid) -> impl Iterator<Item = Cid> + '_ {
+        self.comment_to_media
             .iter()
-            .filter_map(move |(comment_idx, idx)| {
-                if *idx == media_idx {
-                    self.comments.get(*comment_idx)
+            .filter_map(move |(comment_idx, media_idx)| {
+                if media == self.media[*media_idx] {
+                    Some(self.comments[*comment_idx])
                 } else {
                     None
                 }
-            });
+            })
+    }
 
-        Some(iterator)
-    } */
+    pub fn media_author(&self, media: &Cid) -> Option<Cid> {
+        let media_idx = self.media.iter().position(|item| item == media)?;
 
-    /* pub fn comment_author(&self, comment: &Cid) -> Option<&str> {
-        let comment_idx = self.comments.iter().position(|item| *item == *comment)?;
+        let id_idx = *self.media_to_identity.get(&media_idx)?;
 
-        let channel_idx = self.comment_to_channel.get(&comment_idx)?;
+        let id = *self.identities.get(id_idx)?;
 
-        let name_idx = self.channel_to_identity.get(channel_idx)?;
+        Some(id)
+    }
 
-        let name = self.names.get(*name_idx)?;
+    pub fn comment_author(&self, comment: &Cid) -> Option<Cid> {
+        let comment_idx = self.comments.iter().position(|item| item == comment)?;
 
-        Some(name)
-    } */
+        let id_idx = *self.comment_to_identity.get(&comment_idx)?;
 
-    /* pub fn comments_count(&self, media: &Cid) -> usize {
-        let media_idx = match self.media_content.iter().position(|item| *item == *media) {
+        let id = *self.identities.get(id_idx)?;
+
+        Some(id)
+    }
+
+    pub fn comments_count(&self, media: &Cid) -> usize {
+        self.comment_to_media.values().fold(0, |count, media_idx| {
+            if *media == self.media[*media_idx] {
+                count + 1
+            } else {
+                count
+            }
+        })
+    }
+
+    fn identity_index(&mut self, identity: Cid) -> usize {
+        match self.identities.iter().position(|item| *item == identity) {
             Some(idx) => idx,
-            None => return 0,
-        };
+            None => {
+                let idx = self.identities.len();
+                self.identities.push(identity);
 
-        self.comment_to_media.values().fold(
-            0,
-            |count, idx| {
-                if *idx == media_idx {
-                    count + 1
-                } else {
-                    count
-                }
-            },
-        )
-    } */
+                idx
+            }
+        }
+    }
+
+    fn channel_index(&mut self, channel: Cid) -> usize {
+        match self.channels.iter().position(|item| *item == channel) {
+            Some(idx) => idx,
+            None => {
+                let idx = self.channels.len();
+                self.channels.push(channel);
+
+                idx
+            }
+        }
+    }
+
+    fn media_index(&mut self, content: Cid) -> usize {
+        match self.media.iter().position(|item| *item == content) {
+            Some(idx) => idx,
+            None => {
+                let idx = self.media.len();
+                self.media.push(content);
+
+                idx
+            }
+        }
+    }
+
+    fn comment_index(&mut self, comment: Cid) -> usize {
+        match self.comments.iter().position(|item| *item == comment) {
+            Some(idx) => idx,
+            None => {
+                let idx = self.comments.len();
+                self.comments.push(comment);
+
+                idx
+            }
+        }
+    }
 }

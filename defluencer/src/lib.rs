@@ -234,7 +234,12 @@ impl Defluencer {
             .await
     }
 
-    /* async fn web_crawl_step(&self, ipns_addresses: HashSet<IPNSAddress>) -> HashSet<IPNSAddress> {
+    //TODO fill a content cache by crawling the web
+
+    /* pub async fn web_crawl_step(
+        &self,
+        ipns_addresses: HashSet<IPNSAddress>,
+    ) -> HashSet<IPNSAddress> {
         let stream: FuturesUnordered<_> = ipns_addresses
             .iter()
             .map(|ipns| self.ipfs.name_resolve(*ipns))
@@ -318,11 +323,11 @@ impl Defluencer {
                 }
             },
         )
-        .flat_map_unordered(0, |year| self.stream_months(year).boxed_local())
-        .flat_map_unordered(0, |month| self.stream_days(month).boxed_local())
-        .flat_map_unordered(0, |day| self.stream_hours(day).boxed_local())
-        .flat_map_unordered(0, |hours| self.stream_minutes(hours).boxed_local())
-        .flat_map_unordered(0, |minutes| self.stream_seconds(minutes).boxed_local())
+        .flat_map(|year| self.stream_months(year))
+        .flat_map(|month| self.stream_days(month))
+        .flat_map(|day| self.stream_hours(day))
+        .flat_map(|hours| self.stream_minutes(hours))
+        .flat_map(|minutes| self.stream_seconds(minutes))
     }
 
     fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
