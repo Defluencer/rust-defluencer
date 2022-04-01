@@ -6,19 +6,26 @@ use crate::{
     utils::add_image,
 };
 
+use async_recursion::async_recursion;
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
 use cid::Cid;
-
-use either::Either;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
     channel::ChannelMetadata,
+    comments::Comment,
     follows::Follows,
     identity::Identity,
-    indexes::{date_time::*, log::ChainLink},
+    indexes::{
+        date_time::*,
+        hamt::{
+            BitField, BucketEntree, Element, HAMTNode, HAMTRoot, BIT_WIDTH, BUCKET_SIZE,
+            DIGEST_LENGTH_BITS,
+        },
+        log::ChainLink,
+    },
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
@@ -362,10 +369,13 @@ where
 
     /// Add a new comment on the specified media.
     pub async fn add_comment(&self, comment_cid: Cid) -> Result<Cid, Error> {
+        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
+        let media_cid = comment.origin;
+
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let new_index = self
-            .hamt_index_add(channel.comment_index.hamt, comment_cid)
+            .hamt_index_add(channel.comment_index.hamt, media_cid, comment_cid)
             .await?;
 
         channel.comment_index.hamt = Some(new_index.into());
@@ -375,6 +385,9 @@ where
 
     /// Remove a specific comment.
     pub async fn remove_comment(&self, comment_cid: Cid) -> Result<Cid, Error> {
+        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
+        let media_cid = comment.origin;
+
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let index = match channel.comment_index.hamt {
@@ -382,7 +395,9 @@ where
             _ => return Err(Error::NotFound),
         };
 
-        let new_index = self.hamt_index_remove(index, comment_cid).await?;
+        let new_index = self
+            .hamt_index_remove(index, media_cid, comment_cid)
+            .await?;
 
         channel.content_index.date_time = Some(new_index.into());
 
@@ -639,11 +654,120 @@ where
         Ok(cid)
     }
 
-    async fn hamt_index_add(&self, index: Option<IPLDLink>, add_cid: Cid) -> Result<Cid, Error> {
-        todo!()
+    async fn hamt_index_add(
+        &self,
+        index_cid: Option<IPLDLink>,
+        add_key: Cid,
+        add_value: Cid,
+    ) -> Result<Cid, Error> {
+        let mut root = if let Some(index_cid) = index_cid {
+            self.ipfs
+                .dag_get::<&str, HAMTRoot>(index_cid.link, None)
+                .await?
+        } else {
+            Default::default()
+        };
+
+        self.insert(add_key, add_value, 0, &mut root.hamt).await?;
+
+        let cid = self.ipfs.dag_put(&root, Codec::default()).await?;
+
+        Ok(cid)
     }
 
-    async fn hamt_index_remove(&self, index: IPLDLink, remove_cid: Cid) -> Result<Cid, Error> {
+    #[async_recursion(?Send)]
+    async fn insert(
+        &self,
+        add_key: Cid,
+        add_value: Cid,
+        depth: usize,
+        node: &mut HAMTNode,
+    ) -> Result<Cid, Error> {
+        let index = add_key.hash().digest()[depth] as usize;
+        let mut bitfield = BitField::from(node.map);
+        let data_index = bitfield[0..index].count_ones();
+
+        if bitfield[index] {
+            // CASE: index bit is set
+
+            let element = &mut node.data[data_index];
+
+            if let Element::Link(ipld) = element {
+                if (depth + 1) * BIT_WIDTH > DIGEST_LENGTH_BITS {
+                    // MAX Collisions Error
+                    return Err(Error::NotFound); // TODO add new error
+                }
+
+                let mut new_node = self.ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+
+                let cid = self
+                    .insert(add_key, add_value, depth + 1, &mut new_node)
+                    .await?;
+
+                node.data[data_index] = Element::Link(cid.into());
+
+                let cid = self.ipfs.dag_put(&node, Codec::default()).await?;
+
+                return Ok(cid);
+            }
+
+            if let Element::Bucket(vec) = element {
+                if vec.len() == BUCKET_SIZE {
+                    let mut new_node = HAMTNode::default();
+
+                    for item in vec {
+                        self.insert(item.key.link, item.value.link, depth + 1, &mut new_node)
+                            .await?;
+                    }
+
+                    let cid = self
+                        .insert(add_key, add_value, depth + 1, &mut new_node)
+                        .await?;
+
+                    node.data[data_index] = Element::Link(cid.into());
+
+                    let cid = self.ipfs.dag_put(&node, Codec::default()).await?;
+
+                    return Ok(cid);
+                }
+
+                let entree = BucketEntree {
+                    key: add_key.into(),
+                    value: add_value.into(),
+                };
+
+                vec.push(entree);
+
+                let cid = self.ipfs.dag_put(&node, Codec::default()).await?;
+
+                return Ok(cid);
+            }
+        }
+
+        // CASE: index bit is not set
+
+        let bucket = Element::Bucket(vec![BucketEntree {
+            key: add_key.into(),
+            value: add_value.into(),
+        }]);
+
+        node.data.insert(data_index, bucket);
+
+        bitfield.set(index, true);
+
+        node.map = bitfield.into_inner();
+
+        let cid = self.ipfs.dag_put(&node, Codec::default()).await?;
+
+        Ok(cid)
+    }
+
+    async fn hamt_index_remove(
+        &self,
+        index: IPLDLink,
+        remove_key: Cid,
+        remove_value: Cid,
+    ) -> Result<Cid, Error> {
         todo!()
     }
 }

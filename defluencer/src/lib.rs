@@ -234,8 +234,6 @@ impl Defluencer {
             .await
     }
 
-    //TODO fill a content cache by crawling the web
-
     /* pub async fn web_crawl_step(
         &self,
         ipns_addresses: HashSet<IPNSAddress>,
@@ -402,27 +400,6 @@ impl Defluencer {
         .flat_map(|set| stream::iter(set))
         .map(|ipld| ipld.link)
     }
-
-    /* fn stream_content(&self, seconds: Seconds) -> impl Stream<Item = HashSet<IPLDLink>> + '_ {
-        stream::unfold(
-            seconds.second.into_values().rev(),
-            move |mut iter| async move {
-                match iter.next() {
-                    Some(set) => Some((set, iter)),
-                    None => None,
-                }
-            },
-        )
-    } */
-
-    /* fn stream_sets(&self, sets: HashSet<IPLDLink>) -> impl Stream<Item = Cid> + '_ {
-        stream::unfold(sets.into_iter(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => Some((ipld.link, iter)),
-                None => None,
-            }
-        })
-    } */
 
     /* // Lazily stream all the comments for some content on the channel
     pub async fn stream_comments(
