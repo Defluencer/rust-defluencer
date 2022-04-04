@@ -1,15 +1,15 @@
+use std::collections::VecDeque;
+
+use bitvec::BitArr;
+
+use cid::Cid;
 use serde::{Deserialize, Serialize};
 
 use crate::IPLDLink;
 
-use bitvec::prelude::*;
-
-//TODO Implement a HAMT.
-
-//Need HAMT for channel comments and for aggregating.
-
 pub const BIT_WIDTH: usize = 8;
 pub const DIGEST_LENGTH_BITS: usize = 2usize.pow(BIT_WIDTH as u32);
+pub const DIGEST_LENGTH_BYTES: usize = DIGEST_LENGTH_BITS / 8;
 pub const BUCKET_SIZE: usize = 3;
 
 pub type BitField = BitArr!(for DIGEST_LENGTH_BITS, in u8);
@@ -31,7 +31,7 @@ impl Default for HAMTRoot {
             hash_algorithm: 12,
             bucket_size: 3,
             hamt: HAMTNode {
-                map: [0u8; 32],
+                map: [0u8; DIGEST_LENGTH_BYTES],
                 data: vec![],
             },
         }
@@ -40,7 +40,7 @@ impl Default for HAMTRoot {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct HAMTNode {
-    pub map: [u8; 32],
+    pub map: [u8; DIGEST_LENGTH_BYTES],
     pub data: Vec<Element>,
 }
 
@@ -58,13 +58,42 @@ impl Default for HAMTNode {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum Element {
     Link(IPLDLink),
-    Bucket(Vec<BucketEntree>),
+    Bucket(VecDeque<BucketEntry>),
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct BucketEntree {
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct BucketEntry {
     pub key: IPLDLink,
     pub value: IPLDLink,
+}
+
+impl PartialEq for BucketEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for BucketEntry {}
+
+impl PartialOrd for BucketEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.key.partial_cmp(&other.key)
+    }
+}
+
+impl Ord for BucketEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
+impl From<Cid> for BucketEntry {
+    fn from(cid: Cid) -> Self {
+        Self {
+            key: cid.into(),
+            value: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]

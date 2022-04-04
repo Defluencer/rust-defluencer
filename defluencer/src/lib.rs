@@ -7,10 +7,7 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-};
+use std::{borrow::Cow, collections::HashMap};
 
 use anchors::IPNSAnchor;
 
@@ -27,7 +24,7 @@ use errors::Error;
 
 use futures::{
     stream::{self, FuturesUnordered},
-    Stream, StreamExt, TryStreamExt,
+    Stream, StreamExt,
 };
 
 use heck::{ToSnakeCase, ToTitleCase};
@@ -37,7 +34,6 @@ use linked_data::{
     follows::Follows,
     identity::Identity,
     indexes::{date_time::*, log::ChainLink},
-    IPLDLink, IPNSAddress,
 };
 
 use ipfs_api::{
