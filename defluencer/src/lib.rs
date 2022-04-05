@@ -2,6 +2,7 @@ pub mod anchors;
 pub mod channel;
 pub mod content_cache;
 pub mod errors;
+pub mod indexing;
 pub mod moderation_cache;
 pub mod signatures;
 pub mod user;
@@ -24,11 +25,12 @@ use errors::Error;
 
 use futures::{
     stream::{self, FuturesUnordered},
-    Stream, StreamExt,
+    Stream, StreamExt, TryStreamExt,
 };
 
 use heck::{ToSnakeCase, ToTitleCase};
 
+use indexing::hamt;
 use linked_data::{
     channel::ChannelMetadata,
     follows::Follows,
@@ -279,6 +281,7 @@ impl Defluencer {
         unknown
     } */
 
+    /// Lazilly stream content from the linear log.
     pub fn stream_content_log(
         &self,
         channel: &ChannelMetadata,
@@ -297,6 +300,7 @@ impl Defluencer {
         })
     }
 
+    /// Lazilly stream content from the crhonological index.
     pub fn stream_content_chronologically(
         &self,
         channel: &ChannelMetadata,
@@ -397,85 +401,25 @@ impl Defluencer {
         .map(|ipld| ipld.link)
     }
 
-    /* // Lazily stream all the comments for some content on the channel
+    /* /// Lazily stream all the comments for some content on the channel
     pub async fn stream_comments(
         &self,
-        channel: ChannelMetadata,
+        channel: &ChannelMetadata,
         content_cid: Cid,
-    ) -> impl Stream<Item = Comment> + '_ {
-        stream::unfold(channel, move |mut beacon| async move {
-            if let Some(idx) = beacon.comment_index {
-                beacon.comment_index = None;
+    ) -> impl Stream<Item = Cid> + '_ {
+        stream::unfold(channel.comment_index.hamt, move |mut index| async move {
+            match index {
+                Some(root) => match hamt::get(&self.ipfs, root, content_cid).await {
+                    Ok(comments) => {
+                        index = None;
 
-                if let Ok(media) = self.ipfs.dag_get::<&str, Media>(content_cid, None).await {
-                    let date_time = Utc.timestamp(media.timestamp(), 0);
-
-                    let path = get_path(date_time);
-
-                    if let Ok(mut comments) = self
-                        .ipfs
-                        .dag_get::<String, Comments>(idx.date_time.link, Some(path))
-                        .await
-                    {
-                        if let Some(comments) = comments.comments.remove(&content_cid) {
-                            Some((comments, beacon))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                        Some((comments, index))
                     }
-                } else {
-                    None
-                }
-            } else {
-                None
+                    Err(_) => None,
+                },
+                None => None,
             }
         })
-        .flat_map(|comments| self.get_comments(comments))
-    } */
-
-    /* fn get_comments(&self, comments: Vec<IPLDLink>) -> impl Stream<Item = Comment> + '_ {
-        stream::unfold(comments.into_iter(), move |mut iter| async move {
-            if let Some(ipld) = iter.next() {
-                if let Ok(comment) = self.ipfs.dag_get::<&str, Comment>(ipld.link, None).await {
-                    Some((comment, iter))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-    } */
-
-    /* fn stream_media(&self, content: Content) -> impl Stream<Item = Media> + '_ {
-        stream::unfold(content.content.into_iter(), move |mut iter| async move {
-            if let Some(ipld) = iter.next() {
-                if let Ok(raw_jws) = self.ipfs.dag_get::<&str, RawJWS>(ipld.link, None).await {
-                    let jws: Result<JsonWebSignature, Error> = raw_jws.try_into();
-
-                    if let Ok(jws) = jws {
-                        if jws.verify().is_ok() {
-                            if let Ok(media) =
-                                self.ipfs.dag_get::<&str, Media>(jws.link, None).await
-                            {
-                                Some((media, iter))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
+        .flat_map(|comments| hamt::values(&self.ipfs, comments))
     } */
 }
