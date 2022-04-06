@@ -300,126 +300,164 @@ impl Defluencer {
         })
     }
 
-    /// Lazilly stream content from the crhonological index.
+    /// Lazilly stream content from the chronological index.
     pub fn stream_content_chronologically(
         &self,
         channel: &ChannelMetadata,
-    ) -> impl Stream<Item = Cid> + '_ {
-        stream::unfold(
+    ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+        stream::try_unfold(
             channel.content_index.date_time,
             move |mut datetime| async move {
-                match datetime {
-                    Some(ipld) => {
-                        datetime = None;
+                let ipld = match datetime {
+                    Some(ipld) => ipld,
+                    None => return Result::<_, Error>::Ok(None),
+                };
 
-                        match self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await {
-                            Ok(yearly) => Some((yearly, datetime)),
-                            Err(_) => None,
-                        }
-                    }
-                    None => None,
-                }
+                datetime = None;
+
+                let yearly = self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await?;
+
+                return Ok(Some((yearly, datetime)));
             },
         )
-        .flat_map(|year| self.stream_months(year))
-        .flat_map(|month| self.stream_days(month))
-        .flat_map(|day| self.stream_hours(day))
-        .flat_map(|hours| self.stream_minutes(hours))
-        .flat_map(|minutes| self.stream_seconds(minutes))
+        .map_ok(|year| self.stream_months(year))
+        .try_flatten()
+        .map_ok(|month| self.stream_days(month))
+        .try_flatten()
+        .map_ok(|day| self.stream_hours(day))
+        .try_flatten()
+        .map_ok(|hours| self.stream_minutes(hours))
+        .try_flatten()
+        .map_ok(|minutes| self.stream_seconds(minutes))
+        .try_flatten()
     }
 
-    fn stream_months(&self, years: Yearly) -> impl Stream<Item = Monthly> + '_ {
-        stream::unfold(years.year.into_values().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await {
-                    Ok(months) => Some((months, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
+    fn stream_months(&self, years: Yearly) -> impl Stream<Item = Result<Monthly, Error>> + '_ {
+        stream::try_unfold(years.year.into_values().rev(), move |mut iter| async move {
+            let ipld = match iter.next() {
+                Some(ipld) => ipld,
+                None => return Ok(None),
+            };
+
+            let months = self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?;
+
+            return Ok(Some((months, iter)));
         })
     }
 
-    fn stream_days(&self, months: Monthly) -> impl Stream<Item = Daily> + '_ {
-        stream::unfold(
+    fn stream_days(&self, months: Monthly) -> impl Stream<Item = Result<Daily, Error>> + '_ {
+        stream::try_unfold(
             months.month.into_values().rev(),
             move |mut iter| async move {
-                match iter.next() {
-                    Some(ipld) => match self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await {
-                        Ok(days) => Some((days, iter)),
-                        Err(_) => None,
-                    },
-                    None => None,
-                }
+                let ipld = match iter.next() {
+                    Some(ipld) => ipld,
+                    None => return Ok(None),
+                };
+
+                let days = self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await?;
+
+                return Ok(Some((days, iter)));
             },
         )
     }
 
-    fn stream_hours(&self, days: Daily) -> impl Stream<Item = Hourly> + '_ {
-        stream::unfold(days.day.into_values().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await {
-                    Ok(hours) => Some((hours, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
+    fn stream_hours(&self, days: Daily) -> impl Stream<Item = Result<Hourly, Error>> + '_ {
+        stream::try_unfold(days.day.into_values().rev(), move |mut iter| async move {
+            let ipld = match iter.next() {
+                Some(ipld) => ipld,
+                None => return Ok(None),
+            };
+
+            let hours = self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?;
+
+            return Ok(Some((hours, iter)));
         })
     }
 
-    fn stream_minutes(&self, hours: Hourly) -> impl Stream<Item = Minutes> + '_ {
-        stream::unfold(hours.hour.into_values().rev(), move |mut iter| async move {
-            match iter.next() {
-                Some(ipld) => match self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await {
-                    Ok(minutes) => Some((minutes, iter)),
-                    Err(_) => None,
-                },
-                None => None,
-            }
+    fn stream_minutes(&self, hours: Hourly) -> impl Stream<Item = Result<Minutes, Error>> + '_ {
+        stream::try_unfold(hours.hour.into_values().rev(), move |mut iter| async move {
+            let ipld = match iter.next() {
+                Some(ipld) => ipld,
+                None => return Ok(None),
+            };
+
+            let minutes = self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?;
+
+            return Ok(Some((minutes, iter)));
         })
     }
 
-    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Cid> + '_ {
-        stream::unfold(
+    fn stream_seconds(&self, minutes: Minutes) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+        stream::try_unfold(
             minutes.minute.into_values().rev(),
             move |mut iter| async move {
-                match iter.next() {
-                    Some(ipld) => match self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await {
-                        Ok(seconds) => {
-                            let stream = stream::iter(seconds.second.into_values().rev());
+                let ipld = match iter.next() {
+                    Some(ipld) => ipld,
+                    None => return Result::<_, Error>::Ok(None),
+                };
 
-                            Some((stream, iter))
-                        }
-                        Err(_) => None,
-                    },
-                    None => None,
-                }
+                let seconds = self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await?;
+
+                let stream = stream::iter(
+                    seconds
+                        .second
+                        .into_values()
+                        .rev()
+                        .map(|item| Result::<_, Error>::Ok(item)),
+                );
+
+                return Ok(Some((stream, iter)));
             },
         )
-        .flatten()
-        .flat_map(|set| stream::iter(set))
-        .map(|ipld| ipld.link)
+        .try_flatten()
+        .map_ok(|set| stream::iter(set.into_iter().map(|item| Ok(item))))
+        .try_flatten()
+        .map_ok(|ipld| ipld.link)
     }
 
-    /* /// Lazily stream all the comments for some content on the channel
+    /// Lazily stream all the comments for some content on the channel
     pub async fn stream_comments(
+        &self,
+        channel: &ChannelMetadata,
+        content_cid: Cid,
+    ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+        stream::try_unfold(channel.comment_index.hamt, move |mut index| async move {
+            let ipld = match index {
+                Some(ipld) => ipld,
+                None => return Result::<_, Error>::Ok(None),
+            };
+
+            index = None;
+
+            let comments = hamt::get(&self.ipfs, ipld, content_cid).await?;
+
+            let stream = hamt::values(&self.ipfs, comments.into());
+
+            Ok(Some((stream, index)))
+        })
+        .try_flatten()
+    }
+
+    /* pub async fn stream_comments(
         &self,
         channel: &ChannelMetadata,
         content_cid: Cid,
     ) -> impl Stream<Item = Cid> + '_ {
         stream::unfold(channel.comment_index.hamt, move |mut index| async move {
             match index {
-                Some(root) => match hamt::get(&self.ipfs, root, content_cid).await {
+                Some(ipld) => match hamt::get(&self.ipfs, ipld, content_cid).await {
                     Ok(comments) => {
                         index = None;
 
-                        Some((comments, index))
+                        let stream = hamt::values(&self.ipfs, comments.into());
+
+                        Some((stream, index))
                     }
                     Err(_) => None,
                 },
                 None => None,
             }
         })
-        .flat_map(|comments| hamt::values(&self.ipfs, comments))
+        .flatten()
     } */
 }

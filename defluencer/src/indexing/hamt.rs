@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crate::errors::Error;
 
 use arrayvec::ArrayVec;
@@ -8,9 +6,8 @@ use async_recursion::async_recursion;
 
 use cid::Cid;
 
-use either::Either;
 use futures::{
-    stream::{self, FuturesUnordered},
+    stream::{self},
     Stream, StreamExt, TryStreamExt,
 };
 
@@ -289,76 +286,118 @@ async fn delete(
     Err(Error::NotFound)
 }
 
-/* pub async fn values(ipfs: &IpfsService, root: Cid) -> Result<Vec<Vec<BucketEntry>>, Error> {
-
+/* pub fn values(ipfs: &IpfsService, root: IPLDLink) -> impl Stream<Item = Cid> + '_ {
     stream::unfold(Some(root), move |mut root| async move {
         match root {
-            Some(cid) => match ipfs.dag_get::<&str, HAMTRoot>(cid, None).await {
+            Some(ipld) => match ipfs.dag_get::<&str, HAMTRoot>(ipld.link, None).await {
                 Ok(root_node) => {
                     root = None;
 
-                    Some((root_node.hamt, root))
+                    let stream = stream_data(ipfs, root_node.hamt);
+
+                    Some((stream, root))
                 }
                 Err(_) => None,
             },
             None => None,
         }
     })
-    .flat_map(|node| stream_node_data(ipfs, node))
-    .flat_map(|element| stream_elements(ipfs, element))
+    .flatten()
 } */
 
-/* fn stream_node_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Element> + '_ {
-    stream::unfold((0, node.data), move |(mut idx, mut data)| async move {
-        let element = data[idx];
-
-        match element {
-            Element::Link(ipld) => match ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await {
-                Ok(node) => {
-                    let end = idx + node.data.len();
-                    data.splice(idx..end, node.data);
-
-                    Some((element, (idx, data)))
-                }
-                Err(_) => None,
-            },
-            Element::Bucket(vec) => {
-                data.push(element);
-                idx += 1;
-
-                Some((element, (idx, data)))
-            }
-        }
-    })
-} */
-
-/* fn stream_elements(ipfs: &IpfsService, element: Element) -> impl Stream<Item = Cid> + '_ {
-    stream::unfold(Some(element), move |mut element| async move {
-        match element {
-            Some(item) => match item {
+/* fn stream_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Cid> + '_ {
+    stream::unfold(node.data.into_iter(), move |mut iter| async move {
+        match iter.next() {
+            Some(element) => match element {
                 Element::Link(ipld) => {
                     match ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await {
                         Ok(node) => {
-                            element = None;
+                            let stream = stream_data(ipfs, node).boxed_local();
 
-                            let stream = stream_node_data(ipfs, node)
-                                .flat_map(|element| stream_elements(ipfs, element));
-
-                            Some((stream, element))
+                            Some((stream, iter))
                         }
-                        Err(_) => todo!(),
+                        Err(_) => None,
                     }
                 }
                 Element::Bucket(vec) => {
-                    element = None;
+                    let stream =
+                        stream::iter(vec.into_iter().map(|entry| entry.value.link)).boxed_local();
 
-                    let stream = stream::iter(vec.into_iter().map(|entry| entry.value.link));
-
-                    Some((stream, element))
+                    Some((stream, iter))
                 }
             },
             None => None,
         }
     })
     .flatten()
+} */
+
+pub fn values(ipfs: &IpfsService, root: IPLDLink) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+    stream::try_unfold(Some(root), move |mut root| async move {
+        let ipld = match root {
+            Some(ipld) => ipld,
+            None => return Result::<_, Error>::Ok(None),
+        };
+
+        root = None;
+
+        let root_node = ipfs.dag_get::<&str, HAMTRoot>(ipld.link, None).await?;
+
+        let stream = stream_data(ipfs, root_node.hamt);
+
+        Ok(Some((stream, root)))
+    })
+    .try_flatten()
+}
+
+fn stream_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+    stream::try_unfold(node.data.into_iter(), move |mut iter| async move {
+        let element = match iter.next() {
+            Some(element) => element,
+            None => return Result::<_, Error>::Ok(None),
+        };
+
+        match element {
+            Element::Link(ipld) => {
+                let node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+
+                let stream = stream_data(ipfs, node).boxed_local();
+
+                Ok(Some((stream, iter)))
+            }
+            Element::Bucket(vec) => {
+                let stream =
+                    stream::iter(vec.into_iter().map(|entry| Ok(entry.value.link))).boxed_local();
+
+                Ok(Some((stream, iter)))
+            }
+        }
+    })
+    .try_flatten()
+}
+
+/* pub async fn values(ipfs: &IpfsService, root: Cid) -> Result<Vec<Cid>, Error> {
+    let root = ipfs.dag_get::<&str, HAMTRoot>(root, None).await?;
+
+    get_values(ipfs, root.hamt).await
+}
+
+#[async_recursion(?Send)]
+async fn get_values(ipfs: &IpfsService, node: HAMTNode) -> Result<Vec<Cid>, Error> {
+    let mut values = Vec::with_capacity(node.data.len());
+
+    for element in node.data {
+        match element {
+            Element::Link(ipld) => {
+                let node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+
+                let result = get_values(ipfs, node).await?;
+
+                values.extend(result);
+            }
+            Element::Bucket(vec) => values.extend(vec.into_iter().map(|entry| entry.value.link)),
+        }
+    }
+
+    Ok(values)
 } */
