@@ -308,12 +308,10 @@ impl Defluencer {
         stream::try_unfold(
             channel.content_index.date_time,
             move |mut datetime| async move {
-                let ipld = match datetime {
+                let ipld = match datetime.take() {
                     Some(ipld) => ipld,
                     None => return Result::<_, Error>::Ok(None),
                 };
-
-                datetime = None;
 
                 let yearly = self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await?;
 
@@ -422,14 +420,15 @@ impl Defluencer {
         content_cid: Cid,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
         stream::try_unfold(channel.comment_index.hamt, move |mut index| async move {
-            let ipld = match index {
+            let ipld = match index.take() {
                 Some(ipld) => ipld,
                 None => return Result::<_, Error>::Ok(None),
             };
 
-            index = None;
-
-            let comments = hamt::get(&self.ipfs, ipld, content_cid).await?;
+            let comments = match hamt::get(&self.ipfs, ipld, content_cid).await? {
+                Some(comments) => comments,
+                None => return Result::<_, Error>::Ok(None),
+            };
 
             let stream = hamt::values(&self.ipfs, comments.into());
 

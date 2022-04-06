@@ -1,7 +1,12 @@
 use thiserror::Error;
 
+use crate::indexing::hamt;
+
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("HAMT: {0}")]
+    HAMT(#[from] hamt::HAMTError),
+
     #[error("BIP-39: {0}")]
     BIP29(#[from] anyhow::Error),
 

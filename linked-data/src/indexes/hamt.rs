@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use bitvec::BitArr;
 
 use serde::{Deserialize, Serialize};
@@ -5,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::IPLDLink;
 
 // https://ipld.io/specs/advanced-data-layouts/hamt/spec/#implementation-defaults
-pub const HASH_ALGORITHM: usize = 12;
+pub const HASH_ALGORITHM: usize = 12; // SHA2-256 => 32 bytes digest
 pub const BIT_WIDTH: usize = 8;
 pub const BUCKET_SIZE: usize = 3;
 
@@ -56,9 +58,10 @@ impl Default for HAMTNode {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
 pub enum Element {
     Link(IPLDLink),
-    Bucket(Vec<BucketEntry>),
+    Bucket(BTreeSet<BucketEntry>),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

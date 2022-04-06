@@ -18,7 +18,7 @@ use linked_data::{
     comments::Comment,
     follows::Follows,
     identity::Identity,
-    indexes::{date_time::*, log::ChainLink},
+    indexes::{date_time::*, hamt::HAMTRoot, log::ChainLink},
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
@@ -343,18 +343,24 @@ where
 
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        if let Some(index) = channel.content_index.log {
-            let new_index = self.log_index_remove(index, content_cid).await?;
+        match channel.content_index.log {
+            Some(index) => {
+                let new_index = self.log_index_remove(index, content_cid).await?;
 
-            channel.content_index.log = Some(new_index.into());
+                channel.content_index.log = Some(new_index.into());
+            }
+            _ => return Err(Error::NotFound),
         }
 
-        if let Some(index) = channel.content_index.date_time {
-            let new_index = self
-                .datetime_index_remove(datetime, index, content_cid)
-                .await?;
+        match channel.content_index.date_time {
+            Some(index) => {
+                let new_index = self
+                    .datetime_index_remove(datetime, index, content_cid)
+                    .await?;
 
-            channel.content_index.date_time = Some(new_index.into());
+                channel.content_index.date_time = Some(new_index.into());
+            }
+            _ => return Err(Error::NotFound),
         }
 
         self.update_channel(channel_cid, &channel).await
@@ -368,12 +374,24 @@ where
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let index = match channel.comment_index.hamt {
-            Some(it) => it,
-            _ => return Err(Error::NotFound),
+            Some(index) => index,
+            None => self
+                .ipfs
+                .dag_put(&HAMTRoot::default(), Codec::default())
+                .await?
+                .into(),
         };
 
-        let comments = hamt::get(&self.ipfs, index, media_cid).await?;
-        let comments = hamt::insert(&self.ipfs, comments.into(), comment_cid, comment_cid).await?; // The key is only the hash and the value is a CID
+        let comments = match hamt::get(&self.ipfs, index, media_cid).await? {
+            Some(comments) => comments,
+            None => {
+                self.ipfs
+                    .dag_put(&HAMTRoot::default(), Codec::default())
+                    .await?
+            }
+        };
+
+        let comments = hamt::insert(&self.ipfs, comments.into(), comment_cid, comment_cid).await?;
 
         let new_index = hamt::insert(&self.ipfs, index, media_cid, comments).await?;
 
@@ -394,7 +412,11 @@ where
             _ => return Err(Error::NotFound),
         };
 
-        let comments = hamt::get(&self.ipfs, index, media_cid).await?;
+        let comments = match hamt::get(&self.ipfs, index, media_cid).await? {
+            Some(comments) => comments,
+            None => return Err(Error::NotFound),
+        };
+
         let comments = hamt::remove(&self.ipfs, comments.into(), comment_cid).await?;
 
         let index = hamt::insert(&self.ipfs, index, media_cid, comments).await?;

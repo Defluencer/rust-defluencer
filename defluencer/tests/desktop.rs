@@ -5,9 +5,13 @@ mod tests {
     use bip39::{Language, Mnemonic};
     use cid::Cid;
 
-    use defluencer::signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer};
+    use defluencer::{
+        indexing::hamt,
+        signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer},
+    };
 
     use ed25519::KeypairBytes;
+    use futures::StreamExt;
     use ipfs_api::IpfsService;
 
     use linked_data::signature::RawJWS;
@@ -67,5 +71,68 @@ mod tests {
         let mnemonic = Mnemonic::from_phrase(passphrase, Language::English).unwrap();
 
         assert_eq!(&bytes, mnemonic.entropy());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn empty_hamt_get_remove() {
+        let ipfs = IpfsService::default();
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let index =
+            Cid::try_from("bafyreiglvp2q4xij5uzoi7gphdugsbelztsehemnki6hfknqmaitsgblae").unwrap();
+
+        // Random key
+        let key =
+            Cid::try_from("bafyreiebxcyrgbybcebsk7dwlkidiyi7y6shpvsmneufdouto3pgumvefe").unwrap();
+
+        let result = hamt::get(&ipfs, index.into(), key).await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+
+        let result = hamt::remove(&ipfs, index.into(), key).await;
+
+        assert!(result.is_err());
+    }
+
+    //TODO use hand crafted hashes so that node fills up instead of spreading.
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_duplicate_insert() {
+        let ipfs = IpfsService::default();
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut index =
+            Cid::try_from("bafyreiglvp2q4xij5uzoi7gphdugsbelztsehemnki6hfknqmaitsgblae").unwrap();
+
+        // Random key
+        let key =
+            Cid::try_from("bafyreiebxcyrgbybcebsk7dwlkidiyi7y6shpvsmneufdouto3pgumvefe").unwrap();
+
+        // Random value
+        let value =
+            Cid::try_from("bafyreiejplp7y57dxnasxk7vjdujclpe5hzudiqlgvnit4vinqvtehh3ci").unwrap();
+
+        index = hamt::insert(&ipfs, index.into(), key, value).await.unwrap();
+
+        index = hamt::insert(&ipfs, index.into(), key, value).await.unwrap();
+
+        println!("Hamt Root {}", index);
+
+        let mut stream = hamt::values(&ipfs, index.into()).boxed_local();
+
+        let option = stream.next().await;
+
+        assert!(option.is_some());
+        let result = option.unwrap();
+
+        assert!(result.is_ok());
+        let cid = result.unwrap();
+
+        assert_eq!(cid, value);
+
+        let option = stream.next().await;
+
+        assert!(option.is_none());
     }
 }
