@@ -50,6 +50,9 @@ web-sys = { version = "0.3", features = ['console']}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", features = ['full']}
+rand = "0.8"
+rand_xoshiro = "0.6"
+multihash = "0.16"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"

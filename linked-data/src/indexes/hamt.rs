@@ -7,14 +7,15 @@ use serde::{Deserialize, Serialize};
 use crate::IPLDLink;
 
 // https://ipld.io/specs/advanced-data-layouts/hamt/spec/#implementation-defaults
-pub const HASH_ALGORITHM: usize = 12; // SHA2-256 => 32 bytes digest
+pub const HASH_ALGORITHM: usize = 0x12; // SHA2-256 => 32 bytes digest
+pub const DIGEST_LENGTH_BYTES: usize = 32;
+
 pub const BIT_WIDTH: usize = 8;
 pub const BUCKET_SIZE: usize = 3;
 
-pub const DIGEST_LENGTH_BITS: usize = 2usize.pow(BIT_WIDTH as u32);
-pub const DIGEST_LENGTH_BYTES: usize = DIGEST_LENGTH_BITS / 8;
+pub const MAP_LENGTH_BITS: usize = 2usize.pow(BIT_WIDTH as u32);
 
-pub type BitField = BitArr!(for DIGEST_LENGTH_BITS, in u8);
+pub type BitField = BitArr!(for MAP_LENGTH_BITS, in u8);
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct HAMTRoot {
@@ -33,7 +34,7 @@ impl Default for HAMTRoot {
             hash_algorithm: HASH_ALGORITHM,
             bucket_size: BUCKET_SIZE,
             hamt: HAMTNode {
-                map: [0u8; DIGEST_LENGTH_BYTES],
+                map: [0u8; MAP_LENGTH_BITS / 8],
                 data: vec![],
             },
         }
@@ -64,7 +65,7 @@ pub enum Element {
     Bucket(BTreeSet<BucketEntry>),
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub struct BucketEntry {
     pub key: [u8; DIGEST_LENGTH_BYTES],
     pub value: IPLDLink,

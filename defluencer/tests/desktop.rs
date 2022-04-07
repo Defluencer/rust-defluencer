@@ -16,7 +16,9 @@ mod tests {
 
     use linked_data::signature::RawJWS;
 
+    use multihash::Multihash;
     use pkcs8::{EncodePrivateKey, LineEnding};
+    use rand::Rng;
     use rand_core::{OsRng, RngCore};
 
     use ed25519_dalek::{Keypair, SecretKey};
@@ -78,32 +80,34 @@ mod tests {
         let ipfs = IpfsService::default();
 
         // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
-        let index =
-            Cid::try_from("bafyreiglvp2q4xij5uzoi7gphdugsbelztsehemnki6hfknqmaitsgblae").unwrap();
+        let root =
+            Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re").unwrap();
 
         // Random key
         let key =
             Cid::try_from("bafyreiebxcyrgbybcebsk7dwlkidiyi7y6shpvsmneufdouto3pgumvefe").unwrap();
 
-        let result = hamt::get(&ipfs, index.into(), key).await;
+        let result = hamt::get(&ipfs, root.into(), key).await;
+
+        println!("{:?}", result);
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
 
-        let result = hamt::remove(&ipfs, index.into(), key).await;
+        let result = hamt::remove(&ipfs, root.into(), key).await;
+
+        println!("{:?}", result);
 
         assert!(result.is_err());
     }
-
-    //TODO use hand crafted hashes so that node fills up instead of spreading.
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn hamt_duplicate_insert() {
         let ipfs = IpfsService::default();
 
         // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
-        let mut index =
-            Cid::try_from("bafyreiglvp2q4xij5uzoi7gphdugsbelztsehemnki6hfknqmaitsgblae").unwrap();
+        let mut root =
+            Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re").unwrap();
 
         // Random key
         let key =
@@ -113,13 +117,13 @@ mod tests {
         let value =
             Cid::try_from("bafyreiejplp7y57dxnasxk7vjdujclpe5hzudiqlgvnit4vinqvtehh3ci").unwrap();
 
-        index = hamt::insert(&ipfs, index.into(), key, value).await.unwrap();
+        root = hamt::insert(&ipfs, root.into(), key, value).await.unwrap();
 
-        index = hamt::insert(&ipfs, index.into(), key, value).await.unwrap();
+        root = hamt::insert(&ipfs, root.into(), key, value).await.unwrap();
 
-        println!("Hamt Root {}", index);
+        println!("Root {}", root);
 
-        let mut stream = hamt::values(&ipfs, index.into()).boxed_local();
+        let mut stream = hamt::values(&ipfs, root.into()).boxed_local();
 
         let option = stream.next().await;
 
@@ -134,5 +138,157 @@ mod tests {
         let option = stream.next().await;
 
         assert!(option.is_none());
+    }
+
+    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+
+    fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
+        let mut hash = [0u8; 32];
+        rng.fill_bytes(&mut hash);
+
+        let multihash = Multihash::wrap(0x12, &hash).unwrap();
+        let cid = Cid::new_v1(0x71, multihash);
+
+        cid
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_linear_insert() {
+        let ipfs = IpfsService::default();
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut root =
+            Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re").unwrap();
+
+        let count = 256;
+
+        for _ in 0..count {
+            let key = random_cid(&mut rng);
+            let value = key;
+
+            let result = hamt::insert(&ipfs, root.into(), key, value).await;
+
+            match result {
+                Ok(cid) => (root = cid),
+                Err(e) => panic!("Index: {} Key: {} Error: {}", root, key, e),
+            }
+        }
+
+        let sum = hamt::values(&ipfs, root.into())
+            .fold(0, |acc, _| async move { acc + 1 })
+            .await;
+
+        assert_eq!(count, sum);
+
+        println!("Root {}", root);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_remove_collapse() {
+        let ipfs = IpfsService::default();
+
+        // Pre-generated with hamt_random_insert;
+        let mut root =
+            Cid::try_from("bafyreicdmpbc23de3n5o6lu7qr2nnzn2dv4a7ulz6k2ouwzsrsctnmbcta").unwrap();
+
+        let key =
+            Cid::try_from("bafyreiarw4llrjyv6ctuhyupx65tzbgr37kkiyjwyxj6blnmekpfx32ysu").unwrap();
+
+        let result = hamt::remove(&ipfs, root.into(), key).await;
+
+        match result {
+            Ok(cid) => {
+                root = cid;
+            }
+            Err(e) => panic!("Root: {} Key: {} Error: {}", root, key, e),
+        }
+
+        let key =
+            Cid::try_from("bafyreiark2h2b2yumkvhzqttaw66eyu4benkpbyk34qwokj6s6ftafxl6m").unwrap();
+
+        let result = hamt::remove(&ipfs, root.into(), key).await;
+
+        match result {
+            Ok(cid) => println!("Root: {}", cid),
+            Err(e) => panic!("Root: {} Key: {} Error: {}", root, key, e),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_linear_remove() {
+        let ipfs = IpfsService::default();
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
+
+        // Pre-generated with hamt_random_insert;
+        let mut root =
+            Cid::try_from("bafyreicdmpbc23de3n5o6lu7qr2nnzn2dv4a7ulz6k2ouwzsrsctnmbcta").unwrap();
+
+        for _ in 0..256 {
+            let key = random_cid(&mut rng);
+
+            let result = hamt::remove(&ipfs, root.into(), key).await;
+
+            match result {
+                Ok(cid) => (root = cid),
+                Err(e) => panic!("Root: {} Key: {} Error: {}", root, key, e),
+            }
+        }
+
+        let sum = hamt::values(&ipfs, root.into())
+            .fold(0, |acc, _| async move { acc + 1 })
+            .await;
+
+        assert_eq!(0, sum);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_fuzzy() {
+        let ipfs = IpfsService::default();
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut root =
+            Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re").unwrap();
+
+        let count = 500;
+
+        let mut keys = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            if keys.is_empty() || rng.gen_ratio(2, 3) {
+                let key = random_cid(&mut rng);
+                let value = key;
+
+                keys.push(key);
+
+                let result = hamt::insert(&ipfs, root.into(), key, value).await;
+
+                match result {
+                    Ok(cid) => (root = cid),
+                    Err(e) => panic!("Index: {} Key: {} Error: {}", root, key, e),
+                }
+            } else {
+                let idx = rng.gen_range(0..keys.len());
+
+                let key = keys.remove(idx);
+
+                let result = hamt::remove(&ipfs, root.into(), key).await;
+
+                match result {
+                    Ok(cid) => (root = cid),
+                    Err(e) => panic!("Root: {} Key: {} Error: {}", root, key, e),
+                }
+            }
+        }
+
+        let sum = hamt::values(&ipfs, root.into())
+            .fold(0, |acc, _| async move { acc + 1 })
+            .await;
+
+        println!("Final Count {} Root {}", sum, root);
     }
 }

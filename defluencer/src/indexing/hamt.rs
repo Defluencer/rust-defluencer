@@ -13,6 +13,7 @@ use ipfs_api::{responses::Codec, IpfsService};
 use linked_data::{
     indexes::hamt::{
         BitField, BucketEntry, Element, HAMTNode, HAMTRoot, BUCKET_SIZE, DIGEST_LENGTH_BYTES,
+        HASH_ALGORITHM,
     },
     IPLDLink,
 };
@@ -24,21 +25,20 @@ pub enum HAMTError {
     #[error("Max depth reached")]
     MaxDepth,
 
-    #[error("Cannot remove key not present")]
+    #[error("Wrong hash algorithm")]
+    HashAlgo,
+
+    #[error("Cannot remove key, not present")]
     RemoveFailed,
 }
 
 pub async fn get(ipfs: &IpfsService, root: IPLDLink, key: Cid) -> Result<Option<Cid>, Error> {
-    /* if key.hash().size() != DIGEST_LENGTH_BYTES as u8 {
-        return Err(Error::NotFound); //TODO add error type
-    } */
+    if key.hash().code() != HASH_ALGORITHM as u64 {
+        return Err(HAMTError::HashAlgo.into());
+    }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key
-        .hash()
-        .to_bytes()
-        .into_iter()
-        .take(DIGEST_LENGTH_BYTES)
-        .collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> =
+        key.hash().digest().iter().map(|byte| *byte).collect();
     let key = key.into_inner().unwrap();
 
     let root = ipfs.dag_get::<&str, HAMTRoot>(root.link, None).await?;
@@ -89,16 +89,12 @@ pub async fn insert(
     key: Cid,
     value: Cid,
 ) -> Result<Cid, Error> {
-    /* if key.hash().size() != DIGEST_LENGTH_BYTES as u8 {
-        return Err(Error::NotFound); //TODO add error type
-    } */
+    if key.hash().code() != HASH_ALGORITHM as u64 {
+        return Err(HAMTError::HashAlgo.into());
+    }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key
-        .hash()
-        .to_bytes()
-        .into_iter()
-        .take(DIGEST_LENGTH_BYTES)
-        .collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> =
+        key.hash().digest().iter().map(|byte| *byte).collect();
     let key = key.into_inner().unwrap();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index_cid.link, None).await?;
@@ -185,16 +181,12 @@ async fn set(
 }
 
 pub async fn remove(ipfs: &IpfsService, index: IPLDLink, key: Cid) -> Result<Cid, Error> {
-    /* if key.hash().size() != DIGEST_LENGTH_BYTES as u8 {
-        return Err(Error::NotFound); //TODO add error type
-    } */
+    if key.hash().code() != HASH_ALGORITHM as u64 {
+        return Err(HAMTError::HashAlgo.into());
+    }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key
-        .hash()
-        .to_bytes()
-        .into_iter()
-        .take(DIGEST_LENGTH_BYTES)
-        .collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> =
+        key.hash().digest().iter().map(|byte| *byte).collect();
     let key = key.into_inner().unwrap();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
@@ -217,14 +209,18 @@ async fn delete(
     let mut map = BitField::from(node.map);
     let data_index = map[0..index].count_ones();
 
+    /* println!(
+        "Index: {} Depth: {} Data Index: {} Index Bit: {}",
+        index, depth, data_index, map[index]
+    ); */
+
     if !map[index] {
-        // CASE: index bit is not set
         return Err(HAMTError::RemoveFailed.into());
     }
 
-    // CASE: index bit is set
-
     if let Element::Link(ipld) = node.data[data_index] {
+        //println!("Found Link");
+
         if (depth + 1) > DIGEST_LENGTH_BYTES {
             return Err(HAMTError::MaxDepth.into());
         }
@@ -242,21 +238,27 @@ async fn delete(
         }
     }
 
-    let mut links = 0;
-    let mut entrees = 0;
+    //println!("Found Bucket");
 
-    for element in node.data.iter() {
-        match element {
-            Element::Link(_) => {
-                links += 1;
-            }
-            Element::Bucket(vec) => {
-                entrees += vec.len();
-            }
-        }
-    }
+    let (links, entrees) =
+        node.data
+            .iter()
+            .fold((0usize, 0usize), |(mut links, mut entrees), element| {
+                match element {
+                    Element::Link(_) => {
+                        links += 1;
+                    }
+                    Element::Bucket(vec) => {
+                        entrees += vec.len();
+                    }
+                }
+
+                (links, entrees)
+            });
 
     if depth == 0 || links > 0 || entrees > (BUCKET_SIZE + 1) {
+        //println!("Not collapsing bucket into parent");
+
         if let Element::Bucket(btree) = &mut node.data[data_index] {
             if btree.len() > 1 {
                 let entry = BucketEntry {
@@ -264,12 +266,16 @@ async fn delete(
                     value: Default::default(),
                 };
 
-                btree.remove(&entry);
+                if btree.remove(&entry) {
+                    //println!("Entry removed");
+                }
             } else {
-                node.data.remove(data_index);
-
                 map.set(index, false);
                 node.map = map.into_inner();
+
+                node.data.remove(data_index);
+
+                //println!("Bit unset & Data removed");
             }
 
             let cid = ipfs.dag_put(&node, Codec::default()).await?;
@@ -278,21 +284,32 @@ async fn delete(
         }
     }
 
-    if depth != 0 && links == 0 && entrees == (BUCKET_SIZE + 1) {
-        // Collapse node into parent
-        if let Element::Bucket(btree) = &mut node.data[data_index] {
-            let entry = BucketEntry {
-                key,
-                value: Default::default(),
-            };
+    //println!("Collapsing bucket into parent");
 
-            btree.remove(&entry);
+    let mut btree: BTreeSet<BucketEntry> = node
+        .data
+        .iter()
+        .filter_map(|element| {
+            if let Element::Bucket(btree) = element {
+                Some(btree.into_iter())
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .map(|bucket| *bucket)
+        .collect();
 
-            return Ok(Element::Bucket(btree.clone()));
-        }
+    let entry = BucketEntry {
+        key,
+        value: Default::default(),
+    };
+
+    if btree.remove(&entry) {
+        //println!("Entry removed");
     }
 
-    Err(HAMTError::RemoveFailed.into())
+    Ok(Element::Bucket(btree))
 }
 
 pub fn values(ipfs: &IpfsService, root: IPLDLink) -> impl Stream<Item = Result<Cid, Error>> + '_ {
