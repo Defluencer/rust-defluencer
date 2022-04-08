@@ -202,3 +202,21 @@ impl From<PinLsResponse> for PinList {
             .collect()
     }
 }
+
+#[derive(Debug, Display, EnumString)]
+pub enum Codec {
+    #[strum(serialize = "dag-cbor")]
+    DagCbor,
+
+    #[strum(serialize = "dag-jose")]
+    DagJose,
+
+    #[strum(serialize = "dag-json")]
+    DagJson,
+}
+
+impl Default for Codec {
+    fn default() -> Self {
+        Codec::DagCbor
+    }
+}

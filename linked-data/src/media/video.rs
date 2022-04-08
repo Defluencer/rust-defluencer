@@ -1,20 +1,18 @@
 use crate::IPLDLink;
 
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use cid::Cid;
-
 /// Metadata for video thumbnail and playback.
+///
 /// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Clone)]
-pub struct VideoMetadata {
+#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
+pub struct Video {
+    pub identity: IPLDLink,
+
     /// Timestamp at the time of publication in Unix time.
-    pub timestamp: u64,
+    pub user_timestamp: i64,
 
     /// Duration in seconds.
     pub duration: f64,
@@ -29,55 +27,9 @@ pub struct VideoMetadata {
     pub title: String,
 }
 
-impl VideoMetadata {
-    pub fn create(title: String, duration: f64, image: Cid, video: Cid) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("SystemTime after UNIX EPOCH!")
-            .as_secs();
-
-        Self {
-            timestamp,
-            duration,
-            image: image.into(),
-            video: video.into(),
-            title,
-        }
-    }
-
-    pub fn update(
-        &mut self,
-        title: Option<String>,
-        image: Option<Cid>,
-        video: Option<Cid>,
-        duration: Option<f64>,
-    ) {
-        self.timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("SystemTime after UNIX EPOCH!")
-            .as_secs();
-
-        if let Some(title) = title {
-            self.title = title;
-        }
-
-        if let Some(img) = image {
-            self.image = img.into();
-        }
-
-        if let Some(vid) = video {
-            self.video = vid.into();
-        }
-
-        if let Some(dur) = duration {
-            self.duration = dur;
-        }
-    }
-}
-
-/// Root CID.
+/// Timecode structure root CID.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TimecodeNode {
+pub struct Timecode {
     /// ../time/..
     #[serde(rename = "time")]
     pub timecode: IPLDLink,
@@ -85,7 +37,7 @@ pub struct TimecodeNode {
 
 /// Links all hour nodes for multiple hours of video.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DayNode {
+pub struct Day {
     /// ../time/hour/1/..
     #[serde(rename = "hour")]
     pub links_to_hours: Vec<IPLDLink>,
@@ -93,7 +45,7 @@ pub struct DayNode {
 
 /// Links all minute nodes for 1 hour of video.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HourNode {
+pub struct Hour {
     /// ../time/hour/0/minute/15/..
     #[serde(rename = "minute")]
     pub links_to_minutes: Vec<IPLDLink>,
@@ -101,7 +53,7 @@ pub struct HourNode {
 
 /// Links all variants nodes for 1 minute of video.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MinuteNode {
+pub struct Minute {
     /// ..time/hour/2/minute/36/second/30/..
     #[serde(rename = "second")]
     pub links_to_seconds: Vec<IPLDLink>,
@@ -109,7 +61,7 @@ pub struct MinuteNode {
 
 /// Links video and chat nodes.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SecondNode {
+pub struct Second {
     /// ../time/hour/3/minute/59/second/48/video/..
     #[serde(rename = "video")]
     pub link_to_video: IPLDLink,
@@ -119,9 +71,11 @@ pub struct SecondNode {
     pub links_to_chat: Vec<IPLDLink>,
 }
 
-/// Links all stream variants, allowing selection of video quality. Also link to the previous video node.
+/// Links all stream variants, allowing selection of video quality.
+///
+/// Also link to the previous video node.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct VideoNode {
+pub struct Segment {
     /// ../time/hour/0/minute/36/second/12/video/track/1080p60/..
     #[serde(rename = "track")]
     pub tracks: HashMap<String, IPLDLink>,
@@ -137,7 +91,7 @@ pub struct VideoNode {
 
 /// Contains initialization data for video stream.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SetupNode {
+pub struct Setup {
     /// Tracks sorted from lowest to highest bitrate.
     #[serde(rename = "track")]
     pub tracks: Vec<Track>, // ../time/hour/0/minute/36/second/12/video/setup/track/0/..

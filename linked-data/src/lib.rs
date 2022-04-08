@@ -1,15 +1,12 @@
-pub mod beacon;
-pub mod blog;
-pub mod chat;
+pub mod channel;
 pub mod comments;
-pub mod feed;
-pub mod friends;
+pub mod follows;
 pub mod identity;
+pub mod indexes;
 pub mod live;
-pub mod mime_type;
+pub mod media;
 pub mod moderation;
 pub mod signature;
-pub mod video;
 
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -51,14 +48,4 @@ impl From<Cid> for IPLDLink {
     fn from(cid: Cid) -> Self {
         Self { link: cid }
     }
-}
-
-/// Compute the Keccak-256 hash of input bytes.
-pub fn keccak256(bytes: &[u8]) -> [u8; 32] {
-    use tiny_keccak::{Hasher, Keccak};
-    let mut output = [0u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(bytes);
-    hasher.finalize(&mut output);
-    output
 }

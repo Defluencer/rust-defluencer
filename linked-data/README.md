@@ -1,102 +1,105 @@
-# Linked Data
+# Defluencer Protocol IPLD Schemas
 
-IPLD schemas and what to do with them.
+## Channel
 
-## Beacon
+The root of the DAG representing all information related to a channel.
 
-Directory of user content and metadata.
-Since this object should not change it can be used as a unique identifier.
-Always resolve the IPNS address to get the most up to date content.
-If using IPNS over PubSub, you can also subscribe to a IPNS topic for live update.
-Use friend list to crawl the social web.
-
-### IPLD Schemas
 ```
-type Beacon struct {
-    identity IPNS
-    content_feed optional IPNS
-    comments optional IPNS
-    live optional IPNS
-    friends optional IPNS
-    bans optional IPNS
-    mods optional IPNS
+advanced ChronologicalMap { ADL "" } #TODO add specifications
+advanced HashMap { ADL "HAMT/v1" }
+
+type DateTime map [Time:&Media] using ChronologicalMap
+
+type Comments [Comment:&Comment] using HashMap
+type CommentIndex map [Media:&Comments] using HashMap
+
+type ChannelMetadata struct {
+    identity Identity
+    content_index optional &DateTime
+    comment_index optional &CommentIndex
+    live optional &LiveSettings
+    folows optional &Follows
+    bans optional &Bans
+    mods optional &Moderators
 }
-
-type IPNS string # IPNS address
 ```
+
 ## Identity
 
-A user name and avatar.
+User or Channel identity information.
 
-### IPLD Schemas
 ```
 type Identity struct {
-    display_name String # Your choosen name
-    avatar Link # Link to an image
+    display_name String 
+    avatar &MimeTyped
+    channel_ipns optional String
+    channel_ens optional String
 }
 ```
 
-## Content Feed
+## Media
 
-An anchor for a user's content.
-Chronological order is used.
-Other indexing methods could be used.
-
-### IPLD Schemas
 ```
-type FeedAnchor struct {
-    content [Media]
-}
-
 type Media union {
     | &MicroPost link
     | &FullPost link
-    | &VideoMetadata link
+    | &Video link
+    | &Comment link
 } representation kinded
-```
-## Comments
 
-An anchor for a user's comments.
-Indexed by the content they commented on.
-Other indexing methods could be used.
+type MicroPost struct {
+    identity &Identity
+    user_timestamp Int # Unix Time
+    content String
+}
 
-### IPLD Schemas
-```
-type Commentary struct {
-    "comments": {String:[&Comment]} # Keys are CIDs of the content being commented on.
+type FullPost struct {
+    identity &Identity
+    user_timestamp Int # Unix Time
+    content Link # Link to markdown file
+    image &MimeTyped
+    title String
+}
+
+type Video struct {
+    identity &Identity
+    user_timestamp Int # Unix time
+    duration Float
+    image &MimeTyped # Poster & Thumbnail
+    video &TimeCode
+    title String
 }
 
 type Comment struct {
-    timestamp Int # Unix Time
-    origin Link # CID of content being commented on.
-    comment String
+    identity &Identity
+    user_timestamp Int # Unix Time
+    origin String # CID as string prevent recursive pinning.
+    text String
 }
 ```
-## Friends
 
-A list of friends you follow.
+## Live Streaming Settings
 
-### IPLD Schemas
 ```
-type Friendlies struct {
-  friends [Friend] 
+type LiveSettings struct {
+    peer_id String
+    video_topic String
+    chat_topic String
 }
-
-type Friend union {
-    | ENS string # ENS domain name linked to Beacon
-    | Beacon link # Link to Beacon
-} representation kinded
-
-type ENS string
-type Beacon link
 ```
+
+## Follows
+
+List of followees used to build the social web.
+
+```
+type Follows struct {
+  followees [&Identity]
+}
+```
+
 ## Chat Moderation
 
-Moderator can send ban/mod messages via PubSub.
-The message should be signed.
-The schemas are list of banned users and moderators.
-
-### IPLD Schemas
 ```
 type ETHAddress bytes # Ethereum address are 20 bytes.
 
@@ -108,12 +111,12 @@ type Moderators struct {
     moderator_addrs [ETHAddress]
 }
 ```
+
 ## Chat
 
 Display Name and GossipSub Peer ID are signed using Ethereum Keys then the address, name, id, and signature are added to IPFS returning a CID.
 When receiving a pubsub message this CID is used to fetch and verify that IDs matches and signature is correct.
 
-### IPLD Schemas
 ```
 type Text string
 
@@ -158,21 +161,20 @@ type ChatMessage struct {
 A video node contains links to segments of videos of all quality. As video is streamed, new video nodes are created and linked to previous ones.
 A special node contains the stream setup data; codecs, qualities, initialization segments, etc...
 
-### IPLD Schemas
 ```
-type VideoNode struct {
+type Segment struct {
     tracks {String:Link} # Name of the track egg "audio" or "1080p60" & link to video segment data
-    setup optional &SetupNode
-    previous optional &VideoNode
+    setup optional &Setup
+    previous optional &Segment
 }
 
-type SetupNode struct {
+type Setup struct {
     tracks [Track] # Sorted from lowest to highest bitrate.
 }
 
 type Track struct {
     name String
-    codec String #Mime type
+    codec String # Mime type
     init_seg Link # Link to the initialization segment data
     bandwidth Int
 }
@@ -183,55 +185,51 @@ type Track struct {
 Timecode nodes are created at specific intervals and linked together to form a structure around the video allowing it to be addressable by timecode.
 Video clips are subgraph of the whole.
 
-### IPLD Schemas
 ```
-type VideoMetadata struct {
-    timestamp Int # Unix time
-    duration Float
-    image Link # Poster & Thumbnail
-    video &TimeCodeNode
-    title String
+type TimeCode struct {
+    time &Day
 }
 
-type TimeCodeNode struct {
-    time &DayNode
+type Day struct {
+    hour [&Hour]
 }
 
-type DayNode struct {
-    hour [&HourNode]
+type Hour struct {
+    minute [&Minute]
 }
 
-type HourNode struct {
-    minute [&MinuteNode]
+type Minute struct {
+    second [&Second]
 }
 
-type MinuteNode struct {
-    second [&SecondNode]
-}
-
-type SecondNode struct {
-    video &VideoNode
+type Second struct {
+    video &Segment
     chat [&ChatMessage]
 }
 ```
-## Blog
 
-Micro-blogging & long form via markdown files.
+## Mime Typed Data
 
-### IPLD Schemas
+Mime typed data.
+
+If the data fit in a single block inline otherwise link to it.
+
 ```
-type MicroPost struct {
-    timestamp Int # Unix Time
-    content String
+type MimeTyped struct {
+    mime_type String
+    data InlineOrLink
 }
 
-type FullPost struct {
-    timestamp Int # Unix Time
-    content Link # Link to markdown file
-    image Link
-    title String
-}
+type InlineOrLink union {
+  | Inline bytes
+  | Linked link
+} representation kinded
+
+type Inline Bytes
+type Linked Link
 ```
+
+----
 
 ## License
 Licensed under either of

@@ -2,7 +2,7 @@ use std::io::ErrorKind;
 
 use ipfs_api::{errors::Error, IpfsService};
 
-use linked_data::friends::{Friend, Friendlies};
+use linked_data::follows::{Friend, Friendlies};
 
 use cid::Cid;
 

@@ -12,7 +12,7 @@ use ipfs_api::{errors::Error, responses::PinMode, IpfsService};
 use linked_data::{
     blog::{FullPost, MicroPost},
     comments::Commentary,
-    feed::{FeedAnchor, Media},
+    content::{FeedAnchor, Media},
     mime_type::MimeTyped,
     video::{DayNode, HourNode, MinuteNode, VideoMetadata},
 };

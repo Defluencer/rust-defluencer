@@ -9,11 +9,11 @@ bytes = { version = "1", default-features = false, features = [] }
 cid = { version = "0.8", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 reqwest = { git = "https://github.com/SionoiS/reqwest", branch = "stream", default-features = false, features = ["multipart", "stream"]}
-serde = { version = "1.0", default-features = false, features = ["derive"] }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 strum = { version = "0.24", features = ["derive"] }
-thiserror = "1"
-url = "2"
+thiserror = { version = "1", default-features = false, features = [] }
+url = { version = "2", default-features = false, features = [] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", features = ['full']}
