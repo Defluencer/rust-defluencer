@@ -1,6 +1,5 @@
 pub mod channel;
 pub mod comments;
-pub mod content;
 pub mod follows;
 pub mod identity;
 pub mod indexes;

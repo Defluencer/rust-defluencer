@@ -89,14 +89,10 @@ mod tests {
 
         let result = hamt::get(&ipfs, root.into(), key).await;
 
-        println!("{:?}", result);
-
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
 
         let result = hamt::remove(&ipfs, root.into(), key).await;
-
-        println!("{:?}", result);
 
         assert!(result.is_err());
     }
@@ -113,15 +109,12 @@ mod tests {
         let key =
             Cid::try_from("bafyreiebxcyrgbybcebsk7dwlkidiyi7y6shpvsmneufdouto3pgumvefe").unwrap();
 
-        // Random value
         let value =
-            Cid::try_from("bafyreiejplp7y57dxnasxk7vjdujclpe5hzudiqlgvnit4vinqvtehh3ci").unwrap();
+            Cid::try_from("bafyreih62zarvnosx5aktyzkhk6ufn5b33eqmm5te5ozor25r3rfigznje").unwrap();
 
         root = hamt::insert(&ipfs, root.into(), key, value).await.unwrap();
 
         root = hamt::insert(&ipfs, root.into(), key, value).await.unwrap();
-
-        println!("Root {}", root);
 
         let mut stream = hamt::values(&ipfs, root.into()).boxed_local();
 
@@ -138,6 +131,8 @@ mod tests {
         let option = stream.next().await;
 
         assert!(option.is_none());
+
+        println!("Root {}", root);
     }
 
     use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
@@ -162,11 +157,13 @@ mod tests {
         let mut root =
             Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re").unwrap();
 
+        let value =
+            Cid::try_from("bafyreih62zarvnosx5aktyzkhk6ufn5b33eqmm5te5ozor25r3rfigznje").unwrap();
+
         let count = 256;
 
         for _ in 0..count {
             let key = random_cid(&mut rng);
-            let value = key;
 
             let result = hamt::insert(&ipfs, root.into(), key, value).await;
 
@@ -189,9 +186,9 @@ mod tests {
     async fn hamt_remove_collapse() {
         let ipfs = IpfsService::default();
 
-        // Pre-generated with hamt_random_insert;
+        // Pre-generated with hamt_linear_insert;
         let mut root =
-            Cid::try_from("bafyreicdmpbc23de3n5o6lu7qr2nnzn2dv4a7ulz6k2ouwzsrsctnmbcta").unwrap();
+            Cid::try_from("bafyreibk3jg65ukzj5i3lolkmm6cl6yzz7mzrqesrja4msro7lfo3s6exy").unwrap();
 
         let key =
             Cid::try_from("bafyreiarw4llrjyv6ctuhyupx65tzbgr37kkiyjwyxj6blnmekpfx32ysu").unwrap();
@@ -224,7 +221,7 @@ mod tests {
 
         // Pre-generated with hamt_random_insert;
         let mut root =
-            Cid::try_from("bafyreicdmpbc23de3n5o6lu7qr2nnzn2dv4a7ulz6k2ouwzsrsctnmbcta").unwrap();
+            Cid::try_from("bafyreibk3jg65ukzj5i3lolkmm6cl6yzz7mzrqesrja4msro7lfo3s6exy").unwrap();
 
         for _ in 0..256 {
             let key = random_cid(&mut rng);
@@ -254,6 +251,9 @@ mod tests {
         let mut root =
             Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re").unwrap();
 
+        let value =
+            Cid::try_from("bafyreih62zarvnosx5aktyzkhk6ufn5b33eqmm5te5ozor25r3rfigznje").unwrap();
+
         let count = 500;
 
         let mut keys = Vec::with_capacity(count);
@@ -261,7 +261,6 @@ mod tests {
         for _ in 0..count {
             if keys.is_empty() || rng.gen_ratio(2, 3) {
                 let key = random_cid(&mut rng);
-                let value = key;
 
                 keys.push(key);
 

@@ -29,7 +29,7 @@ pub struct Video {
 
 /// Timecode structure root CID.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TimecodeBlock {
+pub struct Timecode {
     /// ../time/..
     #[serde(rename = "time")]
     pub timecode: IPLDLink,
@@ -37,7 +37,7 @@ pub struct TimecodeBlock {
 
 /// Links all hour nodes for multiple hours of video.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DayBlock {
+pub struct Day {
     /// ../time/hour/1/..
     #[serde(rename = "hour")]
     pub links_to_hours: Vec<IPLDLink>,
@@ -45,7 +45,7 @@ pub struct DayBlock {
 
 /// Links all minute nodes for 1 hour of video.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HourBlock {
+pub struct Hour {
     /// ../time/hour/0/minute/15/..
     #[serde(rename = "minute")]
     pub links_to_minutes: Vec<IPLDLink>,
@@ -53,7 +53,7 @@ pub struct HourBlock {
 
 /// Links all variants nodes for 1 minute of video.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MinuteBlock {
+pub struct Minute {
     /// ..time/hour/2/minute/36/second/30/..
     #[serde(rename = "second")]
     pub links_to_seconds: Vec<IPLDLink>,
@@ -61,7 +61,7 @@ pub struct MinuteBlock {
 
 /// Links video and chat nodes.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SecondBlock {
+pub struct Second {
     /// ../time/hour/3/minute/59/second/48/video/..
     #[serde(rename = "video")]
     pub link_to_video: IPLDLink,
@@ -75,7 +75,7 @@ pub struct SecondBlock {
 ///
 /// Also link to the previous video node.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SegmentBlock {
+pub struct Segment {
     /// ../time/hour/0/minute/36/second/12/video/track/1080p60/..
     #[serde(rename = "track")]
     pub tracks: HashMap<String, IPLDLink>,
@@ -91,7 +91,7 @@ pub struct SegmentBlock {
 
 /// Contains initialization data for video stream.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SetupBlock {
+pub struct Setup {
     /// Tracks sorted from lowest to highest bitrate.
     #[serde(rename = "track")]
     pub tracks: Vec<Track>, // ../time/hour/0/minute/36/second/12/video/setup/track/0/..
