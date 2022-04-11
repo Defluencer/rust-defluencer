@@ -1,13 +1,11 @@
-use std::collections::HashSet;
-
 use crate::{
     anchors::{Anchor, IPNSAnchor},
     errors::Error,
-    indexing::hamt,
+    indexing::{datetime, hamt},
     utils::add_image,
 };
 
-use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+use chrono::{TimeZone, Utc};
 
 use cid::Cid;
 
@@ -18,7 +16,7 @@ use linked_data::{
     comments::Comment,
     follows::Follows,
     identity::Identity,
-    indexes::{date_time::*, hamt::HAMTRoot, log::ChainLink},
+    indexes::hamt::HAMTRoot,
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
@@ -120,16 +118,16 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn replace_identity(&self, identity_cid: Cid) -> Result<Cid, Error> {
+    pub async fn replace_identity(&self, identity: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.identity = identity_cid.into();
+        channel.identity = identity;
 
         self.update_channel(channel_cid, &channel).await
     }
 
     /// Follow a channel.
-    pub async fn follow(&self, user_identity: Cid) -> Result<Cid, Error> {
+    pub async fn follow(&self, identity: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let mut follows = match channel.follows {
@@ -137,7 +135,7 @@ where
             None => Follows::default(),
         };
 
-        if !follows.followees.insert(user_identity.into()) {
+        if !follows.followees.insert(identity) {
             return Err(Error::AlreadyAdded);
         }
 
@@ -149,7 +147,7 @@ where
     }
 
     /// Unfollow a channel.
-    pub async fn unfollow(&self, user_identity: Cid) -> Result<Cid, Error> {
+    pub async fn unfollow(&self, identity: &IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let mut follows = match channel.follows {
@@ -157,7 +155,7 @@ where
             None => return Err(Error::NotFound),
         };
 
-        if !follows.followees.remove(&user_identity.into()) {
+        if !follows.followees.remove(identity) {
             return Err(Error::NotFound);
         }
 
@@ -168,10 +166,10 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn replace_follow_list(&self, follows_cid: Cid) -> Result<Cid, Error> {
+    pub async fn replace_follow_list(&self, follows: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.follows = Some(follows_cid.into());
+        channel.follows = Some(follows);
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -213,10 +211,10 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn replace_live_settings(&self, settings_cid: Cid) -> Result<Cid, Error> {
+    pub async fn replace_live_settings(&self, settings: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.live = Some(settings_cid.into());
+        channel.live = Some(settings);
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -259,10 +257,10 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn replace_ban_list(&self, bans_cid: Cid) -> Result<Cid, Error> {
+    pub async fn replace_ban_list(&self, bans: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.bans = Some(bans_cid.into());
+        channel.bans = Some(bans);
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -305,10 +303,10 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn replace_moderator_list(&self, moderators_cid: Cid) -> Result<Cid, Error> {
+    pub async fn replace_moderator_list(&self, moderators: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.mods = Some(moderators_cid.into());
+        channel.mods = Some(moderators);
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -321,17 +319,13 @@ where
 
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let new_index = self
-            .log_index_add(channel.content_index.log, content_cid)
-            .await?;
-
-        channel.content_index.log = Some(new_index.into());
-
-        let new_index = self
-            .datetime_index_insert(datetime, channel.content_index.date_time, content_cid)
-            .await?;
-
-        channel.content_index.date_time = Some(new_index.into());
+        datetime::insert(
+            &self.ipfs,
+            datetime,
+            &mut channel.content_index,
+            content_cid,
+        )
+        .await?;
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -343,25 +337,17 @@ where
 
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        match channel.content_index.log {
-            Some(index) => {
-                let new_index = self.log_index_remove(index, content_cid).await?;
+        if channel.content_index.is_some() {
+            return Ok(channel_cid);
+        };
 
-                channel.content_index.log = Some(new_index.into());
-            }
-            _ => return Err(Error::NotFound),
-        }
-
-        match channel.content_index.date_time {
-            Some(index) => {
-                let new_index = self
-                    .datetime_index_remove(datetime, index, content_cid)
-                    .await?;
-
-                channel.content_index.date_time = Some(new_index.into());
-            }
-            _ => return Err(Error::NotFound),
-        }
+        datetime::remove(
+            &self.ipfs,
+            datetime,
+            &mut channel.content_index,
+            content_cid,
+        )
+        .await?;
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -373,7 +359,7 @@ where
 
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let index = match channel.comment_index.hamt {
+        let mut index = match channel.comment_index {
             Some(index) => index,
             None => self
                 .ipfs
@@ -382,48 +368,50 @@ where
                 .into(),
         };
 
-        let comments = match hamt::get(&self.ipfs, index, media_cid).await? {
-            Some(comments) => comments,
-            None => {
-                self.ipfs
-                    .dag_put(&HAMTRoot::default(), Codec::default())
-                    .await?
-            }
+        let mut comments = match hamt::get(&self.ipfs, index, media_cid).await? {
+            Some(comments) => comments.into(),
+            None => self
+                .ipfs
+                .dag_put(&HAMTRoot::default(), Codec::default())
+                .await?
+                .into(),
         };
 
-        let comments = hamt::insert(&self.ipfs, comments.into(), comment_cid, comment_cid).await?;
+        hamt::insert(&self.ipfs, &mut comments, comment_cid, comment_cid).await?;
 
-        let new_index = hamt::insert(&self.ipfs, index, media_cid, comments).await?;
+        hamt::insert(&self.ipfs, &mut index, media_cid, comments.link).await?;
 
-        channel.comment_index.hamt = Some(new_index.into());
+        channel.comment_index = Some(index.into());
 
         self.update_channel(channel_cid, &channel).await
     }
 
     /// Remove a specific comment.
-    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<Cid, Error> {
+    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<(), Error> {
         let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
         let media_cid = comment.origin;
 
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let index = match channel.comment_index.hamt {
+        let mut index = match channel.comment_index {
             Some(it) => it,
-            _ => return Err(Error::NotFound),
+            _ => return Ok(()),
         };
 
-        let comments = match hamt::get(&self.ipfs, index, media_cid).await? {
-            Some(comments) => comments,
-            None => return Err(Error::NotFound),
+        let mut comments = match hamt::get(&self.ipfs, index, media_cid).await? {
+            Some(comments) => comments.into(),
+            None => return Ok(()),
         };
 
-        let comments = hamt::remove(&self.ipfs, comments.into(), comment_cid).await?;
+        hamt::remove(&self.ipfs, &mut comments, comment_cid).await?;
 
-        let index = hamt::insert(&self.ipfs, index, media_cid, comments).await?;
+        hamt::insert(&self.ipfs, &mut index, media_cid, comments.link).await?;
 
-        channel.comment_index.hamt = Some(index.into());
+        channel.comment_index = Some(index.into());
 
-        self.update_channel(channel_cid, &channel).await
+        self.update_channel(channel_cid, &channel).await?;
+
+        Ok(())
     }
 
     /// Pin a channel to this local node.
@@ -457,6 +445,7 @@ where
         Ok((cid, channel))
     }
 
+    /// Returns new channel Cid
     async fn update_channel(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
         let new_cid = self.ipfs.dag_put(channel, Codec::default()).await?;
 
@@ -465,215 +454,6 @@ where
         self.anchor.anchor(new_cid).await?;
 
         Ok(new_cid)
-    }
-
-    async fn log_index_add(&self, index: Option<IPLDLink>, add_cid: Cid) -> Result<Cid, Error> {
-        let mut chainlink = match index {
-            Some(index) => {
-                self.ipfs
-                    .dag_get::<&str, ChainLink>(index.link, None)
-                    .await?
-            }
-            None => ChainLink::default(),
-        };
-
-        chainlink.media = add_cid.into();
-        chainlink.previous = index;
-
-        let cid = self.ipfs.dag_put(&chainlink, Codec::default()).await?;
-
-        Ok(cid)
-    }
-
-    async fn log_index_remove(&self, index: IPLDLink, remove_cid: Cid) -> Result<Cid, Error> {
-        let mut chainlinks = Vec::default();
-        let mut previous: Option<IPLDLink> = Some(index);
-
-        loop {
-            let cid = match previous {
-                Some(ipld) => ipld.link,
-                None => break,
-            };
-
-            let chainlink = self.ipfs.dag_get::<&str, ChainLink>(cid, None).await?;
-
-            if chainlink.media.link == remove_cid {
-                previous = chainlink.previous;
-
-                break;
-            } else {
-                previous = chainlink.previous;
-
-                chainlinks.push(chainlink);
-            }
-        }
-
-        for mut chainlink in chainlinks.into_iter().rev() {
-            chainlink.previous = previous;
-
-            let cid = self.ipfs.dag_put(&chainlink, Codec::default()).await?;
-
-            previous = Some(cid.into());
-        }
-
-        Ok(previous.unwrap().link)
-    }
-
-    async fn datetime_index_insert(
-        &self,
-        date_time: DateTime<Utc>,
-        index: Option<IPLDLink>,
-        add_cid: Cid,
-    ) -> Result<Cid, Error> {
-        let mut yearly = Yearly::default();
-        let mut monthly = Monthly::default();
-        let mut daily = Daily::default();
-        let mut hourly = Hourly::default();
-        let mut minutes = Minutes::default();
-        let mut seconds = Seconds::default();
-
-        if let Some(index) = index {
-            yearly = self.ipfs.dag_get::<&str, Yearly>(index.link, None).await?;
-        }
-
-        if let Some(ipld) = yearly.year.get(&date_time.year()) {
-            monthly = self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?;
-        }
-
-        if let Some(ipld) = monthly.month.get(&date_time.month()) {
-            daily = self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await?;
-        }
-
-        if let Some(ipld) = daily.day.get(&date_time.day()) {
-            hourly = self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?;
-        }
-
-        if let Some(ipld) = hourly.hour.get(&date_time.hour()) {
-            minutes = self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?;
-        }
-
-        if let Some(ipld) = minutes.minute.get(&date_time.minute()) {
-            seconds = self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await?;
-        }
-
-        seconds
-            .second
-            .entry(date_time.second())
-            .and_modify(|set| {
-                set.insert(add_cid.into());
-            })
-            .or_insert({
-                let mut set = HashSet::with_capacity(1);
-                set.insert(add_cid.into());
-                set
-            });
-        let cid = self.ipfs.dag_put(&seconds, Codec::default()).await?;
-
-        minutes.minute.insert(date_time.minute(), cid.into());
-        let cid = self.ipfs.dag_put(&minutes, Codec::default()).await?;
-
-        hourly.hour.insert(date_time.hour(), cid.into());
-        let cid = self.ipfs.dag_put(&hourly, Codec::default()).await?;
-
-        daily.day.insert(date_time.day(), cid.into());
-        let cid = self.ipfs.dag_put(&daily, Codec::default()).await?;
-
-        monthly.month.insert(date_time.month(), cid.into());
-        let cid = self.ipfs.dag_put(&monthly, Codec::default()).await?;
-
-        yearly.year.insert(date_time.year(), cid.into());
-        let cid = self.ipfs.dag_put(&yearly, Codec::default()).await?;
-
-        Ok(cid)
-    }
-
-    async fn datetime_index_remove(
-        &self,
-        date_time: DateTime<Utc>,
-        index: IPLDLink,
-        remove_cid: Cid,
-    ) -> Result<Cid, Error> {
-        let mut yearly = self.ipfs.dag_get::<&str, Yearly>(index.link, None).await?;
-
-        let mut monthly = match yearly.year.get(&date_time.year()) {
-            Some(ipld) => self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?,
-            None => return Err(Error::NotFound),
-        };
-
-        let mut daily = match monthly.month.get(&date_time.month()) {
-            Some(ipld) => self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await?,
-            None => return Err(Error::NotFound),
-        };
-
-        let mut hourly = match daily.day.get(&date_time.day()) {
-            Some(ipld) => self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?,
-            None => return Err(Error::NotFound),
-        };
-
-        let mut minutes = match hourly.hour.get(&date_time.hour()) {
-            Some(ipld) => self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?,
-            None => return Err(Error::NotFound),
-        };
-
-        let mut seconds = match minutes.minute.get(&date_time.minute()) {
-            Some(ipld) => self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await?,
-            None => return Err(Error::NotFound),
-        };
-
-        let set = match seconds.second.get_mut(&date_time.second()) {
-            Some(set) => set,
-            None => return Err(Error::NotFound),
-        };
-
-        set.remove(&remove_cid.into());
-
-        if set.is_empty() {
-            seconds.second.remove(&date_time.second());
-        }
-
-        if seconds.second.is_empty() {
-            minutes.minute.remove(&date_time.minute());
-        } else {
-            let cid = self.ipfs.dag_put(&seconds, Codec::default()).await?;
-
-            minutes.minute.insert(date_time.minute(), cid.into());
-        }
-
-        if minutes.minute.is_empty() {
-            hourly.hour.remove(&date_time.hour());
-        } else {
-            let cid = self.ipfs.dag_put(&minutes, Codec::default()).await?;
-
-            hourly.hour.insert(date_time.hour(), cid.into());
-        }
-
-        if hourly.hour.is_empty() {
-            daily.day.remove(&date_time.day());
-        } else {
-            let cid = self.ipfs.dag_put(&hourly, Codec::default()).await?;
-
-            daily.day.insert(date_time.day(), cid.into());
-        }
-
-        if daily.day.is_empty() {
-            monthly.month.remove(&date_time.month());
-        } else {
-            let cid = self.ipfs.dag_put(&daily, Codec::default()).await?;
-
-            monthly.month.insert(date_time.month(), cid.into());
-        }
-
-        if monthly.month.is_empty() {
-            yearly.year.remove(&date_time.year());
-        } else {
-            let cid = self.ipfs.dag_put(&monthly, Codec::default()).await?;
-
-            yearly.year.insert(date_time.year(), cid.into());
-        }
-
-        let cid = self.ipfs.dag_put(&yearly, Codec::default()).await?;
-
-        Ok(cid)
     }
 }
 

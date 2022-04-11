@@ -6,12 +6,12 @@ The root of the DAG representing all information related to a channel.
 
 ```
 advanced ChronologicalMap { ADL "" } #TODO add specifications
-advanced HashMap { ADL "HAMT/v1" }
+advanced ShardedMap { ADL "HAMT/v1" }
 
 type DateTime map [Time:&Media] using ChronologicalMap
 
-type Comments [Comment:&Comment] using HashMap
-type CommentIndex map [Media:&Comments] using HashMap
+type Comments [Bytes:&Comment] using ShardedMap
+type CommentIndex map [Media:&Comments] using ShardedMap
 
 type ChannelMetadata struct {
     identity Identity

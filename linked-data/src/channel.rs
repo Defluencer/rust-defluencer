@@ -1,4 +1,4 @@
-use crate::{indexes::Indexing, IPLDLink};
+use crate::IPLDLink;
 
 use serde::{Deserialize, Serialize};
 
@@ -6,13 +6,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// The Cid of this object should be publicly available and trusted to be the latest version.
 /// Blockchains are best suited for this.
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq)]
 pub struct ChannelMetadata {
     pub identity: IPLDLink,
 
-    pub content_index: Indexing,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_index: Option<IPLDLink>,
 
-    pub comment_index: Indexing,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment_index: Option<IPLDLink>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<IPLDLink>,

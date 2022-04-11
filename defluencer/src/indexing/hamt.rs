@@ -32,7 +32,11 @@ pub enum HAMTError {
     RemoveFailed,
 }
 
-pub async fn get(ipfs: &IpfsService, root: IPLDLink, key: Cid) -> Result<Option<Cid>, Error> {
+pub(crate) async fn get(
+    ipfs: &IpfsService,
+    root: IPLDLink,
+    key: Cid,
+) -> Result<Option<Cid>, Error> {
     if key.hash().code() != HASH_ALGORITHM as u64 {
         return Err(HAMTError::HashAlgo.into());
     }
@@ -83,12 +87,12 @@ pub async fn get(ipfs: &IpfsService, root: IPLDLink, key: Cid) -> Result<Option<
     }
 }
 
-pub async fn insert(
+pub(crate) async fn insert(
     ipfs: &IpfsService,
-    index_cid: IPLDLink,
+    index: &mut IPLDLink,
     key: Cid,
     value: Cid,
-) -> Result<Cid, Error> {
+) -> Result<(), Error> {
     if key.hash().code() != HASH_ALGORITHM as u64 {
         return Err(HAMTError::HashAlgo.into());
     }
@@ -97,13 +101,15 @@ pub async fn insert(
         key.hash().digest().iter().map(|byte| *byte).collect();
     let key = key.into_inner().unwrap();
 
-    let mut root = ipfs.dag_get::<&str, HAMTRoot>(index_cid.link, None).await?;
+    let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
 
     set(ipfs, key, value.into(), 0, &mut root.hamt).await?;
 
     let cid = ipfs.dag_put(&root, Codec::default()).await?;
 
-    Ok(cid)
+    *index = cid.into();
+
+    Ok(())
 }
 
 #[async_recursion(?Send)]
@@ -180,7 +186,11 @@ async fn set(
     }
 }
 
-pub async fn remove(ipfs: &IpfsService, index: IPLDLink, key: Cid) -> Result<Cid, Error> {
+pub(crate) async fn remove(
+    ipfs: &IpfsService,
+    index: &mut IPLDLink,
+    key: Cid,
+) -> Result<(), Error> {
     if key.hash().code() != HASH_ALGORITHM as u64 {
         return Err(HAMTError::HashAlgo.into());
     }
@@ -195,7 +205,9 @@ pub async fn remove(ipfs: &IpfsService, index: IPLDLink, key: Cid) -> Result<Cid
 
     let cid = ipfs.dag_put(&root, Codec::default()).await?;
 
-    Ok(cid)
+    *index = cid.into();
+
+    Ok(())
 }
 
 #[async_recursion(?Send)]
@@ -312,7 +324,10 @@ async fn delete(
     Ok(Element::Bucket(btree))
 }
 
-pub fn values(ipfs: &IpfsService, root: IPLDLink) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+pub(crate) fn values(
+    ipfs: &IpfsService,
+    root: IPLDLink,
+) -> impl Stream<Item = Result<Cid, Error>> + '_ {
     stream::try_unfold(Some(root), move |mut root| async move {
         let ipld = match root.take() {
             Some(ipld) => ipld,
@@ -425,3 +440,220 @@ async fn get_values(ipfs: &IpfsService, node: HAMTNode) -> Result<Vec<Cid>, Erro
     })
     .flatten()
 } */
+
+#[cfg(test)]
+mod tests {
+    #![cfg(not(target_arch = "wasm32"))]
+
+    use super::*;
+    use cid::Cid;
+
+    use ipfs_api::IpfsService;
+
+    use multihash::Multihash;
+    use rand::Rng;
+    use rand_core::RngCore;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn empty_hamt_get_remove() {
+        let ipfs = IpfsService::default();
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
+            .unwrap()
+            .into();
+
+        // Random key
+        let key =
+            Cid::try_from("bafyreiebxcyrgbybcebsk7dwlkidiyi7y6shpvsmneufdouto3pgumvefe").unwrap();
+
+        let result = get(&ipfs, root, key).await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+
+        let result = remove(&ipfs, &mut root, key).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_duplicate_insert() {
+        let ipfs = IpfsService::default();
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
+            .unwrap()
+            .into();
+
+        // Random key
+        let key =
+            Cid::try_from("bafyreiebxcyrgbybcebsk7dwlkidiyi7y6shpvsmneufdouto3pgumvefe").unwrap();
+
+        let value =
+            Cid::try_from("bafyreih62zarvnosx5aktyzkhk6ufn5b33eqmm5te5ozor25r3rfigznje").unwrap();
+
+        insert(&ipfs, &mut root, key, value).await.unwrap();
+
+        insert(&ipfs, &mut root, key, value).await.unwrap();
+
+        let mut stream = values(&ipfs, root).boxed_local();
+
+        let option = stream.next().await;
+
+        assert!(option.is_some());
+        let result = option.unwrap();
+
+        assert!(result.is_ok());
+        let cid = result.unwrap();
+
+        assert_eq!(cid, value);
+
+        let option = stream.next().await;
+
+        assert!(option.is_none());
+
+        println!("Root {}", root.link);
+    }
+
+    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+
+    fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
+        let mut hash = [0u8; 32];
+        rng.fill_bytes(&mut hash);
+
+        let multihash = Multihash::wrap(0x12, &hash).unwrap();
+        let cid = Cid::new_v1(0x71, multihash);
+
+        cid
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_linear_insert() {
+        let ipfs = IpfsService::default();
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
+            .unwrap()
+            .into();
+
+        let value =
+            Cid::try_from("bafyreih62zarvnosx5aktyzkhk6ufn5b33eqmm5te5ozor25r3rfigznje").unwrap();
+
+        let count = 256;
+
+        for _ in 0..count {
+            let key = random_cid(&mut rng);
+
+            if let Err(e) = insert(&ipfs, &mut root, key, value).await {
+                panic!("Index: {} Key: {} Error: {}", root.link, key, e);
+            }
+        }
+
+        let sum = values(&ipfs, root)
+            .fold(0, |acc, _| async move { acc + 1 })
+            .await;
+
+        assert_eq!(count, sum);
+
+        println!("Root {}", root.link);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_remove_collapse() {
+        let ipfs = IpfsService::default();
+
+        // Pre-generated with hamt_linear_insert;
+        let mut root = Cid::try_from("bafyreibk3jg65ukzj5i3lolkmm6cl6yzz7mzrqesrja4msro7lfo3s6exy")
+            .unwrap()
+            .into();
+
+        let key =
+            Cid::try_from("bafyreiarw4llrjyv6ctuhyupx65tzbgr37kkiyjwyxj6blnmekpfx32ysu").unwrap();
+
+        if let Err(e) = remove(&ipfs, &mut root, key).await {
+            panic!("Root: {} Key: {} Error: {}", root.link, key, e);
+        }
+
+        let key =
+            Cid::try_from("bafyreiark2h2b2yumkvhzqttaw66eyu4benkpbyk34qwokj6s6ftafxl6m").unwrap();
+
+        match remove(&ipfs, &mut root, key).await {
+            Ok(()) => println!("Root: {}", root.link),
+            Err(e) => panic!("Root: {} Key: {} Error: {}", root.link, key, e),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_linear_remove() {
+        let ipfs = IpfsService::default();
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
+
+        // Pre-generated with hamt_random_insert;
+        let mut root = Cid::try_from("bafyreibk3jg65ukzj5i3lolkmm6cl6yzz7mzrqesrja4msro7lfo3s6exy")
+            .unwrap()
+            .into();
+
+        for _ in 0..256 {
+            let key = random_cid(&mut rng);
+
+            if let Err(e) = remove(&ipfs, &mut root, key).await {
+                panic!("Root: {} Key: {} Error: {}", root.link, key, e);
+            }
+        }
+
+        let sum = values(&ipfs, root)
+            .fold(0, |acc, _| async move { acc + 1 })
+            .await;
+
+        assert_eq!(0, sum);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn hamt_fuzzy() {
+        let ipfs = IpfsService::default();
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
+
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
+            .unwrap()
+            .into();
+
+        let value =
+            Cid::try_from("bafyreih62zarvnosx5aktyzkhk6ufn5b33eqmm5te5ozor25r3rfigznje").unwrap();
+
+        let count = 500;
+
+        let mut keys = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            if keys.is_empty() || rng.gen_ratio(2, 3) {
+                let key = random_cid(&mut rng);
+
+                keys.push(key);
+
+                if let Err(e) = insert(&ipfs, &mut root, key, value).await {
+                    panic!("Index: {} Key: {} Error: {}", root.link, key, e);
+                }
+            } else {
+                let idx = rng.gen_range(0..keys.len());
+
+                let key = keys.remove(idx);
+
+                if let Err(e) = remove(&ipfs, &mut root, key).await {
+                    panic!("Root: {} Key: {} Error: {}", root.link, key, e);
+                }
+            }
+        }
+
+        let sum = values(&ipfs, root)
+            .fold(0, |acc, _| async move { acc + 1 })
+            .await;
+
+        println!("Final Count {} Root {}", sum, root.link);
+    }
+}
