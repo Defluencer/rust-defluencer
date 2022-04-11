@@ -17,7 +17,7 @@ Defluencer is a protocol built on top of the inter-planetary file system (IPFS).
 
 Social media content added to IPFS is **cryptographically signed**. By doing so, each piece of content becomes **verifiable**.
 
-Websites or applications folowing the protocol also become **interoperable** with each other.
+Websites or applications folowing the protocol become **interoperable** with each other for the same reasons.
 
 # Channel Anchoring
 
@@ -31,4 +31,4 @@ The protocol is agnostic to this anchoring system. Blockchains, DIDs or even web
 
 Having permanent identifier for channels is good but who want to remember a number? Channels should have names like websites.
 
-Ethereum name service can be use to associate a name to an IPNS address. Again, the protocol is agnostic to this anchoring system, you can use what you want.
+Ethereum name service can be use to associate a name to an IPNS address. Again, the protocol is agnostic to this, you can use what you want.

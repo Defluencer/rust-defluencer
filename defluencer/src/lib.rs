@@ -32,10 +32,7 @@ use heck::{ToSnakeCase, ToTitleCase};
 
 use indexing::hamt;
 use linked_data::{
-    channel::ChannelMetadata,
-    follows::Follows,
-    identity::Identity,
-    indexes::{date_time::*, log::ChainLink},
+    channel::ChannelMetadata, follows::Follows, identity::Identity, indexes::date_time::*,
 };
 
 use ipfs_api::{
@@ -221,7 +218,7 @@ impl Defluencer {
                     Err(_) => None,
                 }
             })
-            .flatten_unordered(0)
+            .flatten()
             .filter_map(|ipld| async move {
                 match self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await {
                     Ok(identity) => Some((ipld.link, identity)),
@@ -232,92 +229,73 @@ impl Defluencer {
             .await
     }
 
-    /* pub async fn web_crawl_step(
-        &self,
-        ipns_addresses: HashSet<IPNSAddress>,
-    ) -> HashSet<IPNSAddress> {
-        let stream: FuturesUnordered<_> = ipns_addresses
-            .iter()
-            .map(|ipns| self.ipfs.name_resolve(*ipns))
-            .collect();
-
-        let set: HashSet<IPNSAddress> = stream
-            .filter_map(|result| async move {
-                match result {
-                    Ok(cid) => Some(self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await),
-                    Err(e) => Some(Err(e)),
-                }
-            })
-            .filter_map(|result| async move {
-                match result {
-                    Ok(channel) => match channel.follows {
-                        Some(ipld) => {
-                            match self.ipfs.dag_get::<&str, Follows>(ipld.link, None).await {
-                                Ok(follows) => Some(stream::iter(follows.followees)),
-                                Err(_) => None,
-                            }
-                        }
-                        None => None,
-                    },
-                    Err(_) => None,
-                }
-            })
-            .flatten()
-            .filter_map(|ipld| async move {
-                match self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await {
-                    Ok(identity) => match identity.channel_ipns {
-                        Some(ipns) => Some(ipns),
-                        None => None,
-                    },
-                    Err(_) => None,
-                }
-            })
-            .collect()
-            .await;
-
-        // Set of addresses to crawl next
-        let unknown = &set - &ipns_addresses;
-
-        unknown
-    } */
-
-    /// Lazilly stream content from the linear log.
-    pub fn stream_content_log(
+    /// Returns all followees channels on the social web,
+    /// one more degree of separation each iteration.
+    pub async fn streaming_web_crawl(
         &self,
         channel: &ChannelMetadata,
-    ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        stream::try_unfold(channel.content_index.log, move |mut previous| async move {
-            let cid = match previous {
-                Some(ipld) => ipld.link,
-                None => return Ok(None),
+    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
+        stream::try_unfold(Some(channel.identity), move |mut identity| async move {
+            let ipld = match identity.take() {
+                Some(ipld) => ipld,
+                None => return Result::<_, Error>::Ok(None),
             };
 
-            let chainlink = self.ipfs.dag_get::<&str, ChainLink>(cid, None).await?;
+            let id = self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await?;
 
-            previous = chainlink.previous;
-
-            return Ok(Some((chainlink.media.link, previous)));
+            return Ok(Some((id, identity)));
         })
+        .map_ok(|identity| self.web_crawl_step(identity))
+        .try_flatten()
     }
 
-    /// Lazilly stream content from the chronological index.
+    fn web_crawl_step(
+        &self,
+        identity: Identity,
+    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
+        stream::try_unfold(
+            (Some(identity), HashMap::new(), HashMap::new()),
+            move |(mut identity, mut visited, mut unvisited)| async move {
+                let map = match (identity.take(), unvisited.len()) {
+                    (Some(id), _) => self.get_channels(std::iter::once(&id)).await,
+                    (None, x) if x != 0 => {
+                        let identities = self.get_followees_identity(unvisited.values()).await;
+
+                        self.get_channels(identities.values()).await
+                    }
+                    (_, _) => return Result::<_, Error>::Ok(None),
+                };
+
+                let diff = map
+                    .into_iter()
+                    .filter_map(|(key, channel)| match visited.insert(key, channel) {
+                        Some(_) => None,
+                        None => Some((key, channel)),
+                    })
+                    .collect::<HashMap<Cid, ChannelMetadata>>();
+
+                unvisited = diff.clone();
+
+                return Ok(Some((diff, (identity, visited, unvisited))));
+            },
+        )
+    }
+
+    /// Lazily stream a channel's content.
     pub fn stream_content_chronologically(
         &self,
         channel: &ChannelMetadata,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        stream::try_unfold(
-            channel.content_index.date_time,
-            move |mut datetime| async move {
-                let ipld = match datetime.take() {
-                    Some(ipld) => ipld,
-                    None => return Result::<_, Error>::Ok(None),
-                };
+        stream::try_unfold(channel.content_index, move |mut datetime| async move {
+            let ipld = match datetime.take() {
+                Some(ipld) => ipld,
+                None => return Result::<_, Error>::Ok(None),
+            };
 
-                let yearly = self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await?;
+            let yearly = self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await?;
 
-                return Ok(Some((yearly, datetime)));
-            },
-        )
+            return Ok(Some((yearly, datetime)));
+        })
         .map_ok(|year| self.stream_months(year))
         .try_flatten()
         .map_ok(|month| self.stream_days(month))
@@ -419,7 +397,7 @@ impl Defluencer {
         channel: &ChannelMetadata,
         content_cid: Cid,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        stream::try_unfold(channel.comment_index.hamt, move |mut index| async move {
+        stream::try_unfold(channel.comment_index, move |mut index| async move {
             let ipld = match index.take() {
                 Some(ipld) => ipld,
                 None => return Result::<_, Error>::Ok(None),

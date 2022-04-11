@@ -14,7 +14,7 @@ use linked_data::{
     comments::Comment,
     media::{
         blog::{FullPost, MicroPost},
-        video::{DayBlock, HourBlock, MinuteBlock, Video},
+        video::{Day, Hour, Minute, Video},
     },
     IPLDLink,
 };
@@ -173,20 +173,19 @@ where
     }
 
     async fn video_duration(&self, video: Cid) -> Result<f64, Error> {
-        let days: DayBlock = self.ipfs.dag_get(video, Some("/time")).await?;
+        let days: Day = self.ipfs.dag_get(video, Some("/time")).await?;
 
         let mut duration = 0.0;
 
         for (i, ipld) in days.links_to_hours.iter().enumerate().rev().take(1) {
             duration += (i * 3600) as f64; // 3600 second in 1 hour
 
-            let hours: HourBlock = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
+            let hours: Hour = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
 
             for (i, ipld) in hours.links_to_minutes.iter().enumerate().rev().take(1) {
                 duration += (i * 60) as f64; // 60 second in 1 minute
 
-                let minutes: MinuteBlock =
-                    self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
+                let minutes: Minute = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
 
                 duration += (minutes.links_to_seconds.len() - 1) as f64;
             }

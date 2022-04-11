@@ -83,7 +83,7 @@ impl ContentCache {
     /// Idempotent way to add comments.
     ///
     /// Note that the identity is the comment creator's not the media's
-    pub fn insert_media_comments(&mut self, media: Cid, comment: Cid, identity: Cid) {
+    pub fn insert_media_comment(&mut self, media: Cid, comment: Cid, identity: Cid) {
         let comment_idx = self.comment_index(comment);
         let media_idx = self.media_index(media);
         let id_idx = self.identity_index(identity);
