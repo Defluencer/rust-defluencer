@@ -1,10 +1,8 @@
-use crate::{Address, PeerId};
+use crate::types::{Address, PeerId};
 
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
-
-use serde_with::{serde_as, DisplayFromStr};
 
 /// List of banned users.
 /// Direct pin.
@@ -22,10 +20,9 @@ pub struct Moderators {
 
 /// Message to ban/unban a user.
 /// Should be signed by a moderator.
-#[serde_as]
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Ban {
-    #[serde_as(as = "DisplayFromStr")]
     pub ban_peer: PeerId,
 
     pub ban_addrs: Address,
@@ -33,10 +30,9 @@ pub struct Ban {
 
 /// Message to mod/unmod a user.
 /// Should be signed by an administrator.
-#[serde_as]
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Moderator {
-    #[serde_as(as = "DisplayFromStr")]
     pub mod_peer: PeerId,
 
     pub mod_addrs: Address,

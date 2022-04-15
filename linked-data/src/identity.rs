@@ -1,10 +1,7 @@
-use crate::{IPLDLink, IPNSAddress};
+use crate::types::{IPLDLink, IPNSAddress};
 
 use serde::{Deserialize, Serialize};
 
-use serde_with::{serde_as, DisplayFromStr};
-
-#[serde_as]
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct Identity {
     /// Public choosen name.
@@ -15,7 +12,6 @@ pub struct Identity {
 
     /// IPNS address.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
     pub channel_ipns: Option<IPNSAddress>,
 
     /// ENS domain name.

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::IPLDLink;
+use crate::types::IPLDLink;
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct ChainLink {

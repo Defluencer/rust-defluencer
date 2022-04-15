@@ -1,11 +1,8 @@
-use crate::{
-    moderation::{Ban, Moderator},
-    IPLDLink, PeerId,
-};
+use crate::moderation::{Ban, Moderator};
+
+use crate::types::{IPLDLink, PeerId};
 
 use serde::{Deserialize, Serialize};
-
-use serde_with::{serde_as, DisplayFromStr};
 
 /// CID of crypto-signed ChatID.
 pub type ChatSig = cid::Cid;
@@ -28,10 +25,8 @@ pub enum MessageType {
     Mod(Moderator),
 }
 
-#[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChatId {
-    #[serde_as(as = "DisplayFromStr")]
     pub peer_id: PeerId,
 
     pub name: String,

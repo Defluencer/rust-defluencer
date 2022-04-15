@@ -16,7 +16,7 @@ use linked_data::{
         blog::{FullPost, MicroPost},
         video::{Day, Hour, Minute, Video},
     },
-    IPLDLink,
+    types::IPLDLink,
 };
 
 use serde::Serialize;

@@ -20,7 +20,7 @@ use linked_data::{
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
-    Address, IPLDLink, IPNSAddress, PeerId,
+    types::{Address, IPLDLink, IPNSAddress, PeerId},
 };
 
 #[derive(Clone)]
@@ -85,7 +85,7 @@ where
         &self,
         display_name: Option<String>,
         avatar: Option<web_sys::File>,
-        channel_ipns: Option<Cid>,
+        channel_ipns: Option<IPNSAddress>,
         channel_ens: Option<String>,
     ) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
@@ -458,14 +458,14 @@ where
 }
 
 impl Channel<IPNSAnchor> {
-    pub async fn get_ipns_address(&self) -> Result<IPNSAddress, Error> {
+    pub async fn get_ipns_address(&self) -> Result<Option<IPNSAddress>, Error> {
         let key_list = self.ipfs.key_list().await?;
 
-        let cid = match key_list.get(self.anchor.get_name()) {
-            Some(keypair) => *keypair,
-            None => return Err(ipfs_api::errors::Error::Ipns.into()),
+        let ipns = match key_list.get(self.anchor.get_name()) {
+            Some(cid) => (*cid).into(),
+            None => return Ok(None),
         };
 
-        Ok(cid)
+        Ok(Some(ipns))
     }
 }

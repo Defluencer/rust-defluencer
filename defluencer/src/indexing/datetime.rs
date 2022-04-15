@@ -8,7 +8,7 @@ use cid::Cid;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
-use linked_data::{indexes::date_time::*, IPLDLink};
+use linked_data::{indexes::date_time::*, types::IPLDLink};
 
 pub(crate) async fn insert(
     ipfs: &IpfsService,

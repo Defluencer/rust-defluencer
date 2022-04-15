@@ -4,7 +4,7 @@ use bitvec::BitArr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::IPLDLink;
+use crate::types::IPLDLink;
 
 // https://ipld.io/specs/advanced-data-layouts/hamt/spec/#implementation-defaults
 pub const HASH_ALGORITHM: usize = 0x12; // SHA2-256 => 32 bytes digest

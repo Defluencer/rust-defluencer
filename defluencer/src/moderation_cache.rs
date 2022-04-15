@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use linked_data::{media::chat::ChatSig, Address, PeerId};
+use linked_data::{
+    media::chat::ChatSig,
+    types::{Address, PeerId},
+};
 
 /// Local cache of who is verified and/or banned.
 pub struct ChatModerationCache {

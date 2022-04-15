@@ -15,7 +15,7 @@ use linked_data::{
         BitField, BucketEntry, Element, HAMTNode, HAMTRoot, BUCKET_SIZE, DIGEST_LENGTH_BYTES,
         HASH_ALGORITHM,
     },
-    IPLDLink,
+    types::IPLDLink,
 };
 
 use crate::errors::Error;

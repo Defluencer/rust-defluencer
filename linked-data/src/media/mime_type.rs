@@ -1,4 +1,4 @@
-use crate::IPLDLink;
+use crate::types::IPLDLink;
 
 use std::borrow::Cow;
 

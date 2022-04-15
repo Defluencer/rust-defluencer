@@ -33,6 +33,7 @@ use heck::{ToSnakeCase, ToTitleCase};
 use indexing::hamt;
 use linked_data::{
     channel::ChannelMetadata, follows::Follows, identity::Identity, indexes::date_time::*,
+    types::IPNSAddress,
 };
 
 use ipfs_api::{
@@ -106,7 +107,7 @@ impl Defluencer {
 
         let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
         let KeyPair { id, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
-        let ipns = Cid::try_from(id)?;
+        let ipns = IPNSAddress::try_from(id)?;
 
         let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
         let channel = Channel::new(self.ipfs.clone(), anchor);
@@ -173,6 +174,14 @@ impl Defluencer {
         Ok(channel)
     }
 
+    /* /// Subscribe to receive new channel CID.
+    pub fn subscribe_channel_updates(
+        &self,
+        identity: &Identity,
+    ) -> impl Stream<Item = Result<(Cid, ChannelMetadata), Error>> + '_ {
+        todo!()
+    } */
+
     /// Return all the cids and channels of all the identities provided.
     pub async fn get_channels(
         &self,
@@ -180,7 +189,7 @@ impl Defluencer {
     ) -> HashMap<Cid, ChannelMetadata> {
         let stream: FuturesUnordered<_> = identities
             .filter_map(|identity| match identity.channel_ipns {
-                Some(ipns) => Some(self.ipfs.name_resolve(ipns)),
+                Some(ipns) => Some(self.ipfs.name_resolve(ipns.into())),
                 None => None,
             })
             .collect();
@@ -414,27 +423,4 @@ impl Defluencer {
         })
         .try_flatten()
     }
-
-    /* pub async fn stream_comments(
-        &self,
-        channel: &ChannelMetadata,
-        content_cid: Cid,
-    ) -> impl Stream<Item = Cid> + '_ {
-        stream::unfold(channel.comment_index.hamt, move |mut index| async move {
-            match index {
-                Some(ipld) => match hamt::get(&self.ipfs, ipld, content_cid).await {
-                    Ok(comments) => {
-                        index = None;
-
-                        let stream = hamt::values(&self.ipfs, comments.into());
-
-                        Some((stream, index))
-                    }
-                    Err(_) => None,
-                },
-                None => None,
-            }
-        })
-        .flatten()
-    } */
 }

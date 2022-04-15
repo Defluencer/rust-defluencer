@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::IPLDLink;
+use crate::types::IPLDLink;
 
 use serde::{Deserialize, Serialize};
 
