@@ -24,6 +24,7 @@ use ed25519_dalek::SecretKey;
 use errors::Error;
 
 use futures::{
+    future::AbortRegistration,
     stream::{self, FuturesUnordered},
     Stream, StreamExt, TryStreamExt,
 };
@@ -32,8 +33,11 @@ use heck::{ToSnakeCase, ToTitleCase};
 
 use indexing::hamt;
 use linked_data::{
-    channel::ChannelMetadata, follows::Follows, identity::Identity, indexes::date_time::*,
-    types::IPNSAddress,
+    channel::ChannelMetadata,
+    follows::Follows,
+    identity::Identity,
+    indexes::date_time::*,
+    types::{IPLDLink, IPNSAddress, IPNSRecord},
 };
 
 use ipfs_api::{
@@ -48,6 +52,8 @@ use rand_core::{OsRng, RngCore};
 use signatures::Signer;
 
 use user::User;
+
+use prost::Message;
 
 pub struct Defluencer {
     ipfs: IpfsService,
@@ -85,7 +91,7 @@ impl Defluencer {
     /// Create an new channel on this node.
     ///
     /// Returns channel and a secret passphrase used to recreate this channel elsewhere.
-    pub async fn create_channel(
+    pub async fn create_local_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
     ) -> Result<(Mnemonic, Channel<IPNSAnchor>), Error> {
@@ -120,7 +126,7 @@ impl Defluencer {
     }
 
     /// Returns a channel by name previously created or imported on this node.
-    pub async fn get_channel(
+    pub async fn get_local_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
     ) -> Result<Channel<IPNSAnchor>, Error> {
@@ -174,16 +180,126 @@ impl Defluencer {
         Ok(channel)
     }
 
-    /* /// Subscribe to receive new channel CID.
+    /// Subscribe to receive new channel CID.
     pub fn subscribe_channel_updates(
         &self,
-        identity: &Identity,
+        channel_ipns: IPNSAddress,
+        regis: AbortRegistration,
     ) -> impl Stream<Item = Result<(Cid, ChannelMetadata), Error>> + '_ {
-        todo!()
-    } */
+        use signature::Verifier;
+
+        stream::once(async move {
+            let mut channel_cid = self.ipfs.name_resolve(channel_ipns.into()).await?;
+
+            let topic = channel_ipns.to_pubsub_topic();
+
+            let stream = self
+                .ipfs
+                .pubsub_sub(topic.into_bytes(), regis)
+                .err_into()
+                .try_filter_map(move |msg| async move {
+                    let IPNSRecord {
+                        value,
+                        signature,
+                        validity_type: _,
+                        validity,
+                        sequence: _,
+                        ttl: _,
+                        public_key,
+                    } = IPNSRecord::decode(msg.data.as_ref())?;
+
+                    let cid_string = String::from_utf8(value.clone())?;
+                    let cid = Cid::try_from(cid_string)?;
+
+                    if cid == channel_cid {
+                        return Ok(None);
+                    } else {
+                        let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key)?;
+                        let mut signing_input = Vec::with_capacity(
+                            value.len() + validity.len() + 8, /*u64 == 8 bytes */
+                        );
+
+                        signing_input.extend(value);
+                        signing_input.extend(validity);
+                        signing_input.extend([0u8; 8]);
+
+                        let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
+
+                        if public_key.verify(&signing_input, &signature).is_ok() {
+                            channel_cid = cid;
+
+                            return Ok(Some(channel_cid));
+                        }
+
+                        return Ok(None);
+                    }
+                });
+
+            Result::<_, Error>::Ok(stream)
+        })
+        .try_flatten()
+        .and_then(move |cid| async move {
+            let channel = self
+                .ipfs
+                .dag_get::<&str, ChannelMetadata>(cid, None)
+                .await?;
+
+            return Ok((cid, channel));
+        })
+    }
+
+    /// Returns all followees channels on the social web,
+    /// one more degree of separation each iteration.
+    pub async fn streaming_web_crawl(
+        &self,
+        identity: IPLDLink,
+    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
+        stream::once(async move {
+            let id = self
+                .ipfs
+                .dag_get::<&str, Identity>(identity.link, None)
+                .await?;
+
+            Result::<_, Error>::Ok(id)
+        })
+        .map_ok(|identity| self.web_crawl_step(identity))
+        .try_flatten()
+    }
+
+    fn web_crawl_step(
+        &self,
+        identity: Identity,
+    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
+        stream::try_unfold(
+            (Some(identity), HashMap::new(), HashMap::new()),
+            move |(mut identity, mut visited, mut unvisited)| async move {
+                let map = match (identity.take(), unvisited.len()) {
+                    (Some(id), _) => self.channels_metadata(std::iter::once(&id)).await,
+                    (None, x) if x != 0 => {
+                        let identities = self.followees_identity(unvisited.values()).await;
+
+                        self.channels_metadata(identities.values()).await
+                    }
+                    (_, _) => return Result::<_, Error>::Ok(None),
+                };
+
+                let diff = map
+                    .into_iter()
+                    .filter_map(|(key, channel)| match visited.insert(key, channel) {
+                        Some(_) => None,
+                        None => Some((key, channel)),
+                    })
+                    .collect::<HashMap<Cid, ChannelMetadata>>();
+
+                unvisited = diff.clone();
+
+                return Ok(Some((diff, (identity, visited, unvisited))));
+            },
+        )
+    }
 
     /// Return all the cids and channels of all the identities provided.
-    pub async fn get_channels(
+    async fn channels_metadata(
         &self,
         identities: impl Iterator<Item = &Identity>,
     ) -> HashMap<Cid, ChannelMetadata> {
@@ -209,7 +325,7 @@ impl Defluencer {
     }
 
     /// Returns all the cids and identities of all the followees of all the channels provided.
-    pub async fn get_followees_identity(
+    async fn followees_identity(
         &self,
         channels: impl Iterator<Item = &ChannelMetadata>,
     ) -> HashMap<Cid, Identity> {
@@ -238,72 +354,18 @@ impl Defluencer {
             .await
     }
 
-    /// Returns all followees channels on the social web,
-    /// one more degree of separation each iteration.
-    pub async fn streaming_web_crawl(
-        &self,
-        channel: &ChannelMetadata,
-    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
-        stream::try_unfold(Some(channel.identity), move |mut identity| async move {
-            let ipld = match identity.take() {
-                Some(ipld) => ipld,
-                None => return Result::<_, Error>::Ok(None),
-            };
-
-            let id = self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await?;
-
-            return Ok(Some((id, identity)));
-        })
-        .map_ok(|identity| self.web_crawl_step(identity))
-        .try_flatten()
-    }
-
-    fn web_crawl_step(
-        &self,
-        identity: Identity,
-    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
-        stream::try_unfold(
-            (Some(identity), HashMap::new(), HashMap::new()),
-            move |(mut identity, mut visited, mut unvisited)| async move {
-                let map = match (identity.take(), unvisited.len()) {
-                    (Some(id), _) => self.get_channels(std::iter::once(&id)).await,
-                    (None, x) if x != 0 => {
-                        let identities = self.get_followees_identity(unvisited.values()).await;
-
-                        self.get_channels(identities.values()).await
-                    }
-                    (_, _) => return Result::<_, Error>::Ok(None),
-                };
-
-                let diff = map
-                    .into_iter()
-                    .filter_map(|(key, channel)| match visited.insert(key, channel) {
-                        Some(_) => None,
-                        None => Some((key, channel)),
-                    })
-                    .collect::<HashMap<Cid, ChannelMetadata>>();
-
-                unvisited = diff.clone();
-
-                return Ok(Some((diff, (identity, visited, unvisited))));
-            },
-        )
-    }
-
     /// Lazily stream a channel's content.
     pub fn stream_content_chronologically(
         &self,
-        channel: &ChannelMetadata,
+        content_index: IPLDLink,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        stream::try_unfold(channel.content_index, move |mut datetime| async move {
-            let ipld = match datetime.take() {
-                Some(ipld) => ipld,
-                None => return Result::<_, Error>::Ok(None),
-            };
+        stream::once(async move {
+            let yearly = self
+                .ipfs
+                .dag_get::<&str, Yearly>(content_index.link, None)
+                .await?;
 
-            let yearly = self.ipfs.dag_get::<&str, Yearly>(ipld.link, None).await?;
-
-            return Ok(Some((yearly, datetime)));
+            Result::<_, Error>::Ok(yearly)
         })
         .map_ok(|year| self.stream_months(year))
         .try_flatten()
@@ -403,23 +465,19 @@ impl Defluencer {
     /// Lazily stream all the comments for some content on the channel
     pub async fn stream_comments(
         &self,
-        channel: &ChannelMetadata,
+        comment_index: IPLDLink,
         content_cid: Cid,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        stream::try_unfold(channel.comment_index, move |mut index| async move {
-            let ipld = match index.take() {
-                Some(ipld) => ipld,
-                None => return Result::<_, Error>::Ok(None),
-            };
+        stream::once(async move {
+            let comments = hamt::get(&self.ipfs, comment_index, content_cid).await?;
 
-            let comments = match hamt::get(&self.ipfs, ipld, content_cid).await? {
-                Some(comments) => comments,
-                None => return Result::<_, Error>::Ok(None),
-            };
-
-            let stream = hamt::values(&self.ipfs, comments.into());
-
-            Ok(Some((stream, index)))
+            Result::<_, Error>::Ok(comments)
+        })
+        .try_filter_map(move |option| async move {
+            match option {
+                Some(comments) => Ok(Some(hamt::values(&self.ipfs, comments.into()))),
+                None => Ok(None),
+            }
         })
         .try_flatten()
     }

@@ -42,11 +42,12 @@ mod tests {
         let subscribe = async {
             let ipfs = IpfsService::default();
 
-            let res = ipfs.pubsub_sub(TOPIC).await.unwrap();
-
             let (_, regis) = AbortHandle::new_pair();
 
-            let mut stream = ipfs_api::pubsub_stream(res, regis).take(1).fuse();
+            let mut stream = ipfs
+                .pubsub_sub(TOPIC.as_bytes().to_owned(), regis)
+                .take(1)
+                .boxed_local();
 
             stream.next().await.unwrap()
         };

@@ -8,9 +8,13 @@ mod tests {
     use defluencer::signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer};
 
     use ed25519::KeypairBytes;
-    use ipfs_api::IpfsService;
+    use futures::{future::AbortHandle, StreamExt};
+    use ipfs_api::{responses::PubSubMessage, IpfsService};
 
-    use linked_data::signature::RawJWS;
+    use linked_data::{
+        signature::RawJWS,
+        types::{IPNSAddress, IPNSRecord},
+    };
 
     use pkcs8::{EncodePrivateKey, LineEnding};
 
@@ -69,4 +73,36 @@ mod tests {
 
         assert_eq!(&bytes, mnemonic.entropy());
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn ipns_pubsub() {
+        let ipfs = IpfsService::default();
+
+        let ipns: IPNSAddress =
+            Cid::try_from("bafzaajaiaejcbzhovvpbohh2fjeosmfkak45n4hilt5wcxnum4btp5ztxyktac6r")
+                .unwrap()
+                .into();
+
+        let topic = ipns.to_pubsub_topic();
+
+        println!("{}", topic);
+
+        let (handle, regis) = AbortHandle::new_pair();
+
+        let mut stream = ipfs.pubsub_sub(topic.into_bytes(), regis).boxed_local();
+
+        let msg = stream.next().await.unwrap().unwrap();
+
+        let PubSubMessage { from: _, data } = msg;
+
+        use prost::Message;
+
+        let record: IPNSRecord = IPNSRecord::decode(data.as_ref()).unwrap();
+
+        println!("{:?}", record);
+
+        handle.abort();
+    }
+
+    //TODO take record from ipns_pubsub() then test verify the signature
 }

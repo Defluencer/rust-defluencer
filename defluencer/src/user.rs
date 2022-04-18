@@ -12,11 +12,12 @@ use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
     comments::Comment,
+    identity::Identity,
     media::{
         blog::{FullPost, MicroPost},
         video::{Day, Hour, Minute, Video},
     },
-    types::IPLDLink,
+    types::{IPLDLink, IPNSAddress},
 };
 
 use serde::Serialize;
@@ -40,6 +41,80 @@ where
             signer,
             identity,
         }
+    }
+
+    /// Update your identity data.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn update_identity(
+        &mut self,
+        display_name: Option<String>,
+        avatar: Option<&std::path::Path>,
+        channel_ipns: Option<IPNSAddress>,
+        channel_ens: Option<String>,
+    ) -> Result<(), Error> {
+        let mut identity = self
+            .ipfs
+            .dag_get::<&str, Identity>(self.identity.link, None)
+            .await?;
+
+        if let Some(name) = display_name {
+            identity.display_name = name;
+        }
+
+        if let Some(avatar) = avatar {
+            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
+        }
+
+        if let Some(ipns) = channel_ipns {
+            identity.channel_ipns = Some(ipns);
+        }
+
+        if let Some(ens) = channel_ens {
+            identity.channel_ens = Some(ens);
+        }
+
+        let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
+
+        self.identity = cid.into();
+
+        Ok(())
+    }
+
+    /// Update your identity data.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn update_identity(
+        &mut self,
+        display_name: Option<String>,
+        avatar: Option<web_sys::File>,
+        channel_ipns: Option<IPNSAddress>,
+        channel_ens: Option<String>,
+    ) -> Result<(), Error> {
+        let mut identity = self
+            .ipfs
+            .dag_get::<&str, Identity>(self.identity.link, None)
+            .await?;
+
+        if let Some(name) = display_name {
+            identity.display_name = name;
+        }
+
+        if let Some(avatar) = avatar {
+            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
+        }
+
+        if let Some(ipns) = channel_ipns {
+            identity.channel_ipns = Some(ipns);
+        }
+
+        if let Some(ens) = channel_ens {
+            identity.channel_ens = Some(ens);
+        }
+
+        let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
+
+        self.identity = cid.into();
+
+        Ok(())
     }
 
     /// Create a new micro blog post.

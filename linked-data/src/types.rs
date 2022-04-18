@@ -5,6 +5,8 @@ use serde_with::{serde_as, DisplayFromStr};
 
 use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
 
+use prost::{self, Enumeration, Message};
+
 /// Ethereum address
 pub type Address = [u8; 20];
 
@@ -67,10 +69,10 @@ impl Into<Cid> for IPNSAddress {
 
 impl IPNSAddress {
     pub fn from_pubsub_topic(topic: String) -> Result<Self, Box<dyn std::error::Error>> {
-        // "/record/".len()
+        // "/record/".len() == 8
         let decoded = Base::Base64Url.decode(&topic[8..])?;
 
-        // "/ipns/".len()
+        // "/ipns/".len() == 6
         let cid = Cid::try_from(&decoded[6..])?;
 
         let cid_v1 = Cid::new_v1(0x72, *cid.hash());
@@ -93,23 +95,34 @@ impl Display for IPNSAddress {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+#[repr(i32)]
+pub enum ValidityType {
+    EOL = 0,
+}
+
+#[derive(Clone, PartialEq, Message)]
 pub struct IPNSRecord {
+    #[prost(bytes)]
     pub value: Vec<u8>,
 
-    pub validity: Vec<u8>,
-
-    #[serde(rename = "validityType")]
-    pub validity_type: u64,
-
+    #[prost(bytes)]
     pub signature: Vec<u8>,
 
+    #[prost(enumeration = "ValidityType")]
+    pub validity_type: i32,
+
+    #[prost(bytes)]
+    pub validity: Vec<u8>,
+
+    #[prost(uint64)]
     pub sequence: u64,
 
-    #[serde(rename = "pubKey")]
-    pub public_key: Vec<u8>,
-
+    #[prost(uint64)]
     pub ttl: u64,
+
+    #[prost(bytes)]
+    pub public_key: Vec<u8>,
 }
 
 #[serde_as]

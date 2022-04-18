@@ -36,6 +36,23 @@ impl<T> Channel<T>
 where
     T: Anchor + Clone,
 {
+    async fn get_channel(&self) -> Result<(Cid, ChannelMetadata), Error> {
+        let cid = self.anchor.retreive().await?;
+        let channel: ChannelMetadata = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
+
+        Ok((cid, channel))
+    }
+
+    async fn update_channel(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
+        let new_cid = self.ipfs.dag_put(channel, Codec::default()).await?;
+
+        self.ipfs.pin_update(old_cid, new_cid).await?;
+
+        self.anchor.anchor(new_cid).await?;
+
+        Ok(new_cid)
+    }
+
     pub fn new(ipfs: IpfsService, anchor: T) -> Self {
         Self { ipfs, anchor }
     }
@@ -418,7 +435,7 @@ where
     ///
     /// WARNING!
     /// This function pin ALL content from the channel.
-    /// The amout of data could be massive.
+    /// The amout of data downloaded could be massive.
     pub async fn pin_channel(&self) -> Result<(), Error> {
         let cid = self.anchor.retreive().await?;
 
@@ -436,24 +453,6 @@ where
         self.ipfs.pin_rm(cid, true).await?;
 
         Ok(())
-    }
-
-    async fn get_channel(&self) -> Result<(Cid, ChannelMetadata), Error> {
-        let cid = self.anchor.retreive().await?;
-        let channel: ChannelMetadata = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
-
-        Ok((cid, channel))
-    }
-
-    /// Returns new channel Cid
-    async fn update_channel(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
-        let new_cid = self.ipfs.dag_put(channel, Codec::default()).await?;
-
-        self.ipfs.pin_update(old_cid, new_cid).await?;
-
-        self.anchor.anchor(new_cid).await?;
-
-        Ok(new_cid)
     }
 }
 

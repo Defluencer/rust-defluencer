@@ -4,6 +4,9 @@ use crate::indexing::hamt;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("ProtoBuf: {0}")]
+    ProtoBuf(#[from] prost::DecodeError),
+
     #[error("HAMT: {0}")]
     HAMT(#[from] hamt::HAMTError),
 

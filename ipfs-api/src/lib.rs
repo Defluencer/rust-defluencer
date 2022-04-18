@@ -6,7 +6,7 @@ use std::{borrow::Cow, sync::Arc};
 use errors::{Error, IPFSError};
 use futures_util::{
     future::{AbortRegistration, Abortable},
-    AsyncBufReadExt, Stream, StreamExt, TryStreamExt,
+    stream, AsyncBufReadExt, Stream, StreamExt, TryStreamExt,
 };
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -20,14 +20,12 @@ use cid::{
 
 use reqwest::{
     multipart::{Form, Part},
-    Client, Response, Url,
+    Client, Url,
 };
 
 use bytes::Bytes;
 
 pub const DEFAULT_URI: &str = "http://127.0.0.1:5001/api/v0/";
-
-type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
 pub struct IpfsService {
@@ -56,7 +54,7 @@ impl IpfsService {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn add(&self, bytes: Bytes) -> Result<Cid> {
+    pub async fn add(&self, bytes: Bytes) -> Result<Cid, Error> {
         let url = self.base_url.join("add")?;
 
         let part = Part::stream(bytes);
@@ -86,7 +84,7 @@ impl IpfsService {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn add<S>(&self, stream: S) -> Result<Cid>
+    pub async fn add<S>(&self, stream: S) -> Result<Cid, Error>
     where
         S: futures_util::stream::TryStream + Send + Sync + 'static,
         S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -122,7 +120,7 @@ impl IpfsService {
     }
 
     /// Download content from block with this CID.
-    pub async fn cat<U>(&self, cid: Cid, path: Option<U>) -> Result<Bytes>
+    pub async fn cat<U>(&self, cid: Cid, path: Option<U>) -> Result<Bytes, Error>
     where
         U: Into<Cow<'static, str>>,
     {
@@ -147,7 +145,7 @@ impl IpfsService {
     }
 
     /// Pin a CID recursively or not.
-    pub async fn pin_add(&self, cid: Cid, recursive: bool) -> Result<PinAddResponse> {
+    pub async fn pin_add(&self, cid: Cid, recursive: bool) -> Result<PinAddResponse, Error> {
         let url = self.base_url.join("pin/add")?;
 
         let bytes = self
@@ -171,7 +169,7 @@ impl IpfsService {
         Err(error.into())
     }
 
-    pub async fn pin_update(&self, old: Cid, new: Cid) -> Result<PinRmResponse> {
+    pub async fn pin_update(&self, old: Cid, new: Cid) -> Result<PinRmResponse, Error> {
         let url = self.base_url.join("pin/update")?;
 
         let bytes = self
@@ -196,7 +194,7 @@ impl IpfsService {
     }
 
     /// Remove Pinned CID.
-    pub async fn pin_rm(&self, cid: Cid, recursive: bool) -> Result<PinRmResponse> {
+    pub async fn pin_rm(&self, cid: Cid, recursive: bool) -> Result<PinRmResponse, Error> {
         let url = self.base_url.join("pin/rm")?;
 
         let bytes = self
@@ -220,7 +218,7 @@ impl IpfsService {
         Err(error.into())
     }
 
-    pub async fn pin_ls(&self, pin_mode: PinMode) -> Result<PinList> {
+    pub async fn pin_ls(&self, pin_mode: PinMode) -> Result<PinList, Error> {
         let url = self.base_url.join("pin/ls")?;
 
         let bytes = self
@@ -244,7 +242,7 @@ impl IpfsService {
     }
 
     /// Serialize then add dag node to IPFS. Return a CID.
-    pub async fn dag_put<T>(&self, node: &T, store_codec: Codec) -> Result<Cid>
+    pub async fn dag_put<T>(&self, node: &T, store_codec: Codec) -> Result<Cid, Error>
     where
         T: ?Sized + Serialize,
     {
@@ -278,7 +276,7 @@ impl IpfsService {
     }
 
     /// Deserialize dag node from IPFS path. Return dag node.
-    pub async fn dag_get<U, T>(&self, cid: Cid, path: Option<U>) -> Result<T>
+    pub async fn dag_get<U, T>(&self, cid: Cid, path: Option<U>) -> Result<T, Error>
     where
         U: Into<Cow<'static, str>>,
         T: ?Sized + DeserializeOwned,
@@ -312,7 +310,7 @@ impl IpfsService {
         Err(error.into())
     }
 
-    pub async fn key_gen(&self, name: impl Into<Cow<'static, str>>) -> Result<KeyPair> {
+    pub async fn key_gen(&self, name: impl Into<Cow<'static, str>>) -> Result<KeyPair, Error> {
         let url = self.base_url.join("key/gen")?;
 
         let bytes = self
@@ -337,7 +335,7 @@ impl IpfsService {
     }
 
     /// Returns all IPNS keys on this IPFS node.
-    pub async fn key_list(&self) -> Result<KeyList> {
+    pub async fn key_list(&self) -> Result<KeyList, Error> {
         let url = self.base_url.join("key/list")?;
 
         let bytes = self
@@ -360,7 +358,7 @@ impl IpfsService {
         Err(error.into())
     }
 
-    pub async fn key_import<U>(&self, name: U, key_file: String) -> Result<KeyPair>
+    pub async fn key_import<U>(&self, name: U, key_file: String) -> Result<KeyPair, Error>
     where
         U: Into<Cow<'static, str>>,
     {
@@ -393,7 +391,7 @@ impl IpfsService {
     }
 
     /// Publish new IPNS record.
-    pub async fn name_publish<U>(&self, cid: Cid, key: U) -> Result<NamePublishResponse>
+    pub async fn name_publish<U>(&self, cid: Cid, key: U) -> Result<NamePublishResponse, Error>
     where
         U: Into<Cow<'static, str>>,
     {
@@ -423,7 +421,7 @@ impl IpfsService {
     }
 
     /// Resolve IPNS name. Returns CID.
-    pub async fn name_resolve(&self, ipns: Cid) -> Result<Cid> {
+    pub async fn name_resolve(&self, ipns: Cid) -> Result<Cid, Error> {
         let url = self.base_url.join("name/resolve")?;
 
         let bytes = self
@@ -447,7 +445,7 @@ impl IpfsService {
     }
 
     /// Get node associated with IPNS key.
-    pub async fn ipns_get<T>(&self, key: impl Into<Cow<'static, str>>) -> Result<(Cid, T)>
+    pub async fn ipns_get<T>(&self, key: impl Into<Cow<'static, str>>) -> Result<(Cid, T), Error>
     where
         T: ?Sized + DeserializeOwned,
     {
@@ -473,7 +471,7 @@ impl IpfsService {
         key: impl Into<Cow<'static, str>>,
         old_cid: Cid,
         content: &T,
-    ) -> Result<()>
+    ) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -492,7 +490,7 @@ impl IpfsService {
         key: impl Into<Cow<'static, str>>,
         recursive: bool,
         content: &T,
-    ) -> Result<()>
+    ) -> Result<(), Error>
     where
         T: ?Sized + Serialize,
     {
@@ -506,7 +504,7 @@ impl IpfsService {
     }
 
     ///Return peer id as cid v1.
-    pub async fn peer_id(&self) -> Result<Cid> {
+    pub async fn peer_id(&self) -> Result<Cid, Error> {
         let url = self.base_url.join("id")?;
 
         let bytes = self.client.post(url).send().await?.bytes().await?;
@@ -523,7 +521,7 @@ impl IpfsService {
     }
 
     /// Send data on the specified topic.
-    pub async fn pubsub_pub<T, D>(&self, topic: T, data: D) -> Result<()>
+    pub async fn pubsub_pub<T, D>(&self, topic: T, data: D) -> Result<(), Error>
     where
         T: AsRef<[u8]>,
         D: Into<Cow<'static, [u8]>>,
@@ -545,50 +543,48 @@ impl IpfsService {
         Ok(())
     }
 
-    pub async fn pubsub_sub<T>(&self, topic: T) -> Result<Response>
-    where
-        T: AsRef<[u8]>,
-    {
-        let url = self.base_url.join("pubsub/sub")?;
+    /// Subscribe to a topic and receive pubsub messages.
+    pub fn pubsub_sub(
+        &self,
+        topic: Vec<u8>,
+        regis: AbortRegistration,
+    ) -> impl Stream<Item = Result<PubSubMessage, Error>> + '_ {
+        stream::once(async move {
+            let url = self.base_url.join("pubsub/sub")?;
 
-        let topic = encode(Base::Base64Url, topic);
+            let topic = encode(Base::Base64Url, topic);
 
-        let response = self
-            .client
-            .post(url)
-            .query(&[("arg", topic)])
-            .send()
-            .await?;
+            let response = self
+                .client
+                .post(url)
+                .query(&[("arg", topic)])
+                .send()
+                .await?;
 
-        Ok(response)
+            let stream = response.bytes_stream();
+
+            let abortable_stream = Abortable::new(stream, regis);
+
+            let line_stream = abortable_stream
+                //TODO .err_into() require implement from reqwest error for std::io::Error
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))
+                .into_async_read()
+                .lines()
+                .map(|item| match item {
+                    Ok(line) => {
+                        if let Ok(response) = serde_json::from_str::<PubsubSubResponse>(&line) {
+                            return Ok(response.try_into()?);
+                        }
+
+                        let ipfs_error = serde_json::from_str::<IPFSError>(&line)?;
+
+                        return Err(ipfs_error.into());
+                    }
+                    Err(e) => Err(e.into()),
+                });
+
+            Result::<_, Error>::Ok(line_stream)
+        })
+        .try_flatten()
     }
-}
-
-pub fn pubsub_stream(
-    response: Response,
-    regis: AbortRegistration,
-) -> impl Stream<Item = Result<PubSubMessage>> {
-    let stream = response.bytes_stream();
-
-    let abortable_stream = Abortable::new(stream, regis);
-
-    //TODO implement from reqwest error for std::io::Error
-    let line_stream = abortable_stream
-        //.err_into()
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))
-        .into_async_read()
-        .lines();
-
-    line_stream.map(|item| match item {
-        Ok(line) => {
-            if let Ok(response) = serde_json::from_str::<PubsubSubResponse>(&line) {
-                return Ok(response.try_into()?);
-            }
-
-            let ipfs_error = serde_json::from_str::<IPFSError>(&line)?;
-
-            return Err(ipfs_error.into());
-        }
-        Err(e) => Err(e.into()),
-    })
 }
