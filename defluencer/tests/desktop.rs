@@ -2,19 +2,21 @@
 
 #[cfg(test)]
 mod tests {
+
     use bip39::{Language, Mnemonic};
     use cid::Cid;
 
-    use defluencer::signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer};
+    use defluencer::{
+        signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer},
+        Defluencer,
+    };
 
     use ed25519::KeypairBytes;
-    use futures::{future::AbortHandle, StreamExt};
-    use ipfs_api::{responses::PubSubMessage, IpfsService};
 
-    use linked_data::{
-        signature::RawJWS,
-        types::{IPNSAddress, IPNSRecord},
-    };
+    use futures::future::AbortHandle;
+    use ipfs_api::IpfsService;
+
+    use linked_data::{signature::RawJWS, types::IPNSAddress};
 
     use pkcs8::{EncodePrivateKey, LineEnding};
 
@@ -75,34 +77,26 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn ipns_pubsub() {
-        let ipfs = IpfsService::default();
+    async fn ipns_sub() {
+        use futures::StreamExt;
 
-        let ipns: IPNSAddress =
-            Cid::try_from("bafzaajaiaejcbzhovvpbohh2fjeosmfkak45n4hilt5wcxnum4btp5ztxyktac6r")
-                .unwrap()
-                .into();
+        let defluencer = Defluencer::default();
 
-        let topic = ipns.to_pubsub_topic();
+        let ipns = IPNSAddress::try_from(
+            "bafzaajaiaejcbzhovvpbohh2fjeosmfkak45n4hilt5wcxnum4btp5ztxyktac6r",
+        )
+        .unwrap();
 
-        println!("{}", topic);
+        let (_handle, regis) = AbortHandle::new_pair();
 
-        let (handle, regis) = AbortHandle::new_pair();
+        let mut stream = defluencer.subscribe_ipns_updates(ipns, regis).boxed_local();
 
-        let mut stream = ipfs.pubsub_sub(topic.into_bytes(), regis).boxed_local();
+        let cid = stream.next().await.unwrap().unwrap();
 
-        let msg = stream.next().await.unwrap().unwrap();
+        println!("Current {}", cid);
 
-        let PubSubMessage { from: _, data } = msg;
+        let cid = stream.next().await.unwrap().unwrap();
 
-        use prost::Message;
-
-        let record: IPNSRecord = IPNSRecord::decode(data.as_ref()).unwrap();
-
-        println!("{:?}", record);
-
-        handle.abort();
+        println!("New {}", cid);
     }
-
-    //TODO take record from ipns_pubsub() then test verify the signature
 }

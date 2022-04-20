@@ -37,11 +37,11 @@ use linked_data::{
     follows::Follows,
     identity::Identity,
     indexes::date_time::*,
-    types::{IPLDLink, IPNSAddress, IPNSRecord},
+    types::{CryptoKey, IPLDLink, IPNSAddress, IPNSRecord, ValidityType},
 };
 
 use ipfs_api::{
-    responses::{Codec, KeyPair},
+    responses::{Codec, KeyPair, PubSubMessage},
     IpfsService,
 };
 
@@ -55,17 +55,12 @@ use user::User;
 
 use prost::Message;
 
+#[derive(Default, Clone)]
 pub struct Defluencer {
     ipfs: IpfsService,
 }
 
 impl Defluencer {
-    pub fn new() -> Self {
-        let ipfs = IpfsService::default();
-
-        Self { ipfs }
-    }
-
     pub async fn create_user<T>(
         &self,
         user_name: impl Into<Cow<'static, str>>,
@@ -113,7 +108,7 @@ impl Defluencer {
 
         let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
         let KeyPair { id, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
-        let ipns = IPNSAddress::try_from(id)?;
+        let ipns = IPNSAddress::try_from(id.as_str())?;
 
         let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
         let channel = Channel::new(self.ipfs.clone(), anchor);
@@ -180,16 +175,22 @@ impl Defluencer {
         Ok(channel)
     }
 
-    /// Subscribe to receive new channel CID.
-    pub fn subscribe_channel_updates(
+    /// Subscribe to an IPNS address.
+    /// The first value returned is the current IPNS link.
+    ///
+    /// Each update's crypto-signature is verified.
+    ///
+    /// Only works for IPNS address pointing to a CID (for now).
+    pub fn subscribe_ipns_updates(
         &self,
         channel_ipns: IPNSAddress,
         regis: AbortRegistration,
-    ) -> impl Stream<Item = Result<(Cid, ChannelMetadata), Error>> + '_ {
+    ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
         use signature::Verifier;
 
         stream::once(async move {
-            let mut channel_cid = self.ipfs.name_resolve(channel_ipns.into()).await?;
+            let ipns = channel_ipns.into();
+            let mut channel_cid = self.ipfs.name_resolve(ipns).await?;
 
             let topic = channel_ipns.to_pubsub_topic();
 
@@ -198,54 +199,69 @@ impl Defluencer {
                 .pubsub_sub(topic.into_bytes(), regis)
                 .err_into()
                 .try_filter_map(move |msg| async move {
+                    let PubSubMessage { from: _, data } = msg;
+
                     let IPNSRecord {
                         value,
                         signature,
-                        validity_type: _,
+                        validity_type,
                         validity,
                         sequence: _,
                         ttl: _,
                         public_key,
-                    } = IPNSRecord::decode(msg.data.as_ref())?;
+                    } = IPNSRecord::decode(data.as_ref())?;
 
-                    let cid_string = String::from_utf8(value.clone())?;
-                    let cid = Cid::try_from(cid_string)?;
+                    let validity_type = match validity_type {
+                        0 => ValidityType::EOL, // The only possible answer for now
+                        _ => panic!("Does ValidityType now has more than one variant?"),
+                    };
+
+                    let cid_str = std::str::from_utf8(&value)?;
+                    let cid = Cid::try_from(cid_str)?;
 
                     if cid == channel_cid {
                         return Ok(None);
+                    }
+
+                    let public_key = if public_key.len() > 0 {
+                        ed25519_dalek::PublicKey::from_bytes(&public_key)?
                     } else {
-                        let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key)?;
-                        let mut signing_input = Vec::with_capacity(
-                            value.len() + validity.len() + 8, /*u64 == 8 bytes */
-                        );
+                        let key = CryptoKey::decode(ipns.hash().digest())?;
+                        ed25519_dalek::PublicKey::from_bytes(&key.data)?
+                    };
 
-                        signing_input.extend(value);
-                        signing_input.extend(validity);
-                        signing_input.extend([0u8; 8]);
+                    let mut signing_input = Vec::with_capacity(
+                        value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
+                    );
 
-                        let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
+                    signing_input.extend(value);
+                    signing_input.extend(validity);
+                    signing_input.extend(validity_type.to_string().as_bytes());
 
-                        if public_key.verify(&signing_input, &signature).is_ok() {
-                            channel_cid = cid;
+                    let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
 
-                            return Ok(Some(channel_cid));
-                        }
-
+                    if public_key.verify(&signing_input, &signature).is_err() {
                         return Ok(None);
                     }
+
+                    channel_cid = cid;
+
+                    return Ok(Some(channel_cid));
                 });
+
+            let stream = stream::once(async move { Ok(channel_cid) }).chain(stream);
 
             Result::<_, Error>::Ok(stream)
         })
         .try_flatten()
-        .and_then(move |cid| async move {
+        /* .and_then(move |cid| async move {
             let channel = self
                 .ipfs
                 .dag_get::<&str, ChannelMetadata>(cid, None)
                 .await?;
 
             return Ok((cid, channel));
-        })
+        }) */
     }
 
     /// Returns all followees channels on the social web,

@@ -33,7 +33,10 @@ pub enum Error {
     Cid(#[from] cid::Error),
 
     #[error("UTF-8: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
+    FromUtf8(#[from] std::string::FromUtf8Error),
+
+    #[error("UTF-8: {0}")]
+    Utf8(#[from] core::str::Utf8Error),
 
     #[error("Multibase: {0}")]
     Multibase(#[from] multibase::Error),

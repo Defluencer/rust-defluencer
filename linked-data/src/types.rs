@@ -6,6 +6,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
 
 use prost::{self, Enumeration, Message};
+use strum::Display;
 
 /// Ethereum address
 pub type Address = [u8; 20];
@@ -45,11 +46,11 @@ impl Display for PeerId {
 )]
 pub struct IPNSAddress(#[serde_as(as = "DisplayFromStr")] Cid);
 
-impl TryFrom<String> for IPNSAddress {
+impl TryFrom<&str> for IPNSAddress {
     type Error = cid::Error;
 
-    fn try_from(string: String) -> std::result::Result<Self, Self::Error> {
-        let cid = Cid::try_from(string)?;
+    fn try_from(str: &str) -> std::result::Result<Self, Self::Error> {
+        let cid = Cid::try_from(str)?;
 
         Ok(IPNSAddress(cid))
     }
@@ -95,7 +96,7 @@ impl Display for IPNSAddress {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration, Display)]
 #[repr(i32)]
 pub enum ValidityType {
     EOL = 0,
@@ -123,6 +124,24 @@ pub struct IPNSRecord {
 
     #[prost(bytes)]
     pub public_key: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+#[repr(i32)]
+pub enum KeyType {
+    RSA = 0,
+    Ed25519 = 1,
+    Secp256k1 = 2,
+    ECDSA = 3,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct CryptoKey {
+    #[prost(enumeration = "KeyType")]
+    pub key_type: i32,
+
+    #[prost(bytes)]
+    pub data: Vec<u8>,
 }
 
 #[serde_as]

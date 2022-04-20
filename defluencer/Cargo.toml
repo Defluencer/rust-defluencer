@@ -33,6 +33,7 @@ rand_core = { version = "0.6", default-features = false, features = ["getrandom"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = [] }
 signature = { version = "1", default-features = false, features = ["std"] }
+strum = { version = "0.24", default-features = false, features = ["derive"] }
 thiserror = { version = "1", default-features = false, features = [] }
 zeroize = { version = "1", default-features = false, features = [] }
 
