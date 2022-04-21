@@ -265,7 +265,7 @@ impl Defluencer {
     }
 
     /// Returns all followees channels on the social web,
-    /// one more degree of separation each iteration.
+    /// one more degree of separation each iteration without duplicates.
     pub async fn streaming_web_crawl(
         &self,
         identity: IPLDLink,
@@ -315,7 +315,7 @@ impl Defluencer {
     }
 
     /// Return all the cids and channels of all the identities provided.
-    async fn channels_metadata(
+    pub async fn channels_metadata(
         &self,
         identities: impl Iterator<Item = &Identity>,
     ) -> HashMap<Cid, ChannelMetadata> {
@@ -341,7 +341,7 @@ impl Defluencer {
     }
 
     /// Returns all the cids and identities of all the followees of all the channels provided.
-    async fn followees_identity(
+    pub async fn followees_identity(
         &self,
         channels: impl Iterator<Item = &ChannelMetadata>,
     ) -> HashMap<Cid, Identity> {

@@ -10,8 +10,8 @@ advanced ShardedMap { ADL "HAMT/v1" }
 
 type DateTime map [Time:&Media] using ChronologicalMap
 
-type Comments [Bytes:&Comment] using ShardedMap
-type CommentIndex map [Media:&Comments] using ShardedMap
+type Comments map [&Comment:&Comment] using ShardedMap # Keys are hashes of Cids
+type CommentIndex map [&Media:&Comments] using ShardedMap # Keys are hashes of Cids
 
 type ChannelMetadata struct {
     identity Identity

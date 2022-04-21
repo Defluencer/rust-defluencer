@@ -12,6 +12,7 @@ use strum::Display;
 pub type Address = [u8; 20];
 
 /// Peer IDs as CIDs v1
+// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#peer-ids
 #[serde_as]
 #[derive(
     Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord,
@@ -70,6 +71,8 @@ impl Into<Cid> for IPNSAddress {
 
 impl IPNSAddress {
     pub fn from_pubsub_topic(topic: String) -> Result<Self, Box<dyn std::error::Error>> {
+        // https://github.com/ipfs/specs/blob/master/IPNS.md#integration-with-ipfs
+
         // "/record/".len() == 8
         let decoded = Base::Base64Url.decode(&topic[8..])?;
 
@@ -82,6 +85,8 @@ impl IPNSAddress {
     }
 
     pub fn to_pubsub_topic(&self) -> String {
+        //https://github.com/ipfs/specs/blob/master/IPNS.md#integration-with-ipfs
+
         let mut bytes = String::from("/ipns/").into_bytes();
 
         bytes.extend(self.0.hash().to_bytes());
@@ -102,6 +107,7 @@ pub enum ValidityType {
     EOL = 0,
 }
 
+// https://github.com/ipfs/specs/blob/master/IPNS.md#ipns-record
 #[derive(Clone, PartialEq, Message)]
 pub struct IPNSRecord {
     #[prost(bytes)]
@@ -126,6 +132,7 @@ pub struct IPNSRecord {
     pub public_key: Vec<u8>,
 }
 
+// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#key-types
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
 #[repr(i32)]
 pub enum KeyType {
@@ -135,6 +142,7 @@ pub enum KeyType {
     ECDSA = 3,
 }
 
+// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#keys
 #[derive(Clone, PartialEq, Message)]
 pub struct CryptoKey {
     #[prost(enumeration = "KeyType")]
