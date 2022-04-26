@@ -20,7 +20,6 @@ pub struct Moderators {
 
 /// Message to ban/unban a user.
 /// Should be signed by a moderator.
-
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Ban {
     pub ban_peer: PeerId,
@@ -30,7 +29,6 @@ pub struct Ban {
 
 /// Message to mod/unmod a user.
 /// Should be signed by an administrator.
-
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Moderator {
     pub mod_peer: PeerId,

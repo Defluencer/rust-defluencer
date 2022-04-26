@@ -1,32 +1,36 @@
-use ipfs_api::{errors::Error, IpfsService};
-
-use linked_data::identity::Identity;
+use std::path::PathBuf;
 
 use cid::Cid;
 
-use structopt::StructOpt;
+use defluencer::{errors::Error, Defluencer};
 
-pub const IDENTITY_KEY: &str = "identity";
+use ipfs_api::{responses::Codec, IpfsService};
+use linked_data::identity::Identity;
+use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct IdentityCLI {
+    /// Channel local key name.
+    #[structopt(short, long)]
+    key_name: String,
+
     #[structopt(subcommand)]
     cmd: Command,
 }
 
 #[derive(Debug, StructOpt)]
 enum Command {
-    /// Choose a new display name.
-    Name(UpdateName),
+    /// Create an new identity not associated with a channel.
+    Create(Create),
 
-    /// Choose a new image avatar.
-    Avatar(UpdateAvatar),
+    /// Update channel identity.
+    Channel(Channel),
 }
 
 pub async fn identity_cli(cli: IdentityCLI) {
     let res = match cli.cmd {
-        Command::Name(name) => update_name(name).await,
-        Command::Avatar(avatar) => update_avatar(avatar).await,
+        Command::Create(args) => create(args).await,
+        Command::Channel(args) => update(cli.key_name, args).await,
     };
 
     if let Err(e) = res {
@@ -35,60 +39,91 @@ pub async fn identity_cli(cli: IdentityCLI) {
 }
 
 #[derive(Debug, StructOpt)]
-pub struct UpdateName {
+pub struct Create {
     /// Display name.
     #[structopt(short, long)]
-    name: String,
+    display_name: String,
+
+    /// Path to image file.
+    #[structopt(short, long)]
+    path: PathBuf,
+
+    /// IPNS address.
+    #[structopt(short, long)]
+    ipns: Option<Cid>,
+
+    /// ENS address.
+    #[structopt(short, long)]
+    ens: Option<String>,
 }
 
-async fn update_name(command: UpdateName) -> Result<(), Error> {
+async fn create(args: Create) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let UpdateName { name } = command;
+    let Create {
+        display_name,
+        path,
+        ipns,
+        ens,
+    } = args;
 
-    let res = ipfs.ipns_get(IDENTITY_KEY).await?;
-    let (old_id_cid, mut id): (Cid, Identity) = res.unwrap();
+    let channel_ipns = match ipns {
+        Some(ipns) => Some(ipns.into()),
+        None => None,
+    };
 
-    id.display_name = name;
+    let avatar = defluencer::utils::add_image(&ipfs, &path).await?.into();
 
-    ipfs.ipns_put(IDENTITY_KEY, false, &id).await?;
+    //TODO make avatar optional then use default avatar cid is needed
 
-    if let Err(e) = ipfs.pin_rm(&old_id_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_id_cid, e);
-    }
+    let identity = Identity {
+        display_name,
+        avatar,
+        channel_ipns,
+        channel_ens: ens,
+    };
 
-    println!("✅ Display Name Updated");
+    let cid = ipfs.dag_put(&identity, Codec::default()).await?;
+
+    println!("✅ Created Identity {}", cid);
 
     Ok(())
 }
 
 #[derive(Debug, StructOpt)]
-pub struct UpdateAvatar {
-    /// Link to image avatar.
+pub struct Channel {
+    /// Display name.
     #[structopt(short, long)]
-    image: Cid,
-    // Path to image file.
-    //#[structopt(short, long)]
-    //path: Option<PathBuf>,
+    name: Option<String>,
+
+    /// Path to image file.
+    #[structopt(short, long)]
+    path: Option<PathBuf>,
+
+    /// IPNS address.
+    #[structopt(short, long)]
+    ipns: Option<Cid>,
+
+    /// ENS address.
+    #[structopt(short, long)]
+    ens: Option<String>,
 }
 
-async fn update_avatar(command: UpdateAvatar) -> Result<(), Error> {
-    let ipfs = IpfsService::default();
+async fn update(key: String, args: Channel) -> Result<(), Error> {
+    let defluencer = Defluencer::default();
 
-    let UpdateAvatar { image } = command;
+    let Channel {
+        name,
+        path,
+        ipns,
+        ens,
+    } = args;
 
-    let res = ipfs.ipns_get(IDENTITY_KEY).await?;
-    let (old_id_cid, mut id): (Cid, Identity) = res.unwrap();
-
-    id.avatar = image.into();
-
-    ipfs.ipns_put(IDENTITY_KEY, false, &id).await?;
-
-    if let Err(e) = ipfs.pin_rm(&old_id_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_id_cid, e);
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        channel.update_identity(name, path, ipns, ens).await?;
     }
 
-    println!("✅ Avatar Updated");
+    println!("✅ Updated Identity");
 
     Ok(())
 }

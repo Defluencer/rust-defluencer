@@ -3,5 +3,6 @@
 members = [
     "linked-data",
     "defluencer",
-    "ipfs-api"
+    "ipfs-api",
+    "cli"
 ]

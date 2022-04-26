@@ -1,11 +1,11 @@
 use crate::{
-    actors::{Archive, SetupData, VideoData},
+    actors::{SetupData, VideoData},
     server::services::put_requests,
 };
 
 use std::{convert::Infallible, net::SocketAddr};
 
-use tokio::{signal::ctrl_c, sync::mpsc::UnboundedSender};
+use tokio::sync::{mpsc::UnboundedSender, watch::Receiver};
 
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -14,39 +14,13 @@ use hyper::{
 
 use ipfs_api::IpfsService;
 
-async fn shutdown_signal(
-    ipfs: IpfsService,
-    topic: String,
-    archive_tx: Option<UnboundedSender<Archive>>,
-) {
-    ctrl_c()
-        .await
-        .expect("Failed to install CTRL+C signal handler");
-
-    if let Some(archive_tx) = archive_tx {
-        let msg = Archive::Finalize;
-
-        if let Err(error) = archive_tx.send(msg) {
-            eprintln!("Archive receiver hung up. {}", error);
-        }
-
-        //Hacky way to shutdown chat actor. Send some msg to trigger a check
-        if let Err(e) = ipfs.pubsub_pub(&topic, "Stopping".as_bytes()).await {
-            eprintln!("❗ Pubsub disabled. {}", e);
-        }
-    }
-}
-
 pub async fn start_server(
     server_addr: SocketAddr,
     video_tx: UnboundedSender<VideoData>,
     setup_tx: UnboundedSender<SetupData>,
-    archive_tx: Option<UnboundedSender<Archive>>,
     ipfs: IpfsService,
-    topic: String,
+    mut shutdown: Receiver<()>,
 ) {
-    let ipfs_clone = ipfs.clone();
-
     let service = make_service_fn(move |_| {
         let ipfs = ipfs.clone();
         let video_tx = video_tx.clone();
@@ -65,7 +39,11 @@ pub async fn start_server(
 
     println!("✅ Ingess Server Online");
 
-    let graceful = server.with_graceful_shutdown(shutdown_signal(ipfs_clone, topic, archive_tx));
+    let graceful = server.with_graceful_shutdown(async {
+        if let Err(e) = shutdown.changed().await {
+            eprintln!("{}", e);
+        }
+    });
 
     if let Err(e) = graceful.await {
         eprintln!("Server: {}", e);

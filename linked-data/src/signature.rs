@@ -54,14 +54,16 @@ pub enum AlgorithmType {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct JsonWebKey {
-    /* #[serde(rename = "use")]
+    /*
+    #[serde(rename = "use")]
     pub public_key_use: Option<String>, // https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
     #[serde(rename = "key_ops")]
     pub key_operation: Option<String>, // https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
     #[serde(rename = "alg")]
     pub algorithm: Option<String>, // https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
     #[serde(rename = "kid")]
-    pub key_id: Option<String>, // https://datatracker.ietf.org/doc/html/rfc7517#section-4.5 */
+    pub key_id: Option<String>, // https://datatracker.ietf.org/doc/html/rfc7517#section-4.5
+    */
     /*
         Parameter specific to EC
     */

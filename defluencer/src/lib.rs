@@ -85,11 +85,11 @@ impl Defluencer {
 
     /// Create an new channel on this node.
     ///
-    /// Returns channel and a secret passphrase used to recreate this channel elsewhere.
+    /// Returns a secret phrase, a channel and IPNS address.
     pub async fn create_local_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
-    ) -> Result<(Mnemonic, Channel<IPNSAnchor>), Error> {
+    ) -> Result<(Mnemonic, Channel<IPNSAnchor>, Cid), Error> {
         let name = channel_name.into();
         let key_name = name.to_snake_case();
         let display_name = name.to_title_case();
@@ -108,36 +108,43 @@ impl Defluencer {
 
         let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
         let KeyPair { id, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
-        let ipns = IPNSAddress::try_from(id.as_str())?;
+        let cid = Cid::try_from(id.as_str())?;
 
         let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
         let channel = Channel::new(self.ipfs.clone(), anchor);
 
+        let peer_id = self.ipfs.peer_id().await?;
+        let video_topic = format!("{}_video", display_name.to_snake_case());
+
         channel
-            .update_identity(Some(display_name), None, Some(ipns), None)
+            .update_live_settings(Some(peer_id), Some(video_topic), None, Some(false))
             .await?;
 
-        Ok((mnemonic, channel))
+        channel
+            .update_identity(Some(display_name), None, Some(cid), None)
+            .await?;
+
+        Ok((mnemonic, channel, cid))
     }
 
     /// Returns a channel by name previously created or imported on this node.
     pub async fn get_local_channel(
         &self,
         channel_name: impl Into<Cow<'static, str>>,
-    ) -> Result<Channel<IPNSAnchor>, Error> {
+    ) -> Result<Option<Channel<IPNSAnchor>>, Error> {
         let list = self.ipfs.key_list().await?;
 
         let name = channel_name.into();
         let key_name = name.to_snake_case();
 
         if !list.contains_key(&key_name) {
-            return Err(Error::NotFound);
+            return Ok(None);
         }
 
         let anchor = IPNSAnchor::new(self.ipfs.clone(), key_name);
         let channel = Channel::new(self.ipfs.clone(), anchor);
 
-        Ok(channel)
+        Ok(Some(channel))
     }
 
     /// Recreate a channel on this node from a secret passphrase.

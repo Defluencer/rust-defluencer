@@ -1,15 +1,14 @@
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
-use linked_data::video::{DayNode, HourNode, MinuteNode, SecondNode, TimecodeNode};
+use linked_data::media::video::{Day, Hour, Minute, Second, Timecode};
 
 use cid::Cid;
 
 pub enum Archive {
     Chat(Cid),
     Video(Cid),
-    Finalize,
 }
 
 pub struct Archivist {
@@ -17,11 +16,11 @@ pub struct Archivist {
 
     archive_rx: UnboundedReceiver<Archive>,
 
-    video_chat_buffer: Option<SecondNode>,
+    video_chat_buffer: Option<Second>,
 
-    minute_node: MinuteNode,
-    hour_node: HourNode,
-    day_node: DayNode,
+    minute_node: Minute,
+    hour_node: Hour,
+    day_node: Day,
 }
 
 impl Archivist {
@@ -33,15 +32,15 @@ impl Archivist {
 
             video_chat_buffer: None,
 
-            minute_node: MinuteNode {
+            minute_node: Minute {
                 links_to_seconds: Vec::with_capacity(60),
             },
 
-            hour_node: HourNode {
+            hour_node: Hour {
                 links_to_minutes: Vec::with_capacity(60),
             },
 
-            day_node: DayNode {
+            day_node: Day {
                 links_to_hours: Vec::with_capacity(24),
             },
         }
@@ -54,14 +53,15 @@ impl Archivist {
             match event {
                 Archive::Chat(cid) => self.archive_chat_message(cid),
                 Archive::Video(cid) => self.archive_video_segment(cid).await,
-                Archive::Finalize => self.finalize().await,
             }
         }
+
+        self.finalize().await;
 
         println!("❌ Archive System Offline");
     }
 
-    /// Link chat message to SecondNodes.
+    /// Link chat message to Seconds.
     fn archive_chat_message(&mut self, msg_cid: Cid) {
         let node = match self.video_chat_buffer.as_mut() {
             Some(node) => node,
@@ -71,9 +71,9 @@ impl Archivist {
         node.links_to_chat.push(msg_cid.into());
     }
 
-    /// Buffers SecondNodes, waiting for chat messages to be linked.
+    /// Buffers Seconds, waiting for chat messages to be linked.
     async fn archive_video_segment(&mut self, cid: Cid) {
-        let second_node = SecondNode {
+        let second_node = Second {
             link_to_video: cid.into(),
             links_to_chat: Vec::with_capacity(5),
         };
@@ -103,9 +103,9 @@ impl Archivist {
     }
 
     /// Create DAG node containing a link to video segment and all chat messages.
-    /// MinuteNode is then appended with the CID.
-    async fn collect_second(&mut self, node: SecondNode) {
-        let cid = match self.ipfs.dag_put(&node).await {
+    /// Minute is then appended with the CID.
+    async fn collect_second(&mut self, node: Second) {
+        let cid = match self.ipfs.dag_put(&node, Codec::default()).await {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -116,9 +116,9 @@ impl Archivist {
         self.minute_node.links_to_seconds.push(cid.into());
     }
 
-    /// Create DAG node containing 60 SecondNode links. HourNode is then appended with the CID.
+    /// Create DAG node containing 60 Second links. Hour is then appended with the CID.
     async fn collect_minute(&mut self) {
-        let cid = match self.ipfs.dag_put(&self.minute_node).await {
+        let cid = match self.ipfs.dag_put(&self.minute_node, Codec::default()).await {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -131,9 +131,9 @@ impl Archivist {
         self.hour_node.links_to_minutes.push(cid.into());
     }
 
-    /// Create DAG node containing 60 MinuteNode links. DayNode is then appended with the CID.
+    /// Create DAG node containing 60 Minute links. Day is then appended with the CID.
     async fn collect_hour(&mut self) {
-        let cid = match self.ipfs.dag_put(&self.hour_node).await {
+        let cid = match self.ipfs.dag_put(&self.hour_node, Codec::default()).await {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -169,7 +169,7 @@ impl Archivist {
             return;
         }
 
-        let cid = match self.ipfs.dag_put(&self.day_node).await {
+        let cid = match self.ipfs.dag_put(&self.day_node, Codec::default()).await {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -177,11 +177,11 @@ impl Archivist {
             }
         };
 
-        let stream = TimecodeNode {
+        let stream = Timecode {
             timecode: cid.into(),
         };
 
-        let cid = match self.ipfs.dag_put(&stream).await {
+        let cid = match self.ipfs.dag_put(&stream, Codec::default()).await {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -191,8 +191,8 @@ impl Archivist {
 
         println!("Pinning Nodes...");
 
-        match self.ipfs.pin_add(&cid, true).await {
-            Ok(_) => println!("Final Timecode-addressable Node => {}", &cid.to_string()),
+        match self.ipfs.pin_add(cid, true).await {
+            Ok(_) => println!("Final Timecode-addressable Node => {}", cid.to_string()),
             Err(e) => eprintln!("❗ IPFS: pin add failed {}", e),
         }
     }

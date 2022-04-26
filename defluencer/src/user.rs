@@ -35,11 +35,11 @@ impl<T> User<T>
 where
     T: Signer,
 {
-    pub fn new(ipfs: IpfsService, signer: T, identity: IPLDLink) -> Self {
+    pub fn new(ipfs: IpfsService, signer: T, identity: Cid) -> Self {
         Self {
             ipfs,
             signer,
-            identity,
+            identity: identity.into(),
         }
     }
 

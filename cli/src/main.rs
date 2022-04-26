@@ -4,9 +4,9 @@ mod config;
 mod server;
 
 use crate::cli::{
-    beacon::{beacon_cli, BeaconCLI},
+    channel::{channel_cli, ChannelCLI},
     comments::{comments_cli, Comments},
-    content::{content_feed_cli, Content},
+    content::{content_cli, Content},
     daemon::{
         file::{file_cli, File},
         stream::{stream_cli, Stream},
@@ -31,8 +31,8 @@ enum CommandLineInterface {
     /// Start the file streaming daemon.
     File(File),
 
-    /// Create a content beacon.
-    Beacon(BeaconCLI),
+    /// Create a channel.
+    Channel(ChannelCLI),
 
     /// Appoint moderators & ban or unban users.
     Moderation(Moderation),
@@ -56,14 +56,14 @@ enum CommandLineInterface {
 #[tokio::main]
 async fn main() {
     match CommandLineInterface::from_args() {
-        CommandLineInterface::Stream(stream) => stream_cli(stream).await,
-        CommandLineInterface::File(file) => file_cli(file).await,
-        CommandLineInterface::Beacon(beacon) => beacon_cli(beacon).await,
-        CommandLineInterface::Moderation(mods) => moderation_cli(mods).await,
-        CommandLineInterface::Content(feed) => content_feed_cli(feed).await,
-        CommandLineInterface::Comments(comments) => comments_cli(comments).await,
-        CommandLineInterface::Friends(friends) => friends_cli(friends).await,
-        CommandLineInterface::Identity(id) => identity_cli(id).await,
-        CommandLineInterface::Live(live) => live_cli(live).await,
+        CommandLineInterface::Stream(args) => stream_cli(args).await,
+        CommandLineInterface::File(args) => file_cli(args).await,
+        CommandLineInterface::Channel(args) => channel_cli(args).await,
+        CommandLineInterface::Moderation(args) => moderation_cli(args).await,
+        CommandLineInterface::Content(args) => content_cli(args).await,
+        CommandLineInterface::Comments(args) => comments_cli(args).await,
+        CommandLineInterface::Friends(args) => friends_cli(args).await,
+        CommandLineInterface::Identity(args) => identity_cli(args).await,
+        CommandLineInterface::Live(args) => live_cli(args).await,
     }
 }

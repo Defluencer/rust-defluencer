@@ -1,4 +1,4 @@
-use crate::{actors::archivist::Archive, config::VideoConfig};
+use crate::actors::archivist::Archive;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -7,25 +7,25 @@ use std::{
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
-use linked_data::{video::VideoNode, IPLDLink};
+use linked_data::{media::video::Segment, types::IPLDLink};
 
 use cid::Cid;
 
-pub struct VideoAggregator {
+pub struct Videograph {
     ipfs: IpfsService,
 
     service_rx: UnboundedReceiver<VideoData>,
     archive_tx: Option<UnboundedSender<Archive>>,
 
-    config: VideoConfig,
+    pubsub_topic: Option<String>,
 
     track_len: usize,
     setup_link: Option<IPLDLink>,
 
     node_mint_count: usize,
-    video_nodes: VecDeque<VideoNode>,
+    segment_nodes: VecDeque<Segment>,
 
     previous: Option<IPLDLink>,
 }
@@ -36,12 +36,12 @@ pub enum VideoData {
     Setup((IPLDLink, usize)),
 }
 
-impl VideoAggregator {
+impl Videograph {
     pub fn new(
         ipfs: IpfsService,
         service_rx: UnboundedReceiver<VideoData>,
         archive_tx: Option<UnboundedSender<Archive>>,
-        config: VideoConfig,
+        pubsub_topic: Option<String>,
     ) -> Self {
         Self {
             ipfs,
@@ -49,13 +49,13 @@ impl VideoAggregator {
             service_rx,
             archive_tx,
 
-            config,
+            pubsub_topic,
 
             track_len: 0,
             setup_link: None,
 
             node_mint_count: 0,
-            video_nodes: VecDeque::with_capacity(5),
+            segment_nodes: VecDeque::with_capacity(5),
             previous: None,
         }
     }
@@ -98,7 +98,7 @@ impl VideoAggregator {
         // relative index for in memory video nodes
         let buffer_index = index - self.node_mint_count;
 
-        if let Some(node) = self.video_nodes.get_mut(buffer_index) {
+        if let Some(node) = self.segment_nodes.get_mut(buffer_index) {
             node.tracks.insert(quality.to_owned(), cid.into());
 
             node.setup = self.setup_link;
@@ -116,13 +116,13 @@ impl VideoAggregator {
 
             let previous = None;
 
-            let node = VideoNode {
+            let node = Segment {
                 tracks,
                 setup,
                 previous,
             };
 
-            self.video_nodes.push_back(node);
+            self.segment_nodes.push_back(node);
         }
 
         // try to mint in case something failed previously
@@ -135,9 +135,7 @@ impl VideoAggregator {
                 }
             }
 
-            if self.config.pubsub_enable {
-                let topic = &self.config.pubsub_topic;
-
+            if let Some(topic) = self.pubsub_topic.as_ref() {
                 if let Err(e) = self.ipfs.pubsub_pub(topic, cid.to_bytes()).await {
                     eprintln!("❗ IPFS: pubsub pub failed {}", e);
                 }
@@ -145,12 +143,12 @@ impl VideoAggregator {
         }
 
         #[cfg(debug_assertions)]
-        println!("Video: {} buffered nodes", self.video_nodes.len());
+        println!("Video: {} buffered nodes", self.segment_nodes.len());
     }
 
     /// Mint the first VideoNode in queue if it meets all requirements.
     async fn mint_video_node(&mut self) -> Option<Cid> {
-        let node = self.video_nodes.front_mut()?;
+        let node = self.segment_nodes.front_mut()?;
 
         node.setup = self.setup_link;
 
@@ -164,7 +162,7 @@ impl VideoAggregator {
             return None;
         }
 
-        let cid = match self.ipfs.dag_put(node).await {
+        let cid = match self.ipfs.dag_put(node, Codec::default()).await {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -172,7 +170,7 @@ impl VideoAggregator {
             }
         };
 
-        self.video_nodes.pop_front();
+        self.segment_nodes.pop_front();
         self.node_mint_count += 1;
         self.previous = Some(cid.into());
 

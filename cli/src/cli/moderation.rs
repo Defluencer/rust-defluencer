@@ -1,17 +1,14 @@
+use defluencer::{errors::Error, Defluencer};
 use hex::FromHex;
 
-use ipfs_api::{errors::Error, IpfsService};
-
-use cid::Cid;
-
-use linked_data::moderation::{Bans, Moderators};
 use structopt::StructOpt;
-
-pub const BANS_KEY: &str = "bans";
-pub const MODS_KEY: &str = "mods";
 
 #[derive(Debug, StructOpt)]
 pub struct Moderation {
+    /// Channel local key name.
+    #[structopt(short, long)]
+    key_name: String,
+
     #[structopt(subcommand)]
     cmd: Command,
 }
@@ -27,8 +24,8 @@ enum Command {
 
 pub async fn moderation_cli(cli: Moderation) {
     let res = match cli.cmd {
-        Command::Ban(update) => ban_command(update).await,
-        Command::Mods(update) => mod_command(update).await,
+        Command::Ban(args) => ban_command(cli.key_name, args).await,
+        Command::Mods(args) => mod_command(cli.key_name, args).await,
     };
 
     if let Err(e) = res {
@@ -49,16 +46,12 @@ enum BanCommand {
 
     /// Unban users.
     Remove(UnBan),
-
-    /// Replace the current list with another.
-    ReplaceList(ReplaceBanList),
 }
 
-async fn ban_command(cli: BanCommands) -> Result<(), Error> {
+async fn ban_command(key: String, cli: BanCommands) -> Result<(), Error> {
     match cli.cmd {
-        BanCommand::Add(args) => ban_user(args).await,
-        BanCommand::Remove(args) => unban_user(args).await,
-        BanCommand::ReplaceList(args) => replace_ban_list(args).await,
+        BanCommand::Add(args) => ban_user(key, args).await,
+        BanCommand::Remove(args) => unban_user(key, args).await,
     }
 }
 
@@ -69,25 +62,20 @@ pub struct Ban {
     address: String,
 }
 
-async fn ban_user(args: Ban) -> Result<(), Error> {
+async fn ban_user(key: String, args: Ban) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    println!("Banning User...");
+    let defluencer = Defluencer::default();
 
-    let ipfs = IpfsService::default();
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        if channel.ban_user(address).await?.is_some() {
+            println!("✅ User {} Banned", args.address);
 
-    let res = ipfs.ipns_get(BANS_KEY).await?;
-    let (old_ban_cid, mut ban_list): (Cid, Bans) = res.unwrap();
+            return Ok(());
+        }
 
-    ban_list.banned_addrs.insert(address);
-
-    ipfs.ipns_put(BANS_KEY, false, &ban_list).await?;
-
-    if let Err(e) = ipfs.pin_rm(&old_ban_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_ban_cid, e);
+        println!("❗ User {} was already banned", args.address);
     }
-
-    println!("✅ User {} Banned", args.address);
 
     Ok(())
 }
@@ -99,57 +87,20 @@ pub struct UnBan {
     address: String,
 }
 
-async fn unban_user(args: UnBan) -> Result<(), Error> {
+async fn unban_user(key: String, args: UnBan) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    println!("Unbanning User...");
+    let defluencer = Defluencer::default();
 
-    let ipfs = IpfsService::default();
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        if channel.unban_user(&address).await?.is_some() {
+            println!("✅ User {} Unbanned", args.address);
 
-    let res = ipfs.ipns_get(BANS_KEY).await?;
-    let (old_ban_cid, mut ban_list): (Cid, Bans) = res.unwrap();
-
-    if ban_list.banned_addrs.remove(&address) {
-        ipfs.ipns_put(BANS_KEY, false, &ban_list).await?;
-
-        if let Err(e) = ipfs.pin_rm(&old_ban_cid, false).await {
-            eprintln!("❗ IPFS could not unpin {}. Error: {}", old_ban_cid, e);
+            return Ok(());
         }
 
-        println!("✅ User {} Unbanned", args.address);
-
-        return Ok(());
+        println!("❗ User {} was not banned", args.address);
     }
-
-    println!("❗ User {} was not banned", args.address);
-
-    Ok(())
-}
-
-#[derive(Debug, StructOpt)]
-pub struct ReplaceBanList {
-    /// CID of the new ban list.
-    #[structopt(long)]
-    cid: Cid,
-}
-
-async fn replace_ban_list(args: ReplaceBanList) -> Result<(), Error> {
-    println!("Replacing Ban List...");
-
-    let ipfs = IpfsService::default();
-
-    let res = ipfs.ipns_get(BANS_KEY).await?;
-    let (old_ban_cid, _): (Cid, Bans) = res.unwrap();
-
-    ipfs.pin_add(&args.cid, false).await?;
-
-    ipfs.name_publish(&args.cid, BANS_KEY).await?;
-
-    if let Err(e) = ipfs.pin_rm(&old_ban_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_ban_cid, e);
-    }
-
-    println!("✅ Previous Ban List Replaced with {:?}", &args.cid);
 
     Ok(())
 }
@@ -167,16 +118,12 @@ enum ModCommand {
 
     /// Demote user from moderator position.
     Remove(UnMod),
-
-    /// Replace the current moderator list with another.
-    ReplaceModList(ReplaceModList),
 }
 
-async fn mod_command(cli: ModCommands) -> Result<(), Error> {
+async fn mod_command(key: String, cli: ModCommands) -> Result<(), Error> {
     match cli.cmd {
-        ModCommand::Add(args) => mod_user(args).await,
-        ModCommand::Remove(args) => unmod_user(args).await,
-        ModCommand::ReplaceModList(args) => replace_mod_list(args).await,
+        ModCommand::Add(args) => mod_user(key, args).await,
+        ModCommand::Remove(args) => unmod_user(key, args).await,
     }
 }
 
@@ -187,25 +134,20 @@ pub struct Mod {
     address: String,
 }
 
-async fn mod_user(args: Mod) -> Result<(), Error> {
+async fn mod_user(key: String, args: Mod) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    println!("Promoting User...");
+    let defluencer = Defluencer::default();
 
-    let ipfs = IpfsService::default();
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        if channel.add_moderator(address).await?.is_some() {
+            println!("✅ User {} Promoted To Moderator Position", args.address);
 
-    let res = ipfs.ipns_get(MODS_KEY).await?;
-    let (old_mods_cid, mut mods_list): (Cid, Moderators) = res.unwrap();
+            return Ok(());
+        }
 
-    mods_list.moderator_addrs.insert(address);
-
-    ipfs.ipns_put(MODS_KEY, false, &mods_list).await?;
-
-    if let Err(e) = ipfs.pin_rm(&old_mods_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_mods_cid, e);
+        println!("❗ User {} was already banned", args.address);
     }
-
-    println!("✅ User {} Promoted To Moderator Position", args.address);
 
     Ok(())
 }
@@ -217,56 +159,20 @@ pub struct UnMod {
     address: String,
 }
 
-async fn unmod_user(args: UnMod) -> Result<(), Error> {
+async fn unmod_user(key: String, args: UnMod) -> Result<(), Error> {
     let address = parse_address(&args.address);
-    println!("Demoting Moderator...");
 
-    let ipfs = IpfsService::default();
+    let defluencer = Defluencer::default();
 
-    let res = ipfs.ipns_get(MODS_KEY).await?;
-    let (old_mods_cid, mut mods_list): (Cid, Moderators) = res.unwrap();
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        if channel.remove_moderator(&address).await?.is_some() {
+            println!("✅ Moderator {} Demoted", args.address);
 
-    if mods_list.moderator_addrs.remove(&address) {
-        ipfs.ipns_put(MODS_KEY, false, &mods_list).await?;
-
-        if let Err(e) = ipfs.pin_rm(&old_mods_cid, false).await {
-            eprintln!("❗ IPFS could not unpin {}. Error: {}", old_mods_cid, e);
+            return Ok(());
         }
 
-        println!("✅ Moderator {} Demoted", args.address);
-
-        return Ok(());
+        println!("❗ User {} Was Not A Moderator", args.address);
     }
-
-    println!("❗ User {} Was Not A Moderator", args.address);
-
-    Ok(())
-}
-
-#[derive(Debug, StructOpt)]
-pub struct ReplaceModList {
-    /// CID of the new moderator list
-    #[structopt(long)]
-    cid: Cid,
-}
-
-async fn replace_mod_list(args: ReplaceModList) -> Result<(), Error> {
-    println!("Replacing Moderator List...");
-
-    let ipfs = IpfsService::default();
-
-    let res = ipfs.ipns_get(MODS_KEY).await?;
-    let (old_mods_cid, _): (Cid, Moderators) = res.unwrap();
-
-    ipfs.pin_add(&args.cid, false).await?;
-
-    ipfs.name_publish(&args.cid, MODS_KEY).await?;
-
-    if let Err(e) = ipfs.pin_rm(&old_mods_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_mods_cid, e);
-    }
-
-    println!("✅ Previous Moderator List Replaced with {:?}", &args.cid);
 
     Ok(())
 }

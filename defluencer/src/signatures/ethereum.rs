@@ -19,20 +19,20 @@ use web3::{transports::eip_1193::Eip1193, types::Address, Web3};
 use signature::Signature;
 
 /// Create DAG-Jose blocks with the EcDSA.
-pub struct EthereumSigner {
+pub struct EthereumWebSigner {
     ipfs: IpfsService,
     addr: Address,
     web3: Web3<Eip1193>,
 }
 
-impl EthereumSigner {
+impl EthereumWebSigner {
     pub fn new(ipfs: IpfsService, addr: Address, web3: Web3<Eip1193>) -> Self {
         Self { ipfs, addr, web3 }
     }
 }
 
 #[async_trait(?Send)]
-impl super::Signer for EthereumSigner {
+impl super::Signer for EthereumWebSigner {
     async fn sign(&self, cid: Cid) -> Result<Cid, Error> {
         let payload = cid.to_bytes();
         let payload = Base::Base64Url.encode(payload);

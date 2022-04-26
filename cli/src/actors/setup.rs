@@ -7,11 +7,11 @@ use std::{
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
-    video::{SetupNode, Track},
-    IPLDLink,
+    media::video::{Setup, Track},
+    types::IPLDLink,
 };
 
 use cid::Cid;
@@ -26,7 +26,7 @@ pub enum SetupData {
     Segment((PathBuf, Cid)),
 }
 
-pub struct SetupAggregator {
+pub struct Setter {
     ipfs: IpfsService,
 
     service_rx: UnboundedReceiver<SetupData>,
@@ -37,7 +37,7 @@ pub struct SetupAggregator {
     map: HashMap<String, TrackData>,
 }
 
-impl SetupAggregator {
+impl Setter {
     pub fn new(
         ipfs: IpfsService,
         service_rx: UnboundedReceiver<SetupData>,
@@ -167,11 +167,11 @@ impl SetupAggregator {
 
         tracks.sort_unstable_by_key(|track| track.bandwidth);
 
-        let setup_node = SetupNode { tracks };
+        let setup_node = Setup { tracks };
 
         let cid = self
             .ipfs
-            .dag_put(&setup_node)
+            .dag_put(&setup_node, Codec::default())
             .await
             .expect("IPFS: SetupNode dag put failed"); // Panic because can't be recovered from anyway
 

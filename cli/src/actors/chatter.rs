@@ -1,26 +1,28 @@
-use crate::{
-    actors::archivist::Archive,
-    cli::moderation::{BANS_KEY, MODS_KEY},
-    config::ChatConfig,
+use crate::actors::archivist::Archive;
+
+use defluencer::moderation_cache::ChatModerationCache;
+
+use futures_util::{future::AbortHandle, StreamExt, TryStreamExt};
+
+use tokio::sync::{mpsc::UnboundedSender, watch::Receiver};
+
+use ipfs_api::{
+    responses::{Codec, PubSubMessage},
+    IpfsService,
 };
-
-use futures_util::future::AbortHandle;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::StreamExt;
-
-use ipfs_api::{errors::Error, responses::PubSubMessage, IpfsService};
 
 use linked_data::{
-    chat::{ChatId, ChatMessage, MessageType},
-    moderation::{Ban, Bans, ChatModerationCache, Moderators},
-    signature::SignedMessage,
-    PeerId,
+    media::chat::{ChatMessage, MessageType},
+    moderation::{Ban, Bans, Moderators},
+    types::PeerId,
 };
 
-pub struct ChatAggregator {
+pub struct Chatter {
     ipfs: IpfsService,
 
     archive_tx: UnboundedSender<Archive>,
+
+    shutdown: Receiver<()>,
 
     mod_db: ChatModerationCache,
 
@@ -33,30 +35,21 @@ pub struct ChatAggregator {
     mods: Moderators,
 }
 
-impl ChatAggregator {
-    pub async fn new(
+impl Chatter {
+    pub fn new(
         ipfs: IpfsService,
         archive_tx: UnboundedSender<Archive>,
-        config: ChatConfig,
-    ) -> Result<Self, Error> {
-        let ChatConfig { topic } = config;
-
-        let (mod_res, ban_res) =
-            match tokio::try_join!(ipfs.ipns_get(MODS_KEY), ipfs.ipns_get(BANS_KEY)) {
-                Ok(res) => res,
-                Err(e) => {
-                    return Err(e);
-                }
-            };
-
-        //TODO error handling
-        let (_, bans) = ban_res.unwrap();
-        let (_, mods) = mod_res.unwrap();
-
-        Ok(Self {
+        shutdown: Receiver<()>,
+        topic: String,
+        bans: Bans,
+        mods: Moderators,
+    ) -> Self {
+        Self {
             ipfs,
 
             archive_tx,
+
+            shutdown,
 
             mod_db: ChatModerationCache::new(100, 0),
 
@@ -67,39 +60,45 @@ impl ChatAggregator {
             new_ban_count: 0,
 
             mods,
-        })
+        }
     }
 
     pub async fn start(mut self) {
-        let res = self.ipfs.pubsub_sub(&self.topic).await.unwrap();
+        let ipfs = self.ipfs.clone();
+
         let (_, regis) = AbortHandle::new_pair();
-        let mut stream = ipfs_api::pubsub_stream(res, regis);
+        let mut stream = ipfs
+            .pubsub_sub(self.topic.as_bytes().to_owned(), regis)
+            .boxed();
 
         println!("✅ Chat System Online");
 
-        while let Some(result) = stream.next().await {
-            if self.archive_tx.is_closed() {
-                //Hacky way to shutdown
-                break;
-            }
+        loop {
+            tokio::select! {
+                biased;
 
-            match result {
-                Ok(response) => self.on_pubsub_message(response).await,
-                Err(error) => {
-                    eprintln!("{}", error);
-                    continue;
-                }
+                _ = self.shutdown.changed() => break,
+
+                res = stream.try_next() => match res {
+                    Ok(option) => match option {
+                        Some(msg) => self.on_pubsub_message(msg).await,
+                        None => {},
+                    },
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        break;
+                    }
+                },
             }
         }
 
         if self.new_ban_count > 0 {
-            println!(
-                "Updating Banned List with {} New Users 👍",
-                self.new_ban_count
-            );
-
-            if let Err(e) = self.ipfs.ipns_put(BANS_KEY, false, &self.bans).await {
-                eprintln!("❗ IPNS Update Failed. {}", e);
+            match self.ipfs.dag_put(&self.bans, Codec::default()).await {
+                Ok(cid) => println!(
+                    "Updating Banned List with {} New Users 👍\nNew List CID: {}",
+                    self.new_ban_count, cid
+                ),
+                Err(e) => eprintln!("❗ IPFS DAG Put Failed. {}", e),
             }
         }
 
@@ -108,7 +107,7 @@ impl ChatAggregator {
 
     async fn on_pubsub_message(&mut self, msg: PubSubMessage) {
         let PubSubMessage { from, data } = msg;
-        let peer: PeerId = from;
+        let peer: PeerId = from.into();
 
         if self.mod_db.is_banned(&peer) {
             return;
@@ -130,7 +129,7 @@ impl ChatAggregator {
     }
 
     async fn get_origin(&mut self, peer: PeerId, msg: ChatMessage) {
-        let sign_msg: SignedMessage<ChatId> = match self
+        /* let sign_msg: SignedMessage<ChatId> = match self
             .ipfs
             .dag_get(&msg.signature.link, Option::<&str>::None)
             .await
@@ -158,9 +157,11 @@ impl ChatAggregator {
         if self.bans.banned_addrs.contains(&sign_msg.address) {
             self.mod_db.ban_peer(&peer);
             return;
-        }
+        } */
 
-        self.process_msg(&peer, msg).await
+        //self.process_msg(&peer, msg).await
+
+        todo!()
     }
 
     async fn process_msg(&mut self, peer: &PeerId, chat: ChatMessage) {
@@ -171,8 +172,8 @@ impl ChatAggregator {
         }
     }
 
-    async fn mint_and_archive(&mut self, msg: String) {
-        let cid = match self.ipfs.dag_put(&msg).await {
+    async fn mint_and_archive(&self, msg: String) {
+        let cid = match self.ipfs.dag_put(&msg, Codec::default()).await {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);

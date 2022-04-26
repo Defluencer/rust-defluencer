@@ -1,38 +1,31 @@
-use std::io::ErrorKind;
-
-use ipfs_api::{errors::Error, IpfsService};
-
-use linked_data::follows::{Friend, Friendlies};
-
 use cid::Cid;
 
+use defluencer::{errors::Error, Defluencer};
 use structopt::StructOpt;
-
-use either::Either;
-
-pub const FRIENDS_KEY: &str = "friends";
 
 #[derive(Debug, StructOpt)]
 pub struct Friends {
+    /// Channel local key name.
+    #[structopt(short, long)]
+    key_name: String,
+
     #[structopt(subcommand)]
     cmd: Command,
 }
 
 #[derive(Debug, StructOpt)]
 enum Command {
-    /// Add a new friend to your list.
-    /// Use either their beacon Cid OR their ethereum name service domain name.
-    Add(AddFriend),
+    /// Add a new followee to your list.
+    Add(Followee),
 
-    /// Remove a friend from your list.
-    /// Use either their beacon Cid OR their ethereum name service domain name.
-    Remove(RemoveFriend),
+    /// Remove a followee from your list.
+    Remove(Followee),
 }
 
 pub async fn friends_cli(cli: Friends) {
     let res = match cli.cmd {
-        Command::Add(add) => add_friend(add).await,
-        Command::Remove(remove) => remove_friend(remove).await,
+        Command::Add(args) => add(cli.key_name, args).await,
+        Command::Remove(args) => remove(cli.key_name, args).await,
     };
 
     if let Err(e) = res {
@@ -41,97 +34,32 @@ pub async fn friends_cli(cli: Friends) {
 }
 
 #[derive(Debug, StructOpt)]
-pub struct AddFriend {
-    /// Beacon CID.
+pub struct Followee {
+    /// Followee's current identity CID.
     #[structopt(short, long)]
-    beacon: Option<Cid>,
-
-    /// Ethereum name service domain.
-    #[structopt(short, long)]
-    ens: Option<String>,
+    identity: Cid,
 }
 
-async fn add_friend(command: AddFriend) -> Result<(), Error> {
-    let ipfs = IpfsService::default();
+async fn add(key: String, args: Followee) -> Result<(), Error> {
+    let defluencer = Defluencer::default();
 
-    let AddFriend { beacon, ens } = command;
-
-    let new_friend = match (beacon, ens) {
-        (Some(cid), None) => Friend {
-            friend: Either::Right(cid.into()),
-        },
-        (None, Some(name)) => Friend {
-            friend: Either::Left(name),
-        },
-        (_, _) => return Err(std::io::Error::from(ErrorKind::InvalidInput).into()),
-    };
-
-    println!("Adding Friend {:?}", &new_friend.friend);
-
-    let res = ipfs.ipns_get(FRIENDS_KEY).await?;
-    let (old_friends_cid, mut list): (Cid, Friendlies) = res.unwrap();
-
-    list.friends.insert(new_friend);
-
-    println!("Updating Friends List...");
-
-    ipfs.ipns_put(FRIENDS_KEY, false, &list).await?;
-
-    println!("Unpinning Old List...");
-
-    if let Err(e) = ipfs.pin_rm(&old_friends_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_friends_cid, e);
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        channel.follow(args.identity.into()).await?;
     }
 
-    println!("✅ Friend Added");
+    println!("✅ Followee Added");
 
     Ok(())
 }
 
-#[derive(Debug, StructOpt)]
-pub struct RemoveFriend {
-    /// Beacon CID
-    #[structopt(short, long)]
-    beacon: Option<Cid>,
+async fn remove(key: String, args: Followee) -> Result<(), Error> {
+    let defluencer = Defluencer::default();
 
-    /// Ethereum name service domain name.
-    #[structopt(short, long)]
-    ens: Option<String>,
-}
-
-async fn remove_friend(command: RemoveFriend) -> Result<(), Error> {
-    let ipfs = IpfsService::default();
-
-    let RemoveFriend { beacon, ens } = command;
-
-    let old_friend = match (beacon, ens) {
-        (Some(cid), None) => Friend {
-            friend: Either::Right(cid.into()),
-        },
-        (None, Some(name)) => Friend {
-            friend: Either::Left(name),
-        },
-        (_, _) => return Err(std::io::Error::from(ErrorKind::InvalidInput).into()),
-    };
-
-    println!("Removing Friend {:?}", &old_friend.friend);
-
-    let res = ipfs.ipns_get(FRIENDS_KEY).await?;
-    let (old_friends_cid, mut list): (Cid, Friendlies) = res.unwrap();
-
-    list.friends.remove(&old_friend);
-
-    println!("Updating Friends List...");
-
-    ipfs.ipns_put(FRIENDS_KEY, false, &list).await?;
-
-    println!("Unpinning Old List...");
-
-    if let Err(e) = ipfs.pin_rm(&old_friends_cid, false).await {
-        eprintln!("❗ IPFS could not unpin {}. Error: {}", old_friends_cid, e);
+    if let Some(channel) = defluencer.get_local_channel(key).await? {
+        channel.unfollow(args.identity.into()).await?;
     }
 
-    println!("✅ Friend Removed");
+    println!("✅ Followee Removed");
 
     Ok(())
 }

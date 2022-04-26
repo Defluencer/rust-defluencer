@@ -1,10 +1,24 @@
+use std::net::SocketAddr;
+
 use crate::{
-    actors::{Archivist, ChatAggregator, SetupAggregator, VideoAggregator},
-    config::Configuration,
+    actors::{Archivist, Chatter, Setter, Videograph},
     server::start_server,
 };
 
-use tokio::sync::mpsc::unbounded_channel;
+use cid::Cid;
+
+use defluencer::errors::Error;
+
+use linked_data::{
+    channel::ChannelMetadata,
+    live::LiveSettings,
+    moderation::{Bans, Moderators},
+};
+
+use tokio::{
+    signal::ctrl_c,
+    sync::{mpsc::unbounded_channel, watch},
+};
 
 use ipfs_api::IpfsService;
 
@@ -12,74 +26,108 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct Stream {
-    /// Disable chat archiving.
+    /// Socket Address used to ingress video.
+    ///
+    /// egg. 127.0.0.1:2526
     #[structopt(long)]
-    no_chat: bool,
+    socket_addr: SocketAddr,
 
-    /// Disable all archiving.
+    /// Channel IPNS Address.
     #[structopt(long)]
-    no_archive: bool,
+    address: Cid,
 }
 
-pub async fn stream_cli(stream: Stream) {
-    let Stream {
-        no_chat,
-        no_archive,
-    } = stream;
+pub async fn stream_cli(args: Stream) {
+    let res = stream(args).await;
 
-    let ipfs = IpfsService::default();
-
-    if ipfs.peer_id().await.is_err() {
-        eprintln!("❗ IPFS must be started beforehand. Aborting...");
-        return;
+    if let Err(e) = res {
+        eprintln!("❗ IPFS: {:#?}", e);
     }
+}
+
+async fn stream(args: Stream) -> Result<(), Error> {
+    let ipfs = IpfsService::default();
 
     println!("Initialization...");
 
-    let config = match Configuration::from_file().await {
-        Ok(conf) => conf,
-        Err(e) => {
-            eprintln!("❗ Configuration file not found. {}", e);
-            return;
+    let peer_id = match ipfs.peer_id().await {
+        Ok(peer_id) => peer_id,
+        Err(_) => {
+            eprintln!("❗ IPFS must be started beforehand. Aborting...");
+            return Ok(());
         }
     };
 
-    let Configuration {
-        input_socket_addr,
-        mut archive,
-        mut video,
-        chat,
-    } = config;
+    let Stream {
+        address,
+        socket_addr,
+    } = args;
 
-    let mut handles = Vec::with_capacity(4);
+    let cid = ipfs.name_resolve(address).await?;
+    let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
 
-    let topic = chat.topic.clone();
+    let settings = match metadata.live {
+        Some(ipld) => ipfs.dag_get::<&str, LiveSettings>(ipld.link, None).await?,
+        None => {
+            eprintln!("❗ Stream settings not found. Aborting...");
+            return Ok(());
+        }
+    };
+
+    if settings.peer_id != peer_id.into() {
+        eprintln!("❗ This peer is not allowed to stream on this channel. Aborting...");
+        return Ok(());
+    }
+
+    let mut handles = Vec::with_capacity(6);
+
+    let shutdown = {
+        let (tx, rx) = watch::channel::<()>(());
+
+        let handle = tokio::spawn(async move {
+            ctrl_c()
+                .await
+                .expect("Failed to install CTRL+C signal handler");
+
+            if let Err(e) = tx.send(()) {
+                eprintln!("{}", e);
+            }
+        });
+        handles.push(handle);
+
+        rx
+    };
 
     let archive_tx = {
-        if !no_archive {
+        if settings.archiving {
             let (archive_tx, archive_rx) = unbounded_channel();
 
-            if !no_chat {
-                let chat = match ChatAggregator::new(ipfs.clone(), archive_tx.clone(), chat).await {
-                    Ok(chat) => chat,
-                    Err(e) => {
-                        eprintln!("❗ IPFS: {:#?}", e);
-                        return;
-                    }
+            if let Some(chat_topic) = settings.chat_topic {
+                let bans = match settings.bans {
+                    Some(ipld) => ipfs.dag_get::<&str, Bans>(ipld.link, None).await?,
+                    None => Default::default(),
                 };
 
-                let chat_handle = tokio::spawn(chat.start());
+                let mods = match settings.mods {
+                    Some(ipld) => ipfs.dag_get::<&str, Moderators>(ipld.link, None).await?,
+                    None => Default::default(),
+                };
 
-                handles.push(chat_handle);
+                let chat = Chatter::new(
+                    ipfs.clone(),
+                    archive_tx.clone(),
+                    shutdown.clone(),
+                    chat_topic,
+                    bans,
+                    mods,
+                );
+                let handle = tokio::spawn(chat.start());
+                handles.push(handle);
             }
 
-            archive.archive_live_chat = !no_chat;
-
             let archivist = Archivist::new(ipfs.clone(), archive_rx);
-
-            let archive_handle = tokio::spawn(archivist.start());
-
-            handles.push(archive_handle);
+            let handle = tokio::spawn(archivist.start());
+            handles.push(handle);
 
             Some(archive_tx)
         } else {
@@ -89,36 +137,35 @@ pub async fn stream_cli(stream: Stream) {
 
     let (video_tx, video_rx) = unbounded_channel();
 
-    video.pubsub_enable = true;
-
-    let video = VideoAggregator::new(ipfs.clone(), video_rx, archive_tx.clone(), video);
-
-    let video_handle = tokio::spawn(video.start());
-
-    handles.push(video_handle);
+    let video = Videograph::new(
+        ipfs.clone(),
+        video_rx,
+        archive_tx.clone(),
+        Some(settings.video_topic),
+    );
+    let handle = tokio::spawn(video.start());
+    handles.push(handle);
 
     let (setup_tx, setup_rx) = unbounded_channel();
 
-    let setup = SetupAggregator::new(ipfs.clone(), setup_rx, video_tx.clone());
+    let setup = Setter::new(ipfs.clone(), setup_rx, video_tx.clone());
+    let handle = tokio::spawn(setup.start());
+    handles.push(handle);
 
-    let setup_handle = tokio::spawn(setup.start());
-
-    handles.push(setup_handle);
-
-    let server_handle = tokio::spawn(start_server(
-        input_socket_addr,
+    let handle = tokio::spawn(start_server(
+        socket_addr,
         video_tx,
         setup_tx,
-        archive_tx,
         ipfs,
-        topic,
+        shutdown,
     ));
-
-    handles.push(server_handle);
+    handles.push(handle);
 
     for handle in handles {
         if let Err(e) = handle.await {
             eprintln!("❗ Main: {}", e);
         }
     }
+
+    Ok(())
 }

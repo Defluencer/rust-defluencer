@@ -20,7 +20,7 @@ use linked_data::{
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
-    types::{Address, IPLDLink, IPNSAddress, PeerId},
+    types::{Address, IPLDLink, IPNSAddress},
 };
 
 #[derive(Clone)]
@@ -62,8 +62,8 @@ where
     pub async fn update_identity(
         &self,
         display_name: Option<String>,
-        avatar: Option<&std::path::Path>,
-        channel_ipns: Option<IPNSAddress>,
+        avatar: Option<std::path::PathBuf>,
+        channel_ipns: Option<Cid>,
         channel_ens: Option<String>,
     ) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
@@ -78,11 +78,11 @@ where
         }
 
         if let Some(avatar) = avatar {
-            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
+            identity.avatar = add_image(&self.ipfs, &avatar).await?.into();
         }
 
         if let Some(ipns) = channel_ipns {
-            identity.channel_ipns = Some(ipns);
+            identity.channel_ipns = Some(ipns.into());
         }
 
         if let Some(ens) = channel_ens {
@@ -164,7 +164,7 @@ where
     }
 
     /// Unfollow a channel.
-    pub async fn unfollow(&self, identity: &IPLDLink) -> Result<Cid, Error> {
+    pub async fn unfollow(&self, identity: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
         let mut follows = match channel.follows {
@@ -172,7 +172,7 @@ where
             None => return Err(Error::NotFound),
         };
 
-        if !follows.followees.remove(identity) {
+        if !follows.followees.remove(&identity) {
             return Err(Error::NotFound);
         }
 
@@ -192,11 +192,14 @@ where
     }
 
     /// Update live chat & streaming settings.
+    ///
+    /// Returns CID of new settings.
     pub async fn update_live_settings(
         &self,
-        peer_id: Option<PeerId>,
+        peer_id: Option<Cid>,
         video_topic: Option<String>,
         chat_topic: Option<String>,
+        archiving: Option<bool>,
     ) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
@@ -210,7 +213,7 @@ where
         };
 
         if let Some(peer_id) = peer_id {
-            live.peer_id = peer_id;
+            live.peer_id = peer_id.into();
         }
 
         if let Some(video_topic) = video_topic {
@@ -218,14 +221,20 @@ where
         }
 
         if let Some(chat_topic) = chat_topic {
-            live.chat_topic = chat_topic;
+            live.chat_topic = Some(chat_topic);
+        }
+
+        if let Some(archive) = archiving {
+            live.archiving = archive;
         }
 
         let cid = self.ipfs.dag_put(&live, Codec::default()).await?;
 
         channel.live = Some(cid.into());
 
-        self.update_channel(channel_cid, &channel).await
+        self.update_channel(channel_cid, &channel).await?;
+
+        Ok(cid)
     }
 
     pub async fn replace_live_settings(&self, settings: IPLDLink) -> Result<Cid, Error> {
@@ -236,94 +245,174 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn ban_user(&self, user: Address) -> Result<Cid, Error> {
+    /// Returns new list if a user was banned.
+    pub async fn ban_user(&self, user: Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let mut bans: Bans = match channel.bans {
+        let mut live = match channel.live {
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .await?
+            }
+            None => LiveSettings::default(),
+        };
+
+        let mut bans: Bans = match live.bans {
             Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
             None => Bans::default(),
         };
 
         if !bans.banned_addrs.insert(user) {
-            return Err(Error::AlreadyAdded);
+            return Ok(None);
         }
 
         let bans_cid = self.ipfs.dag_put(&bans, Codec::default()).await?;
+        live.bans = Some(bans_cid.into());
 
-        channel.bans = Some(bans_cid.into());
+        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        channel.live = Some(live_cid.into());
 
-        self.update_channel(channel_cid, &channel).await
+        self.update_channel(channel_cid, &channel).await?;
+
+        Ok(Some(bans_cid))
     }
 
-    pub async fn unban_user(&self, user: &Address) -> Result<Cid, Error> {
+    /// Returns new list if a user was unbanned.
+    pub async fn unban_user(&self, user: &Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let mut bans: Bans = match channel.bans {
+        let mut live = match channel.live {
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .await?
+            }
+            None => LiveSettings::default(),
+        };
+
+        let mut bans: Bans = match live.bans {
             Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
-            None => return Err(Error::NotFound),
+            None => return Ok(None),
         };
 
         if !bans.banned_addrs.remove(user) {
-            return Err(Error::NotFound);
+            return Ok(None);
         }
 
         let bans_cid = self.ipfs.dag_put(&bans, Codec::default()).await?;
+        live.bans = Some(bans_cid.into());
 
-        channel.bans = Some(bans_cid.into());
+        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        channel.live = Some(live_cid.into());
 
-        self.update_channel(channel_cid, &channel).await
+        self.update_channel(channel_cid, &channel).await?;
+
+        Ok(Some(bans_cid))
     }
 
     pub async fn replace_ban_list(&self, bans: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.bans = Some(bans);
+        let mut live = match channel.live {
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .await?
+            }
+            None => LiveSettings::default(),
+        };
+
+        live.bans = Some(bans);
+
+        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        channel.live = Some(live_cid.into());
 
         self.update_channel(channel_cid, &channel).await
     }
 
-    pub async fn add_moderator(&self, user: Address) -> Result<Cid, Error> {
+    /// Returns new channel Cid if a moderator was added.
+    pub async fn add_moderator(&self, user: Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let mut mods: Moderators = match channel.mods {
+        let mut live = match channel.live {
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .await?
+            }
+            None => LiveSettings::default(),
+        };
+
+        let mut mods: Moderators = match live.mods {
             Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
             None => Moderators::default(),
         };
 
         if !mods.moderator_addrs.insert(user) {
-            return Err(Error::AlreadyAdded);
+            return Ok(None);
         }
 
         let mods_cid = self.ipfs.dag_put(&mods, Codec::default()).await?;
+        live.mods = Some(mods_cid.into());
 
-        channel.mods = Some(mods_cid.into());
+        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        channel.live = Some(live_cid.into());
 
-        self.update_channel(channel_cid, &channel).await
+        let new_channel = self.update_channel(channel_cid, &channel).await?;
+
+        Ok(Some(new_channel))
     }
 
-    pub async fn remove_moderator(&self, user: &Address) -> Result<Cid, Error> {
+    /// Returns new channel Cid if a moderator was removed.
+    pub async fn remove_moderator(&self, user: &Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        let mut mods: Moderators = match channel.mods {
+        let mut live = match channel.live {
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .await?
+            }
+            None => LiveSettings::default(),
+        };
+
+        let mut mods: Moderators = match live.mods {
             Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
-            None => return Err(Error::NotFound),
+            None => return Ok(None),
         };
 
         if !mods.moderator_addrs.remove(user) {
-            return Err(Error::NotFound);
+            return Ok(None);
         }
 
         let mods_cid = self.ipfs.dag_put(&mods, Codec::default()).await?;
+        live.mods = Some(mods_cid.into());
 
-        channel.mods = Some(mods_cid.into());
+        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        channel.live = Some(live_cid.into());
 
-        self.update_channel(channel_cid, &channel).await
+        let new_channel = self.update_channel(channel_cid, &channel).await?;
+
+        Ok(Some(new_channel))
     }
 
     pub async fn replace_moderator_list(&self, moderators: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        channel.mods = Some(moderators);
+        let mut live = match channel.live {
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .await?
+            }
+            None => LiveSettings::default(),
+        };
+
+        live.mods = Some(moderators);
+
+        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        channel.live = Some(live_cid.into());
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -347,14 +436,15 @@ where
         self.update_channel(channel_cid, &channel).await
     }
 
-    /// Remove a specific content.
+    /// Remove a specific media.
+    /// Also remove associated comments.
     pub async fn remove_content(&self, content_cid: Cid) -> Result<Cid, Error> {
         let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
         let datetime = Utc.timestamp(media.user_timestamp(), 0);
 
         let (channel_cid, mut channel) = self.get_channel().await?;
 
-        if channel.content_index.is_some() {
+        if channel.content_index.is_none() {
             return Ok(channel_cid);
         };
 
@@ -365,6 +455,11 @@ where
             content_cid,
         )
         .await?;
+
+        // Remove comments too!
+        if let Some(index) = channel.comment_index.as_mut() {
+            hamt::remove(&self.ipfs, index, content_cid).await?;
+        }
 
         self.update_channel(channel_cid, &channel).await
     }
@@ -466,5 +561,9 @@ impl Channel<IPNSAnchor> {
         };
 
         Ok(Some(ipns))
+    }
+
+    pub fn get_name(&self) -> &str {
+        self.anchor.get_name()
     }
 }

@@ -34,6 +34,18 @@ impl TryFrom<String> for PeerId {
     }
 }
 
+impl From<Cid> for PeerId {
+    fn from(cid: Cid) -> Self {
+        Self(cid)
+    }
+}
+
+impl Into<Cid> for PeerId {
+    fn into(self) -> Cid {
+        self.0
+    }
+}
+
 impl Display for PeerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)

@@ -21,10 +21,4 @@ pub struct ChannelMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follows: Option<IPLDLink>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bans: Option<IPLDLink>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mods: Option<IPLDLink>,
 }
