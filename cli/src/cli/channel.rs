@@ -1,10 +1,11 @@
+use cid::Cid;
 use defluencer::{errors::Error, Defluencer};
 
-use futures_util::{stream::FuturesUnordered, StreamExt};
+use futures_util::{future::AbortHandle, pin_mut, stream::FuturesUnordered, StreamExt};
 
 use ipfs_api::IpfsService;
 
-use linked_data::channel::ChannelMetadata;
+use linked_data::{channel::ChannelMetadata, identity::Identity};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -18,13 +19,12 @@ enum Command {
     /// Create a new channel.
     Create(Create),
 
-    /// Pin a channel.
-    /// Will recursively pin all associated data.
-    /// The amount of data to be pinned could be MASSIVE use carefully.
+    /// Recursively pin all channel associated data.
+    ///
+    /// CAUTION: The amount of data to download could be MASSIVE.
     Pin(Pinning),
 
-    /// Unpin a channel.
-    /// Recursively unpin all associated data.
+    /// Recursively unpin all channel associated data.
     Unpin(Pinning),
 
     /// Import a channel from a secret phrase.
@@ -32,6 +32,9 @@ enum Command {
 
     /// List all local channels on this IPFS node.
     List,
+
+    /// Receive channel updates in real time.
+    Subscribe(Subscribe),
 }
 
 pub async fn channel_cli(cli: ChannelCLI) {
@@ -41,6 +44,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
         Command::Unpin(args) => unpin(args).await,
         Command::Import(args) => import(args).await,
         Command::List => list().await,
+        Command::Subscribe(args) => subscribe(args).await,
     };
 
     if let Err(e) = res {
@@ -173,4 +177,58 @@ async fn list() -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, StructOpt)]
+pub struct Subscribe {
+    /// Channel identity CID.
+    #[structopt(short, long)]
+    identity: Cid,
+}
+
+async fn subscribe(args: Subscribe) -> Result<(), Error> {
+    use futures_util::TryStreamExt;
+
+    let ipfs = IpfsService::default();
+    let defluencer = Defluencer::default();
+
+    let Subscribe { identity } = args;
+
+    let identity = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+
+    let ipns = match identity.channel_ipns {
+        Some(ipns) => ipns,
+        None => {
+            eprintln!("This identity has no channel.");
+            return Ok(());
+        }
+    };
+
+    let (handle, regis) = AbortHandle::new_pair();
+    let stream = defluencer.subscribe_ipns_updates(ipns, regis);
+    pin_mut!(stream);
+
+    let control = tokio::signal::ctrl_c();
+    pin_mut!(control);
+
+    println!("Awaiting Updates\nPress CRTL-C to exit...");
+
+    loop {
+        tokio::select! {
+            biased;
+
+            _ = &mut control => {
+                handle.abort();
+                return Ok(());
+            }
+
+            result = stream.try_next() => match result {
+                Ok(option) => match option {
+                    Some(cid) => println!("New Channel Metadata: {}", cid),
+                    None => continue,
+                },
+                Err(e) => return Err(e),
+            }
+        }
+    }
 }

@@ -1,19 +1,19 @@
 use crate::moderation::{Ban, Moderator};
 
-use crate::types::{IPLDLink, PeerId};
+use crate::types::IPLDLink;
 
 use serde::{Deserialize, Serialize};
-
-/// CID of crypto-signed ChatID.
-pub type ChatSig = cid::Cid;
 
 /// GossipSub Live Chat Message.
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct ChatMessage {
+    /// Name of the sender
+    pub name: String,
+
     /// Usualy text, ban user or add moderator.
     pub message: MessageType,
 
-    /// Link to chat ID, crypto-signed.
+    /// Link to DAG-JOSE block for verification.
     pub signature: IPLDLink,
 }
 
@@ -23,11 +23,4 @@ pub enum MessageType {
     Text(String),
     Ban(Ban),
     Mod(Moderator),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChatId {
-    pub peer_id: PeerId,
-
-    pub name: String,
 }

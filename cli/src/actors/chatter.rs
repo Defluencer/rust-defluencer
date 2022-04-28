@@ -1,6 +1,6 @@
 use crate::actors::archivist::Archive;
 
-use defluencer::moderation_cache::ChatModerationCache;
+use defluencer::{moderation_cache::ChatModerationCache, signatures::dag_jose::JsonWebSignature};
 
 use futures_util::{future::AbortHandle, StreamExt, TryStreamExt};
 
@@ -14,6 +14,7 @@ use ipfs_api::{
 use linked_data::{
     media::chat::{ChatMessage, MessageType},
     moderation::{Ban, Bans, Moderators},
+    signature::RawJWS,
     types::PeerId,
 };
 
@@ -84,10 +85,7 @@ impl Chatter {
                         Some(msg) => self.on_pubsub_message(msg).await,
                         None => {},
                     },
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        break;
-                    }
+                    Err(e) => eprintln!("{}", e),
                 },
             }
         }
@@ -129,39 +127,55 @@ impl Chatter {
     }
 
     async fn get_origin(&mut self, peer: PeerId, msg: ChatMessage) {
-        /* let sign_msg: SignedMessage<ChatId> = match self
+        let jws: JsonWebSignature = match self
             .ipfs
-            .dag_get(&msg.signature.link, Option::<&str>::None)
+            .dag_get::<&str, RawJWS>(msg.signature.link, Option::<&str>::None)
             .await
         {
-            Ok(msg) => msg,
+            Ok(raw_jws) => match raw_jws.try_into() {
+                Ok(jws) => jws,
+                Err(e) => {
+                    eprintln!("❗ {}", e);
+                    return;
+                }
+            },
             Err(e) => {
                 eprintln!("❗ IPFS: dag get failed {}", e);
                 return;
             }
         };
 
+        let address = match jws.get_eth_address() {
+            Some(addr) => addr,
+            None => {
+                self.mod_db
+                    .add_peer(peer, msg.signature.link, [0u8; 20], None);
+
+                self.mod_db.ban_peer(&peer);
+
+                return;
+            }
+        };
+
         self.mod_db
-            .add_peer(peer, msg.signature.link, sign_msg.address, None);
+            .add_peer(peer, msg.signature.link, address, None);
 
-        if peer != sign_msg.data.peer_id {
+        if peer != jws.link.into() {
             self.mod_db.ban_peer(&peer);
             return;
         }
 
-        if !sign_msg.verify() {
+        if !jws.verify().is_ok() {
             self.mod_db.ban_peer(&peer);
             return;
         }
 
-        if self.bans.banned_addrs.contains(&sign_msg.address) {
+        if self.bans.banned_addrs.contains(&address) {
             self.mod_db.ban_peer(&peer);
             return;
-        } */
+        }
 
-        //self.process_msg(&peer, msg).await
-
-        todo!()
+        self.process_msg(&peer, msg).await
     }
 
     async fn process_msg(&mut self, peer: &PeerId, chat: ChatMessage) {

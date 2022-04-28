@@ -1,9 +1,13 @@
 use cid::Cid;
 
-use linked_data::signature::{AlgorithmType, CurveType, Header, KeyType, RawJWS, RawSignature};
+use linked_data::{
+    signature::{AlgorithmType, CurveType, Header, KeyType, RawJWS, RawSignature},
+    types::Address,
+};
 
 use multibase::Base;
 
+use sha3::Keccak256;
 use signature::Verifier;
 
 use crate::errors::Error;
@@ -122,5 +126,36 @@ impl JsonWebSignature {
         }
 
         Ok(())
+    }
+
+    pub fn get_eth_address(&self) -> Option<Address> {
+        use sha3::Digest;
+
+        let jwk = self.signatures[0].header.json_web_key.as_ref()?;
+
+        if jwk.curve != CurveType::Secp256k1 {
+            return None;
+        }
+
+        let mut hasher = Keccak256::new();
+
+        hasher.update(jwk.x.as_bytes());
+
+        if let Some(y) = jwk.y.as_ref() {
+            hasher.update(y.as_bytes());
+        }
+
+        let gen_array = hasher.finalize();
+
+        if gen_array.len() != 32 {
+            panic!("Keccak256 digest size is 32 bytes");
+        }
+
+        let mut address = [0u8; 20];
+        for (i, byte) in gen_array.into_iter().skip(12).enumerate() {
+            address[i] = byte;
+        }
+
+        Some(address)
     }
 }

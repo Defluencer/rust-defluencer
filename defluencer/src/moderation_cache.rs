@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 
-use linked_data::{
-    media::chat::ChatSig,
-    types::{Address, PeerId},
-};
+use cid::Cid;
+use linked_data::types::{Address, PeerId};
 
 /// Local cache of who is verified and/or banned.
 pub struct ChatModerationCache {
     verified: HashMap<PeerId, usize>, // Map peer IDs to indices.
 
     peers: Vec<PeerId>,      // sync
-    origins: Vec<ChatSig>,   // sync
+    origins: Vec<Cid>,       // sync
     addresses: Vec<Address>, // sync
     names: Vec<String>,      // sync not used when archiving
 
@@ -42,7 +40,7 @@ impl ChatModerationCache {
     }
 
     /// Check if this peer is verified.
-    pub fn is_verified(&self, peer: &PeerId, origin: &ChatSig) -> bool {
+    pub fn is_verified(&self, peer: &PeerId, origin: &Cid) -> bool {
         let index = match self.verified.get(peer) {
             Some(i) => *i,
             None => return false,
@@ -51,6 +49,7 @@ impl ChatModerationCache {
         origin == &self.origins[index]
     }
 
+    /// Get the ethereum address of this peer
     pub fn get_address(&self, peer: &PeerId) -> Option<&Address> {
         let index = self.verified.get(peer)?;
 
@@ -59,6 +58,7 @@ impl ChatModerationCache {
         Some(address)
     }
 
+    /// Get the chosen name of this peer
     pub fn get_name(&self, peer: &PeerId) -> Option<&str> {
         let index = self.verified.get(peer)?;
 
@@ -67,14 +67,8 @@ impl ChatModerationCache {
         Some(name)
     }
 
-    /// Add as verified user.
-    pub fn add_peer(
-        &mut self,
-        peer: PeerId,
-        msg_sig: ChatSig,
-        addrs: Address,
-        name: Option<String>,
-    ) {
+    /// Add a peer to the cache.
+    pub fn add_peer(&mut self, peer: PeerId, msg_sig: Cid, addrs: Address, name: Option<String>) {
         if self.verified.contains_key(&peer) {
             return;
         }
@@ -92,6 +86,7 @@ impl ChatModerationCache {
         self.verified.insert(peer, index);
     }
 
+    /// Add this peer to the naughty list.
     pub fn ban_peer(&mut self, peer: &PeerId) {
         let i = match self.verified.get(peer) {
             Some(i) => *i,
@@ -113,13 +108,6 @@ impl ChatModerationCache {
         self.origins.swap(i, last);
         self.addresses.swap(i, last);
         self.names.swap(i, last);
-
-        //let index = self.verified.get_mut(peer).unwrap();
-        //*index = last;
-
-        //let last_peer = self.peers[i];
-        //let index = self.verified.get_mut(last_peer).unwrap();
-        //*index = i;
 
         self.verified.entry(*peer).or_insert(last);
         self.verified.entry(self.peers[i]).or_insert(i);

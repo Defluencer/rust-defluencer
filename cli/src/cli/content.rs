@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use cid::Cid;
 
 use defluencer::{errors::Error, signatures::TestSigner, user::User, Defluencer};
+use futures_util::pin_mut;
 use ipfs_api::IpfsService;
+use linked_data::{channel::ChannelMetadata, identity::Identity};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -16,6 +18,9 @@ pub struct Content {
 enum Command {
     /// Create new media content.
     Create(Create),
+
+    /// Stream a channel's content.
+    Stream(Stream),
 
     /// Remove media content from your channel.
     Remove(Remove),
@@ -66,6 +71,7 @@ pub async fn content_cli(cli: Content) {
             Media::Video(args) => video(create.identity, args).await,
             Media::Comment(args) => comment(create.identity, args).await,
         },
+        Command::Stream(args) => stream(args).await,
         Command::Remove(remove) => delete(remove.key_name, remove.cid).await,
     };
 
@@ -194,14 +200,67 @@ async fn comment(identity: Cid, args: Comment) -> Result<(), Error> {
     Ok(())
 }
 
+#[derive(Debug, StructOpt)]
+pub struct Stream {
+    /// Channel identity CID.
+    #[structopt(short, long)]
+    identity: Cid,
+}
+
+async fn stream(args: Stream) -> Result<(), Error> {
+    use futures_util::TryStreamExt;
+
+    let ipfs = IpfsService::default();
+    let defluencer = Defluencer::default();
+
+    let Stream { identity } = args;
+
+    let identity = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+
+    let ipns = match identity.channel_ipns {
+        Some(ipns) => ipns,
+        None => {
+            eprintln!("❗ This identity has no channel.");
+            return Ok(());
+        }
+    };
+
+    let cid = ipfs.name_resolve(ipns.into()).await?;
+
+    let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+
+    let index = match metadata.content_index {
+        Some(ipns) => ipns,
+        None => {
+            eprintln!("❗ This channel has no content.");
+            return Ok(());
+        }
+    };
+
+    let stream = defluencer.stream_content_chronologically(index);
+    pin_mut!(stream);
+
+    while let Some(cid) = stream.try_next().await? {
+        println!("{}", cid);
+    }
+
+    Ok(())
+}
+
 async fn delete(key: String, content_cid: Cid) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        channel.remove_content(content_cid).await?;
+    let channel = match defluencer.get_local_channel(key).await? {
+        Some(channel) => channel,
+        None => {
+            eprintln!("❗ Cannot find channel");
+            return Ok(());
+        }
+    };
 
-        println!("✅ Comments Cleared & Removed Content {}", content_cid);
-    }
+    channel.remove_content(content_cid).await?;
+
+    println!("✅ Comments Cleared & Removed Content {}", content_cid);
 
     Ok(())
 }

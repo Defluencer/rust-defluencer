@@ -1,6 +1,5 @@
 mod actors;
 mod cli;
-mod config;
 mod server;
 
 use crate::cli::{

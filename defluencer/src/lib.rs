@@ -486,7 +486,7 @@ impl Defluencer {
     }
 
     /// Lazily stream all the comments for some content on the channel
-    pub async fn stream_comments(
+    pub fn stream_comments(
         &self,
         comment_index: IPLDLink,
         content_cid: Cid,

@@ -268,4 +268,8 @@ where
 
         Ok(duration)
     }
+
+    // TODO live chat
+    // When sending chat message create a DAG-JOSE block, the link is the peer id of the chatter.
+    // Verifying the signature once is enough since the cid of the DAG-JOSE block can't change
 }
