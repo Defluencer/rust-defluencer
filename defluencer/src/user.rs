@@ -269,7 +269,14 @@ where
         Ok(duration)
     }
 
-    // TODO live chat
-    // When sending chat message create a DAG-JOSE block, the link is the peer id of the chatter.
-    // Verifying the signature once is enough since the cid of the DAG-JOSE block can't change
+    /// Returns a DAG-JOSE block CID used to authenticate chat message.
+    ///
+    /// Message will only be valid when sent by this IPFS node.
+    pub async fn chat_signature(&self) -> Result<Cid, Error> {
+        let peer = self.ipfs.peer_id().await?;
+
+        let cid = self.signer.sign(peer).await?;
+
+        Ok(cid)
+    }
 }

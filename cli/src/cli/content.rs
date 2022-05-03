@@ -92,7 +92,7 @@ async fn micro_blog(identity: Cid, args: MicroBlog) -> Result<(), Error> {
 
     let MicroBlog { content } = args;
 
-    let signer = TestSigner::default();
+    let signer = TestSigner::default(); // TODO
 
     let user = User::new(ipfs, signer, identity);
 
@@ -127,7 +127,7 @@ async fn blog(identity: Cid, args: Blog) -> Result<(), Error> {
         content,
     } = args;
 
-    let signer = TestSigner::default();
+    let signer = TestSigner::default(); // TODO
 
     let user = User::new(ipfs, signer, identity);
 
@@ -162,7 +162,7 @@ async fn video(identity: Cid, args: Video) -> Result<(), Error> {
         video,
     } = args;
 
-    let signer = TestSigner::default();
+    let signer = TestSigner::default(); // TODO
 
     let user = User::new(ipfs, signer, identity);
 
@@ -189,7 +189,7 @@ async fn comment(identity: Cid, args: Comment) -> Result<(), Error> {
 
     let Comment { origin, content } = args;
 
-    let signer = TestSigner::default();
+    let signer = TestSigner::default(); // TODO
 
     let user = User::new(ipfs, signer, identity);
 

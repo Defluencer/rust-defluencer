@@ -14,16 +14,16 @@ bitvec = { version = "1", default-features = false, features = ["serde", "std"] 
 tiny-bip39 = { version = "0.8.2", default-features = false, features = [] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cid = { version = "0.8", default-features = false, features = [] }
-ecdsa = { version = "0.13", default-features = false, features = ["sign", "verify"] }
+ecdsa = { version = "0.13", default-features = false, features = ["sign", "verify", "der"] }
 ed25519 = { version = "1", default-features = false, features = ["pkcs8", "alloc"] }
 ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek.git", branch = "update-deps", default-features = false, features = ["u64_backend"] }
 either = { version = "1", default-features = false, features = [] }
-elliptic-curve = { version = "0.11", default-features = false, features = ["std", "serde", "jwk"] }
+elliptic-curve = { version = "0.11", default-features = false, features = [] }
 futures = { version = "0.3", default-features = false, features = [] }
 futures-util = { version = "0.3", default-features = false, features = [] }
 heck = { version = "0.4", default-features = false, features = [] }
 ipfs-api = { path = "../ipfs-api" }
-k256 = { version = "0.10", default-features = false, features = ["ecdsa", "keccak256", "jwk", "sha256"] }
+k256 = { version = "0.10", default-features = false, features = ["std", "ecdsa", "keccak256", "jwk", "sha256", "pem"] }
 linked-data = { path = "../linked-data" }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = [] }
@@ -33,7 +33,7 @@ rand_core = { version = "0.6", default-features = false, features = ["getrandom"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = [] }
 sha3 = { version = "*", default-features = false, features = [] }
-signature = { version = "1", default-features = false, features = ["std"] }
+signature = { version = "1", default-features = false, features = ["std", "digest-preview"] }
 strum = { version = "0.24", default-features = false, features = ["derive"] }
 thiserror = { version = "1", default-features = false, features = [] }
 zeroize = { version = "1", default-features = false, features = [] }

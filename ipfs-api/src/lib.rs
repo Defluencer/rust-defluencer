@@ -587,4 +587,37 @@ impl IpfsService {
         })
         .try_flatten()
     }
+
+    pub async fn dht_put<D>(&self, peer_id: Cid, data: D) -> Result<DHTPutResponse, Error>
+    where
+        D: Into<Cow<'static, [u8]>>,
+    {
+        let url = self.base_url.join("dht/put")?;
+
+        let key = format!("/ipns/{}", peer_id.to_string_of_base(Base::Base32Lower)?);
+
+        let part = Part::bytes(data);
+        let form = Form::new().part("value-file", part);
+
+        let bytes = self
+            .client
+            .post(url)
+            .query(&[("arg", key)])
+            .query(&[("verbose", "true")])
+            .multipart(form)
+            .send()
+            .await?
+            .bytes()
+            .await?;
+
+        println!("{}", std::str::from_utf8(&bytes).unwrap());
+
+        if let Ok(res) = serde_json::from_slice::<DHTPutResponse>(&bytes) {
+            return Ok(res);
+        }
+
+        let error = serde_json::from_slice::<IPFSError>(&bytes)?;
+
+        Err(error.into())
+    }
 }

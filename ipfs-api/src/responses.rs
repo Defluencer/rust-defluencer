@@ -220,3 +220,27 @@ impl Default for Codec {
         Codec::DagCbor
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct DHTPutResponse {
+    #[serde(rename = "Extra")]
+    pub extra: String,
+
+    #[serde(rename = "ID")]
+    pub id: Option<String>,
+
+    #[serde(rename = "Responses")]
+    pub responses: Vec<Response>,
+
+    #[serde(rename = "Type")]
+    pub dht_put_response_type: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Response {
+    #[serde(rename = "Addrs")]
+    pub addrs: Vec<String>,
+
+    #[serde(rename = "ID")]
+    pub id: String,
+}

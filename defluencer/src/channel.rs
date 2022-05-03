@@ -85,10 +85,10 @@ where
         &self,
         display_name: Option<String>,
         avatar: Option<web_sys::File>,
-        channel_ipns: Option<IPNSAddress>,
+        channel_ipns: Option<Cid>,
         channel_ens: Option<String>,
     ) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_channel().await?;
+        let (channel_cid, mut channel) = self.get_metadata().await?;
 
         let mut identity = self
             .ipfs
@@ -104,7 +104,7 @@ where
         }
 
         if let Some(ipns) = channel_ipns {
-            identity.channel_ipns = Some(ipns);
+            identity.channel_ipns = Some(ipns.into());
         }
 
         if let Some(ens) = channel_ens {
@@ -115,7 +115,7 @@ where
 
         channel.identity = cid.into();
 
-        self.update_channel(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await
     }
 
     pub async fn replace_identity(&self, identity: IPLDLink) -> Result<Cid, Error> {
