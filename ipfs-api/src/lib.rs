@@ -578,7 +578,7 @@ impl IpfsService {
 
                         let ipfs_error = serde_json::from_str::<IPFSError>(&line)?;
 
-                        return Err(ipfs_error.into());
+                        Err(ipfs_error.into())
                     }
                     Err(e) => Err(e.into()),
                 });
@@ -588,7 +588,7 @@ impl IpfsService {
         .try_flatten()
     }
 
-    pub async fn dht_put<D>(&self, peer_id: Cid, data: D) -> Result<DHTPutResponse, Error>
+    pub async fn dht_put<D>(&self, peer_id: Cid, data: D) -> Result<(), Error>
     where
         D: Into<Cow<'static, [u8]>>,
     {
@@ -599,25 +599,24 @@ impl IpfsService {
         let part = Part::bytes(data);
         let form = Form::new().part("value-file", part);
 
-        let bytes = self
-            .client
+        self.client
             .post(url)
             .query(&[("arg", key)])
-            .query(&[("verbose", "true")])
+            .query(&[("verbose", "false")])
             .multipart(form)
             .send()
-            .await?
-            .bytes()
             .await?;
 
-        println!("{}", std::str::from_utf8(&bytes).unwrap());
+        //println!("{}", std::str::from_utf8(&bytes).unwrap());
 
-        if let Ok(res) = serde_json::from_slice::<DHTPutResponse>(&bytes) {
+        /* if let Ok(res) = serde_json::from_slice::<DHTPutResponse>(&bytes) {
             return Ok(res);
         }
 
         let error = serde_json::from_slice::<IPFSError>(&bytes)?;
 
-        Err(error.into())
+        Err(error.into()) */
+
+        Ok(())
     }
 }

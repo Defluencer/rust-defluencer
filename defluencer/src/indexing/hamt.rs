@@ -41,8 +41,7 @@ pub(crate) async fn get(
         return Err(HAMTError::HashAlgo.into());
     }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> =
-        key.hash().digest().iter().map(|byte| *byte).collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key.hash().digest().iter().copied().collect();
     let key = key.into_inner().unwrap();
 
     let root = ipfs.dag_get::<&str, HAMTRoot>(root.link, None).await?;
@@ -97,8 +96,7 @@ pub(crate) async fn insert(
         return Err(HAMTError::HashAlgo.into());
     }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> =
-        key.hash().digest().iter().map(|byte| *byte).collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key.hash().digest().iter().copied().collect();
     let key = key.into_inner().unwrap();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
@@ -156,7 +154,7 @@ async fn set(
 
             let cid = ipfs.dag_put(&node, Codec::default()).await?;
 
-            return Ok(cid);
+            Ok(cid)
         }
         Element::Bucket(btree) => {
             if btree.len() < BUCKET_SIZE {
@@ -181,7 +179,7 @@ async fn set(
 
             let cid = ipfs.dag_put(&node, Codec::default()).await?;
 
-            return Ok(cid);
+            Ok(cid)
         }
     }
 }
@@ -195,8 +193,7 @@ pub(crate) async fn remove(
         return Err(HAMTError::HashAlgo.into());
     }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> =
-        key.hash().digest().iter().map(|byte| *byte).collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key.hash().digest().iter().copied().collect();
     let key = key.into_inner().unwrap();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
@@ -303,13 +300,13 @@ async fn delete(
         .iter()
         .filter_map(|element| {
             if let Element::Bucket(btree) = element {
-                Some(btree.into_iter())
+                Some(btree.iter())
             } else {
                 None
             }
         })
         .flatten()
-        .map(|bucket| *bucket)
+        .copied()
         .collect();
 
     let entry = BucketEntry {
@@ -368,78 +365,6 @@ fn stream_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Result<
     })
     .try_flatten()
 }
-
-/* pub async fn values(ipfs: &IpfsService, root: Cid) -> Result<Vec<Cid>, Error> {
-    let root = ipfs.dag_get::<&str, HAMTRoot>(root, None).await?;
-
-    get_values(ipfs, root.hamt).await
-}
-
-#[async_recursion(?Send)]
-async fn get_values(ipfs: &IpfsService, node: HAMTNode) -> Result<Vec<Cid>, Error> {
-    let mut values = Vec::with_capacity(node.data.len());
-
-    for element in node.data {
-        match element {
-            Element::Link(ipld) => {
-                let node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
-
-                let result = get_values(ipfs, node).await?;
-
-                values.extend(result);
-            }
-            Element::Bucket(vec) => values.extend(vec.into_iter().map(|entry| entry.value.link)),
-        }
-    }
-
-    Ok(values)
-} */
-
-/* pub fn values(ipfs: &IpfsService, root: IPLDLink) -> impl Stream<Item = Cid> + '_ {
-    stream::unfold(Some(root), move |mut root| async move {
-        match root {
-            Some(ipld) => match ipfs.dag_get::<&str, HAMTRoot>(ipld.link, None).await {
-                Ok(root_node) => {
-                    root = None;
-
-                    let stream = stream_data(ipfs, root_node.hamt);
-
-                    Some((stream, root))
-                }
-                Err(_) => None,
-            },
-            None => None,
-        }
-    })
-    .flatten()
-} */
-
-/* fn stream_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Cid> + '_ {
-    stream::unfold(node.data.into_iter(), move |mut iter| async move {
-        match iter.next() {
-            Some(element) => match element {
-                Element::Link(ipld) => {
-                    match ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await {
-                        Ok(node) => {
-                            let stream = stream_data(ipfs, node).boxed_local();
-
-                            Some((stream, iter))
-                        }
-                        Err(_) => None,
-                    }
-                }
-                Element::Bucket(vec) => {
-                    let stream =
-                        stream::iter(vec.into_iter().map(|entry| entry.value.link)).boxed_local();
-
-                    Some((stream, iter))
-                }
-            },
-            None => None,
-        }
-    })
-    .flatten()
-} */
 
 #[cfg(test)]
 mod tests {
@@ -523,9 +448,8 @@ mod tests {
         rng.fill_bytes(&mut hash);
 
         let multihash = Multihash::wrap(0x12, &hash).unwrap();
-        let cid = Cid::new_v1(0x71, multihash);
 
-        cid
+        Cid::new_v1(0x71, multihash)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

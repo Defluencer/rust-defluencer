@@ -1,13 +1,17 @@
-use defluencer::{errors::Error, Defluencer};
+use cid::Cid;
 
+use defluencer::{channel::Channel, errors::Error, signatures::TestSigner};
+
+use ipfs_api::IpfsService;
 use linked_data::types::PeerId;
+
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct LiveCLI {
-    /// Channel local key name.
+    /// Channel IPNS Address.
     #[structopt(short, long)]
-    key_name: String,
+    address: Cid,
 
     /// Peer Id of the node live streaming.
     #[structopt(short, long)]
@@ -35,36 +39,38 @@ pub async fn live_cli(cli: LiveCLI) {
 }
 
 async fn update(cli: LiveCLI) -> Result<(), Error> {
-    let defluencer = Defluencer::default();
-
     let LiveCLI {
-        key_name,
+        address,
         peer_id,
         video_topic,
         chat_topic,
         archiving,
     } = cli;
 
-    if let Some(channel) = defluencer.get_local_channel(key_name).await? {
-        let peer_id = if let Some(peer) = peer_id {
-            match PeerId::try_from(peer) {
-                Ok(peer) => Some(peer.into()),
-                Err(e) => {
-                    eprintln!("{}", e);
+    let ipfs = IpfsService::default();
 
-                    None
-                }
+    let signer = TestSigner::default(); //TODO
+
+    let channel = Channel::new(ipfs, address.into(), signer);
+
+    let peer_id = if let Some(peer) = peer_id {
+        match PeerId::try_from(peer) {
+            Ok(peer) => Some(peer.into()),
+            Err(e) => {
+                eprintln!("{}", e);
+
+                None
             }
-        } else {
-            None
-        };
+        }
+    } else {
+        None
+    };
 
-        let cid = channel
-            .update_live_settings(peer_id, video_topic, chat_topic, archiving)
-            .await?;
+    let cid = channel
+        .update_live_settings(peer_id, video_topic, chat_topic, archiving)
+        .await?;
 
-        println!("✅ Live Settings Updated\nCID: {}", cid);
-    }
+    println!("✅ Live Settings Updated\nCID: {}", cid);
 
     Ok(())
 }

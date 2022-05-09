@@ -93,7 +93,7 @@ impl ContentCache {
     }
 
     pub fn iter_media(&self) -> impl Iterator<Item = Cid> + '_ {
-        self.media.iter().map(|media| *media)
+        self.media.iter().copied()
     }
 
     pub fn iter_media_comments(&self, media: Cid) -> impl Iterator<Item = Cid> + '_ {

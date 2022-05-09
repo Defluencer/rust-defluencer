@@ -224,7 +224,7 @@ impl Default for Codec {
 #[derive(Debug, Deserialize)]
 pub struct DHTPutResponse {
     #[serde(rename = "Extra")]
-    pub extra: String,
+    pub extra: Option<String>,
 
     #[serde(rename = "ID")]
     pub id: Option<String>,

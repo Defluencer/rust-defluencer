@@ -11,7 +11,7 @@ arrayvec = { version = "0.7", default-features = false, features = [] }
 async-recursion = { version = "1", default-features = false, features = [] }
 async-trait = { version = "0.1", default-features = false, features = [] }
 bitvec = { version = "1", default-features = false, features = ["serde", "std"] }
-tiny-bip39 = { version = "0.8.2", default-features = false, features = [] }
+#tiny-bip39 = { version = "0.8.2", default-features = false, features = [] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cid = { version = "0.8", default-features = false, features = [] }
 ecdsa = { version = "0.13", default-features = false, features = ["sign", "verify", "der"] }

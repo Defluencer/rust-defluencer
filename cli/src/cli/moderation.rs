@@ -1,13 +1,17 @@
-use defluencer::{errors::Error, Defluencer};
+use cid::Cid;
+
+use defluencer::{channel::Channel, errors::Error, signatures::TestSigner};
+
 use hex::FromHex;
 
+use ipfs_api::IpfsService;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct Moderation {
-    /// Channel local key name.
+    /// Channel IPNS Address.
     #[structopt(short, long)]
-    key_name: String,
+    address: Cid,
 
     #[structopt(subcommand)]
     cmd: Command,
@@ -24,8 +28,14 @@ enum Command {
 
 pub async fn moderation_cli(cli: Moderation) {
     let res = match cli.cmd {
-        Command::Ban(args) => ban_command(cli.key_name, args).await,
-        Command::Mods(args) => mod_command(cli.key_name, args).await,
+        Command::Ban(args) => match args.cmd {
+            BanCommand::Add(args) => ban_user(cli.address, args).await,
+            BanCommand::Remove(args) => unban_user(cli.address, args).await,
+        },
+        Command::Mods(args) => match args.cmd {
+            ModCommand::Add(args) => mod_user(cli.address, args).await,
+            ModCommand::Remove(args) => unmod_user(cli.address, args).await,
+        },
     };
 
     if let Err(e) = res {
@@ -48,13 +58,6 @@ enum BanCommand {
     Remove(UnBan),
 }
 
-async fn ban_command(key: String, cli: BanCommands) -> Result<(), Error> {
-    match cli.cmd {
-        BanCommand::Add(args) => ban_user(key, args).await,
-        BanCommand::Remove(args) => unban_user(key, args).await,
-    }
-}
-
 #[derive(Debug, StructOpt)]
 pub struct Ban {
     /// Ethereum Address.
@@ -62,20 +65,22 @@ pub struct Ban {
     address: String,
 }
 
-async fn ban_user(key: String, args: Ban) -> Result<(), Error> {
+async fn ban_user(addr: Cid, args: Ban) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    let defluencer = Defluencer::default();
+    let ipfs = IpfsService::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        if channel.ban_user(address).await?.is_some() {
-            println!("✅ User {} Banned", args.address);
+    let signer = TestSigner::default(); //TODO
 
-            return Ok(());
-        }
+    let channel = Channel::new(ipfs, addr.into(), signer);
 
-        println!("❗ User {} was already banned", args.address);
+    if channel.ban_user(address).await?.is_some() {
+        println!("✅ User {} Banned", args.address);
+
+        return Ok(());
     }
+
+    println!("❗ User {} was already banned", args.address);
 
     Ok(())
 }
@@ -87,20 +92,22 @@ pub struct UnBan {
     address: String,
 }
 
-async fn unban_user(key: String, args: UnBan) -> Result<(), Error> {
+async fn unban_user(addr: Cid, args: UnBan) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    let defluencer = Defluencer::default();
+    let ipfs = IpfsService::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        if channel.unban_user(&address).await?.is_some() {
-            println!("✅ User {} Unbanned", args.address);
+    let signer = TestSigner::default(); //TODO
 
-            return Ok(());
-        }
+    let channel = Channel::new(ipfs, addr.into(), signer);
 
-        println!("❗ User {} was not banned", args.address);
+    if channel.unban_user(&address).await?.is_some() {
+        println!("✅ User {} Unbanned", args.address);
+
+        return Ok(());
     }
+
+    println!("❗ User {} was not banned", args.address);
 
     Ok(())
 }
@@ -120,13 +127,6 @@ enum ModCommand {
     Remove(UnMod),
 }
 
-async fn mod_command(key: String, cli: ModCommands) -> Result<(), Error> {
-    match cli.cmd {
-        ModCommand::Add(args) => mod_user(key, args).await,
-        ModCommand::Remove(args) => unmod_user(key, args).await,
-    }
-}
-
 #[derive(Debug, StructOpt)]
 pub struct Mod {
     /// Ethereum address.
@@ -134,20 +134,22 @@ pub struct Mod {
     address: String,
 }
 
-async fn mod_user(key: String, args: Mod) -> Result<(), Error> {
+async fn mod_user(addr: Cid, args: Mod) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    let defluencer = Defluencer::default();
+    let ipfs = IpfsService::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        if channel.add_moderator(address).await?.is_some() {
-            println!("✅ User {} Promoted To Moderator Position", args.address);
+    let signer = TestSigner::default(); //TODO
 
-            return Ok(());
-        }
+    let channel = Channel::new(ipfs, addr.into(), signer);
 
-        println!("❗ User {} was already banned", args.address);
+    if channel.add_moderator(address).await?.is_some() {
+        println!("✅ User {} Promoted To Moderator Position", args.address);
+
+        return Ok(());
     }
+
+    println!("❗ User {} was already banned", args.address);
 
     Ok(())
 }
@@ -159,20 +161,22 @@ pub struct UnMod {
     address: String,
 }
 
-async fn unmod_user(key: String, args: UnMod) -> Result<(), Error> {
+async fn unmod_user(addr: Cid, args: UnMod) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
-    let defluencer = Defluencer::default();
+    let ipfs = IpfsService::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        if channel.remove_moderator(&address).await?.is_some() {
-            println!("✅ Moderator {} Demoted", args.address);
+    let signer = TestSigner::default(); //TODO
 
-            return Ok(());
-        }
+    let channel = Channel::new(ipfs, addr.into(), signer);
 
-        println!("❗ User {} Was Not A Moderator", args.address);
+    if channel.remove_moderator(&address).await?.is_some() {
+        println!("✅ Moderator {} Demoted", args.address);
+
+        return Ok(());
     }
+
+    println!("❗ User {} Was Not A Moderator", args.address);
 
     Ok(())
 }

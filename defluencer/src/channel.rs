@@ -1,16 +1,19 @@
+use std::{borrow::Cow, ops::Add};
+
 use crate::{
-    anchors::{Anchor, IPNSAnchor},
     errors::Error,
     indexing::{datetime, hamt},
+    signatures::Signer,
     utils::add_image,
 };
 
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, SecondsFormat, TimeZone, Utc};
 
 use cid::Cid;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
+use k256::ecdsa::VerifyingKey;
 use linked_data::{
     channel::ChannelMetadata,
     comments::Comment,
@@ -20,24 +23,53 @@ use linked_data::{
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
-    types::{Address, IPLDLink, IPNSAddress},
+    types::{Address, CryptoKey, IPLDLink, IPNSAddress, IPNSRecord, KeyType, ValidityType},
 };
+
+use cid::multihash::Multihash;
+
+use prost::Message;
 
 #[derive(Clone)]
 pub struct Channel<T>
 where
-    T: Anchor + Clone,
+    T: Signer + Clone,
 {
-    anchor: T,
     ipfs: IpfsService,
+    ipns: IPNSAddress,
+    signer: T,
 }
 
 impl<T> Channel<T>
 where
-    T: Anchor + Clone,
+    T: Signer + Clone,
 {
-    pub fn new(ipfs: IpfsService, anchor: T) -> Self {
-        Self { ipfs, anchor }
+    pub fn new(ipfs: IpfsService, ipns: IPNSAddress, signer: T) -> Self {
+        Self { ipfs, signer, ipns }
+    }
+
+    pub async fn create(
+        name: impl Into<Cow<'static, str>>,
+        ipfs: IpfsService,
+        signer: T,
+    ) -> Result<Self, Error> {
+        let identity = Identity {
+            display_name: name.into().into_owned(),
+            ..Default::default()
+        };
+
+        let metadata = ChannelMetadata {
+            identity: ipfs.dag_put(&identity, Codec::default()).await?.into(),
+            ..Default::default()
+        };
+
+        let cid = ipfs.dag_put(&metadata, Codec::default()).await?;
+
+        let ipns = create_ipns_record(cid, &ipfs, &signer, metadata.seq).await?;
+
+        let channel = Self { ipfs, signer, ipns };
+
+        Ok(channel)
     }
 
     /// Update your identity data.
@@ -476,7 +508,7 @@ where
 
         hamt::insert(&self.ipfs, &mut index, media_cid, comments.link).await?;
 
-        channel.comment_index = Some(index.into());
+        channel.comment_index = Some(index);
 
         self.update_metadata(channel_cid, &channel).await
     }
@@ -502,39 +534,15 @@ where
 
         hamt::insert(&self.ipfs, &mut index, media_cid, comments.link).await?;
 
-        channel.comment_index = Some(index.into());
+        channel.comment_index = Some(index);
 
         self.update_metadata(channel_cid, &channel).await?;
 
         Ok(())
     }
 
-    /// Pin a channel to this local node.
-    ///
-    /// WARNING!
-    /// This function pin ALL content from the channel.
-    /// The amout of data downloaded could be massive.
-    pub async fn pin_channel(&self) -> Result<(), Error> {
-        let cid = self.anchor.retreive().await?;
-
-        self.ipfs.pin_add(cid, true).await?;
-
-        Ok(())
-    }
-
-    /// Unpin a channel from this local node.
-    ///
-    /// This function unpin everyting; metadata, content, comment, etc...
-    pub async fn unpin_channel(&self) -> Result<(), Error> {
-        let cid = self.anchor.retreive().await?;
-
-        self.ipfs.pin_rm(cid, true).await?;
-
-        Ok(())
-    }
-
     pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
-        let cid = self.anchor.retreive().await?;
+        let cid = self.ipfs.name_resolve(self.ipns.into()).await?;
         let channel: ChannelMetadata = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
 
         Ok((cid, channel))
@@ -545,25 +553,78 @@ where
 
         self.ipfs.pin_update(old_cid, new_cid).await?;
 
-        self.anchor.anchor(new_cid).await?;
+        let ipns = create_ipns_record(new_cid, &self.ipfs, &self.signer, channel.seq + 1).await?;
+
+        if ipns != self.ipns {
+            return Err(Error::AlreadyAdded); //TODO add custom error
+        }
 
         Ok(new_cid)
     }
+
+    pub fn get_address(&self) -> IPNSAddress {
+        self.ipns
+    }
 }
 
-impl Channel<IPNSAnchor> {
-    pub async fn get_ipns_address(&self) -> Result<Option<IPNSAddress>, Error> {
-        let key_list = self.ipfs.key_list().await?;
+async fn create_ipns_record(
+    cid: Cid,
+    ipfs: &IpfsService,
+    signer: &impl Signer,
+    sequence: u64,
+) -> Result<IPNSAddress, Error> {
+    let value = format!("/ipfs/{}", cid).into_bytes();
 
-        let ipns = match key_list.get(self.anchor.get_name()) {
-            Some(cid) => (*cid).into(),
-            None => return Ok(None),
-        };
+    let validity = Utc::now()
+        .add(Duration::weeks(52))
+        .to_rfc3339_opts(SecondsFormat::Nanos, false)
+        .into_bytes();
 
-        Ok(Some(ipns))
+    let validity_type = ValidityType::EOL;
+
+    let signing_input = {
+        let mut data = Vec::with_capacity(
+            value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
+        );
+
+        data.extend(value.iter());
+        data.extend(validity.iter());
+        data.extend(validity_type.to_string().as_bytes());
+
+        data
+    };
+
+    let (public_key, signature) = signer.sign(signing_input).await?;
+
+    let verifying_key = VerifyingKey::from(public_key);
+
+    let public_key = CryptoKey {
+        key_type: KeyType::Secp256k1 as i32,
+        data: verifying_key.to_bytes().to_vec(),
     }
+    .encode_to_vec(); // Protobuf encoding
 
-    pub fn get_name(&self) -> &str {
-        self.anchor.get_name()
-    }
+    let signature = signature.to_der().to_bytes().into_vec();
+
+    let ipns = {
+        let multihash = Multihash::wrap(0x00, &public_key).unwrap();
+
+        Cid::new_v1(0x72, multihash)
+    };
+
+    let record = IPNSRecord {
+        value,
+        signature,
+        validity_type: validity_type as i32,
+        validity,
+        sequence,
+        ttl: 0, //TODO figure this out!
+        public_key,
+    };
+
+    let record_data = record.encode_to_vec(); // Protobuf encoding
+
+    ipfs.dht_put(ipns, record_data).await?;
+
+    Ok(ipns.into())
 }

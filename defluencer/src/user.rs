@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{
     errors::Error,
     signatures::Signer,
@@ -17,23 +19,27 @@ use linked_data::{
         blog::{FullPost, MicroPost},
         video::{Day, Hour, Minute, Video},
     },
+    signature::{AlgorithmType, Header, JsonWebKey, RawJWS, RawSignature},
     types::{IPLDLink, IPNSAddress},
 };
 
+use multibase::Base;
+
 use serde::Serialize;
 
+#[derive(Clone)]
 pub struct User<T>
 where
-    T: Signer,
+    T: Signer + Clone,
 {
-    signer: T,
     ipfs: IpfsService,
     identity: IPLDLink,
+    signer: T,
 }
 
 impl<T> User<T>
 where
-    T: Signer,
+    T: Signer + Clone,
 {
     pub fn new(ipfs: IpfsService, signer: T, identity: Cid) -> Self {
         Self {
@@ -41,6 +47,28 @@ where
             signer,
             identity: identity.into(),
         }
+    }
+
+    pub async fn create(
+        &self,
+        user_name: impl Into<Cow<'static, str>>,
+        ipfs: IpfsService,
+        signer: T,
+    ) -> Result<Self, Error> {
+        let identity = Identity {
+            display_name: user_name.into().into_owned(),
+            ..Default::default()
+        };
+
+        let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
+
+        let user = Self {
+            ipfs,
+            signer,
+            identity,
+        };
+
+        Ok(user)
     }
 
     /// Update your identity data.
@@ -240,7 +268,7 @@ where
     {
         let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
 
-        let signed_cid = self.signer.sign(content_cid).await?;
+        let signed_cid = self.create_dag_jose(content_cid).await?;
 
         self.ipfs.pin_add(signed_cid, pin).await?;
 
@@ -275,7 +303,49 @@ where
     pub async fn chat_signature(&self) -> Result<Cid, Error> {
         let peer = self.ipfs.peer_id().await?;
 
-        let cid = self.signer.sign(peer).await?;
+        let cid = self.create_dag_jose(peer).await?;
+
+        Ok(cid)
+    }
+
+    async fn create_dag_jose(&self, cid: Cid) -> Result<Cid, Error> {
+        let payload = cid.to_bytes();
+        let payload = Base::Base64Url.encode(payload);
+
+        let protected = Header {
+            algorithm: Some(AlgorithmType::ES256K),
+            json_web_key: None,
+        };
+
+        let protected = serde_json::to_vec(&protected)?;
+        let protected = Base::Base64Url.encode(protected);
+
+        let message = format!("{}.{}", payload, protected);
+
+        let (public_key, signature) = self.signer.sign(message.into_bytes()).await?;
+
+        // Lazy Hack: Deserialize then serialize as the other type
+        let jwk_string = public_key.to_jwk_string();
+        let jwk: JsonWebKey = serde_json::from_str(&jwk_string)?;
+
+        let header = Some(Header {
+            algorithm: None,
+            json_web_key: Some(jwk),
+        });
+
+        let signature = Base::Base64Url.encode(signature);
+
+        let json = RawJWS {
+            payload,
+            signatures: vec![RawSignature {
+                header,
+                protected,
+                signature,
+            }],
+            link: cid.into(), // ignored when serializing
+        };
+
+        let cid = self.ipfs.dag_put(&json, Codec::DagJose).await?;
 
         Ok(cid)
     }

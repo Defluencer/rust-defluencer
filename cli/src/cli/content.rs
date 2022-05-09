@@ -2,10 +2,14 @@ use std::path::PathBuf;
 
 use cid::Cid;
 
-use defluencer::{errors::Error, signatures::TestSigner, user::User, Defluencer};
+use defluencer::{channel::Channel, errors::Error, signatures::TestSigner, user::User, Defluencer};
+
 use futures_util::pin_mut;
+
 use ipfs_api::IpfsService;
-use linked_data::{channel::ChannelMetadata, identity::Identity};
+
+use linked_data::channel::ChannelMetadata;
+
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -53,9 +57,9 @@ enum Media {
 
 #[derive(Debug, StructOpt)]
 pub struct Remove {
-    /// Channel local key name.
+    /// Channel IPNS Address.
     #[structopt(short, long)]
-    key_name: String,
+    address: Cid,
 
     /// The CID of the content to remove.
     /// Will also delete your comments.
@@ -72,7 +76,7 @@ pub async fn content_cli(cli: Content) {
             Media::Comment(args) => comment(create.identity, args).await,
         },
         Command::Stream(args) => stream(args).await,
-        Command::Remove(remove) => delete(remove.key_name, remove.cid).await,
+        Command::Remove(remove) => delete(remove.address, remove.cid).await,
     };
 
     if let Err(e) = res {
@@ -90,13 +94,11 @@ pub struct MicroBlog {
 async fn micro_blog(identity: Cid, args: MicroBlog) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let MicroBlog { content } = args;
-
     let signer = TestSigner::default(); // TODO
 
     let user = User::new(ipfs, signer, identity);
 
-    let cid = user.create_micro_blog_post(content).await?;
+    let cid = user.create_micro_blog_post(args.content).await?;
 
     println!("✅ Added Micro Blog Post {}", cid);
 
@@ -179,7 +181,7 @@ pub struct Comment {
     #[structopt(long)]
     origin: Cid,
 
-    /// The comment content.
+    /// The comment text.
     #[structopt(short, long)]
     content: String,
 }
@@ -187,13 +189,11 @@ pub struct Comment {
 async fn comment(identity: Cid, args: Comment) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let Comment { origin, content } = args;
-
     let signer = TestSigner::default(); // TODO
 
     let user = User::new(ipfs, signer, identity);
 
-    let cid = user.create_comment(origin, content).await?;
+    let cid = user.create_comment(args.origin, args.content).await?;
 
     println!("✅ Added Comment {}", cid);
 
@@ -202,9 +202,9 @@ async fn comment(identity: Cid, args: Comment) -> Result<(), Error> {
 
 #[derive(Debug, StructOpt)]
 pub struct Stream {
-    /// Channel identity CID.
+    /// Channel IPNS Address.
     #[structopt(short, long)]
-    identity: Cid,
+    address: Cid,
 }
 
 async fn stream(args: Stream) -> Result<(), Error> {
@@ -213,19 +213,7 @@ async fn stream(args: Stream) -> Result<(), Error> {
     let ipfs = IpfsService::default();
     let defluencer = Defluencer::default();
 
-    let Stream { identity } = args;
-
-    let identity = ipfs.dag_get::<&str, Identity>(identity, None).await?;
-
-    let ipns = match identity.channel_ipns {
-        Some(ipns) => ipns,
-        None => {
-            eprintln!("❗ This identity has no channel.");
-            return Ok(());
-        }
-    };
-
-    let cid = ipfs.name_resolve(ipns.into()).await?;
+    let cid = ipfs.name_resolve(args.address.into()).await?;
 
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
 
@@ -244,19 +232,17 @@ async fn stream(args: Stream) -> Result<(), Error> {
         println!("{}", cid);
     }
 
+    println!("✅ Content Stream End");
+
     Ok(())
 }
 
-async fn delete(key: String, content_cid: Cid) -> Result<(), Error> {
-    let defluencer = Defluencer::default();
+async fn delete(addr: Cid, content_cid: Cid) -> Result<(), Error> {
+    let ipfs = IpfsService::default();
 
-    let channel = match defluencer.get_local_channel(key).await? {
-        Some(channel) => channel,
-        None => {
-            eprintln!("❗ Cannot find channel");
-            return Ok(());
-        }
-    };
+    let signer = TestSigner::default(); //TODO
+
+    let channel = Channel::new(ipfs, addr.into(), signer);
 
     channel.remove_content(content_cid).await?;
 

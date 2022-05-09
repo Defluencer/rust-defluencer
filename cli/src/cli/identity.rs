@@ -2,18 +2,16 @@ use std::path::PathBuf;
 
 use cid::Cid;
 
-use defluencer::{errors::Error, Defluencer};
+use defluencer::{channel::Channel, errors::Error, signatures::TestSigner};
 
 use ipfs_api::{responses::Codec, IpfsService};
+
 use linked_data::identity::Identity;
+
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct IdentityCLI {
-    /// Channel local key name.
-    #[structopt(short, long)]
-    key_name: String,
-
     #[structopt(subcommand)]
     cmd: Command,
 }
@@ -24,13 +22,13 @@ enum Command {
     Create(Create),
 
     /// Update channel identity.
-    Channel(Channel),
+    Channel(ChannelIdentity),
 }
 
 pub async fn identity_cli(cli: IdentityCLI) {
     let res = match cli.cmd {
         Command::Create(args) => create(args).await,
-        Command::Channel(args) => update(cli.key_name, args).await,
+        Command::Channel(args) => update(args).await,
     };
 
     if let Err(e) = res {
@@ -74,7 +72,7 @@ async fn create(args: Create) -> Result<(), Error> {
 
     let avatar = defluencer::utils::add_image(&ipfs, &path).await?.into();
 
-    //TODO make avatar optional then use default avatar cid is needed
+    //TODO make avatar optional then use default avatar cid as needed
 
     let identity = Identity {
         display_name,
@@ -91,7 +89,11 @@ async fn create(args: Create) -> Result<(), Error> {
 }
 
 #[derive(Debug, StructOpt)]
-pub struct Channel {
+pub struct ChannelIdentity {
+    /// Channel IPNS Address.
+    #[structopt(short, long)]
+    address: Cid,
+
     /// Display name.
     #[structopt(short, long)]
     name: Option<String>,
@@ -109,19 +111,22 @@ pub struct Channel {
     ens: Option<String>,
 }
 
-async fn update(key: String, args: Channel) -> Result<(), Error> {
-    let defluencer = Defluencer::default();
-
-    let Channel {
+async fn update(args: ChannelIdentity) -> Result<(), Error> {
+    let ChannelIdentity {
+        address,
         name,
         path,
         ipns,
         ens,
     } = args;
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        channel.update_identity(name, path, ipns, ens).await?;
-    }
+    let ipfs = IpfsService::default();
+
+    let signer = TestSigner::default(); //TODO
+
+    let channel = Channel::new(ipfs, address.into(), signer);
+
+    channel.update_identity(name, path, ipns, ens).await?;
 
     println!("✅ Updated Identity");
 

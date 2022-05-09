@@ -147,10 +147,6 @@ impl JsonWebSignature {
 
         let gen_array = hasher.finalize();
 
-        if gen_array.len() != 32 {
-            panic!("Keccak256 digest size is 32 bytes");
-        }
-
         let mut address = [0u8; 20];
         for (i, byte) in gen_array.into_iter().skip(12).enumerate() {
             address[i] = byte;

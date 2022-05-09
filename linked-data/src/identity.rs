@@ -18,3 +18,14 @@ pub struct Identity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_ens: Option<String>,
 }
+
+impl Default for Identity {
+    fn default() -> Self {
+        Self {
+            display_name: Default::default(),
+            avatar: Default::default(), //TODO generic avatar cid
+            channel_ipns: Default::default(),
+            channel_ens: Default::default(),
+        }
+    }
+}

@@ -2,17 +2,13 @@
 
 #[cfg(test)]
 mod tests {
-
-    use std::{hash, ops::Add};
+    /* use std::ops::Add;
 
     use bip39::{Language, Mnemonic};
     use chrono::{Duration, SecondsFormat, Utc};
     use cid::Cid;
 
-    use defluencer::{
-        signatures::{dag_jose::JsonWebSignature, EdDSASigner, Signer},
-        Defluencer,
-    };
+    use defluencer::{signatures::dag_jose::JsonWebSignature, Defluencer};
 
     use ed25519::KeypairBytes;
 
@@ -24,13 +20,12 @@ mod tests {
         types::{CryptoKey, IPNSAddress, IPNSRecord, KeyType, ValidityType},
     };
 
-    use multihash::{Hasher, Multihash, MultihashGeneric, Sha2_256};
+    use multihash::Multihash;
     use pkcs8::{EncodePrivateKey, LineEnding};
 
-    use rand_core::{OsRng, RngCore};
-    use serde::{Deserialize, Serialize};
+    use rand_core::{OsRng, RngCore}; */
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ed25519_roundtrip() {
         let ipfs = IpfsService::default();
 
@@ -53,9 +48,9 @@ mod tests {
         let result = jws.verify();
 
         assert!(result.is_ok());
-    }
+    } */
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn mnemonic_roundtrip() {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
@@ -80,9 +75,9 @@ mod tests {
         let mnemonic = Mnemonic::from_phrase(passphrase, Language::English).unwrap();
 
         assert_eq!(&bytes, mnemonic.entropy());
-    }
+    } */
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ipns_sub() {
         use futures::StreamExt;
 
@@ -104,11 +99,11 @@ mod tests {
         let cid = stream.next().await.unwrap().unwrap();
 
         println!("New {}", cid);
-    }
+    } */
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ipns_esoteric_record() {
-        use pkcs8::EncodePublicKey;
+        //use pkcs8::EncodePublicKey;
         use prost::Message;
         use signature::Signer;
 
@@ -117,7 +112,7 @@ mod tests {
         let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
 
         let validity = Utc::now()
-            .add(Duration::weeks(52))
+            .add(Duration::weeks(1))
             .to_rfc3339_opts(SecondsFormat::Nanos, false)
             .into_bytes();
 
@@ -144,12 +139,12 @@ mod tests {
         };
 
         let public_key = {
-            let key = k256::PublicKey::from(verifying_key);
+            //let key = k256::PublicKey::from(verifying_key);
 
-            let data = key.to_public_key_der().unwrap().as_ref().to_vec();
+            let data = verifying_key.to_bytes().to_vec();
 
             let key = CryptoKey {
-                key_type: KeyType::ECDSA as i32,
+                key_type: KeyType::Secp256k1 as i32,
                 data,
             };
 
@@ -157,10 +152,13 @@ mod tests {
         };
 
         let address = {
-            let mut hasher = Sha2_256::default();
+            /* let mut hasher = Sha2_256::default();
             hasher.update(&public_key);
             let digest = hasher.finalize();
-            let multihash = Multihash::wrap(0x12, &digest).unwrap();
+            let multihash = Multihash::wrap(0x12, &digest).unwrap(); */
+
+            let multihash = Multihash::wrap(0x00, &public_key).unwrap();
+
             Cid::new_v1(0x72, multihash)
         };
 
@@ -180,8 +178,14 @@ mod tests {
 
         let response = ipfs.dht_put(address, record_data).await;
 
-        println!("{:#?}", response);
+        let ipns: IPNSAddress = address.into();
 
-        //unsupported it seams
-    }
+        println!(
+            "IPNS Address: {}\nPubsub Topic: {}\nResolve: {}\nResponse: {:#?}",
+            ipns,
+            ipns.to_pubsub_topic(),
+            cid,
+            response,
+        );
+    } */
 }

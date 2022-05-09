@@ -1,4 +1,3 @@
-pub mod anchors;
 pub mod channel;
 pub mod content_cache;
 pub mod errors;
@@ -8,18 +7,9 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
-use std::{borrow::Cow, collections::HashMap};
-
-use anchors::IPNSAnchor;
-
-use bip39::{Language, Mnemonic};
-
-use channel::Channel;
+use std::collections::HashMap;
 
 use cid::Cid;
-
-use ed25519::KeypairBytes;
-use ed25519_dalek::SecretKey;
 
 use errors::Error;
 
@@ -29,9 +19,8 @@ use futures::{
     Stream, StreamExt, TryStreamExt,
 };
 
-use heck::{ToSnakeCase, ToTitleCase};
-
 use indexing::hamt;
+
 use linked_data::{
     channel::ChannelMetadata,
     follows::Follows,
@@ -40,18 +29,7 @@ use linked_data::{
     types::{CryptoKey, IPLDLink, IPNSAddress, IPNSRecord, ValidityType},
 };
 
-use ipfs_api::{
-    responses::{Codec, KeyPair, PubSubMessage},
-    IpfsService,
-};
-
-use pkcs8::{EncodePrivateKey, LineEnding};
-
-use rand_core::{OsRng, RngCore};
-
-use signatures::Signer;
-
-use user::User;
+use ipfs_api::{responses::PubSubMessage, IpfsService};
 
 use prost::Message;
 
@@ -61,125 +39,32 @@ pub struct Defluencer {
 }
 
 impl Defluencer {
-    pub async fn create_user<T>(
-        &self,
-        user_name: impl Into<Cow<'static, str>>,
-        signer: T,
-    ) -> Result<User<T>, Error>
-    where
-        T: Signer,
-    {
-        let identity = Identity {
-            display_name: user_name.into().into_owned(),
-            avatar: Cid::default().into(), //TODO generic avatar cid
-            channel_ipns: None,
-            channel_ens: None,
-        };
-
-        let identity = self.ipfs.dag_put(&identity, Codec::default()).await?.into();
-
-        let user = User::new(self.ipfs.clone(), signer, identity);
-
-        Ok(user)
+    pub fn new(ipfs: IpfsService) -> Self {
+        Self { ipfs }
     }
 
-    /// Create an new channel on this node.
+    /// Pin a channel to this local node.
     ///
-    /// Returns a secret phrase, a channel and IPNS address.
-    pub async fn create_local_channel(
-        &self,
-        channel_name: impl Into<Cow<'static, str>>,
-    ) -> Result<(Mnemonic, Channel<IPNSAnchor>, Cid), Error> {
-        let name = channel_name.into();
-        let key_name = name.to_snake_case();
-        let display_name = name.to_title_case();
+    /// WARNING!
+    /// This function pin ALL content from the channel.
+    /// The amout of data downloaded could be massive.
+    pub async fn pin_channel(&self, ipns: IPNSAddress) -> Result<(), Error> {
+        let cid = self.ipfs.name_resolve(ipns.into()).await?;
 
-        let mut bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut bytes);
+        self.ipfs.pin_add(cid, true).await?;
 
-        let secret_key = SecretKey::from_bytes(&bytes)?;
-
-        let key_pair_bytes = KeypairBytes {
-            secret_key: secret_key.to_bytes(),
-            public_key: None,
-        };
-
-        let mnemonic = Mnemonic::from_entropy(&bytes, Language::English)?;
-
-        let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
-        let KeyPair { id, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
-        let cid = Cid::try_from(id.as_str())?;
-
-        let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
-        let channel = Channel::new(self.ipfs.clone(), anchor);
-
-        let peer_id = self.ipfs.peer_id().await?;
-        let video_topic = format!("{}_video", display_name.to_snake_case());
-
-        channel
-            .update_live_settings(Some(peer_id), Some(video_topic), None, Some(false))
-            .await?;
-
-        channel
-            .update_identity(Some(display_name), None, Some(cid), None)
-            .await?;
-
-        Ok((mnemonic, channel, cid))
+        Ok(())
     }
 
-    /// Returns a channel by name previously created or imported on this node.
-    pub async fn get_local_channel(
-        &self,
-        channel_name: impl Into<Cow<'static, str>>,
-    ) -> Result<Option<Channel<IPNSAnchor>>, Error> {
-        let list = self.ipfs.key_list().await?;
-
-        let name = channel_name.into();
-        let key_name = name.to_snake_case();
-
-        if !list.contains_key(&key_name) {
-            return Ok(None);
-        }
-
-        let anchor = IPNSAnchor::new(self.ipfs.clone(), key_name);
-        let channel = Channel::new(self.ipfs.clone(), anchor);
-
-        Ok(Some(channel))
-    }
-
-    /// Recreate a channel on this node from a secret passphrase.
+    /// Unpin a channel from this local node.
     ///
-    /// Note that having the same channel on multiple nodes is NOT recommended.
-    /// Use this to transfer a channel from one node to another.
-    pub async fn import_channel(
-        &self,
-        channel_name: impl Into<Cow<'static, str>>,
-        passphrase: impl Into<Cow<'static, str>>,
-        pin_content: bool,
-    ) -> Result<Channel<IPNSAnchor>, Error> {
-        let name = channel_name.into();
-        let key_name = name.to_snake_case();
+    /// This function unpin everyting; metadata, content, comment, etc...
+    pub async fn unpin_channel(&self, ipns: IPNSAddress) -> Result<(), Error> {
+        let cid = self.ipfs.name_resolve(ipns.into()).await?;
 
-        let mnemonic = Mnemonic::from_phrase(&passphrase.into(), Language::English)?;
+        self.ipfs.pin_rm(cid, true).await?;
 
-        let secret_key = SecretKey::from_bytes(&mnemonic.entropy())?;
-
-        let key_pair_bytes = KeypairBytes {
-            secret_key: secret_key.to_bytes(),
-            public_key: None,
-        };
-
-        let data = key_pair_bytes.to_pkcs8_pem(LineEnding::default())?;
-        let KeyPair { id: _, name } = self.ipfs.key_import(key_name, data.to_string()).await?;
-
-        let anchor = IPNSAnchor::new(self.ipfs.clone(), name);
-        let channel = Channel::new(self.ipfs.clone(), anchor);
-
-        if pin_content {
-            channel.pin_channel().await?;
-        }
-
-        Ok(channel)
+        Ok(())
     }
 
     /// Subscribe to an IPNS address.
@@ -193,11 +78,17 @@ impl Defluencer {
         channel_ipns: IPNSAddress,
         regis: AbortRegistration,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+        use signature::Signature;
         use signature::Verifier;
 
         stream::once(async move {
             let ipns = channel_ipns.into();
             let mut channel_cid = self.ipfs.name_resolve(ipns).await?;
+
+            let metadata = self
+                .ipfs
+                .dag_get::<&str, ChannelMetadata>(channel_cid, None)
+                .await?;
 
             let topic = channel_ipns.to_pubsub_topic();
 
@@ -213,7 +104,7 @@ impl Defluencer {
                         signature,
                         validity_type,
                         validity,
-                        sequence: _,
+                        sequence,
                         ttl: _,
                         public_key,
                     } = IPNSRecord::decode(data.as_ref())?;
@@ -230,12 +121,9 @@ impl Defluencer {
                         return Ok(None);
                     }
 
-                    let public_key = if public_key.len() > 0 {
-                        ed25519_dalek::PublicKey::from_bytes(&public_key)?
-                    } else {
-                        let key = CryptoKey::decode(ipns.hash().digest())?;
-                        ed25519_dalek::PublicKey::from_bytes(&key.data)?
-                    };
+                    if sequence <= metadata.seq {
+                        return Ok(None);
+                    }
 
                     let mut signing_input = Vec::with_capacity(
                         value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
@@ -245,15 +133,40 @@ impl Defluencer {
                     signing_input.extend(validity);
                     signing_input.extend(validity_type.to_string().as_bytes());
 
-                    let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
+                    // If the pub key is not in the record use the peer id
+                    let crypto_key = if !public_key.is_empty() {
+                        CryptoKey::decode(public_key.as_ref())?
+                    } else {
+                        CryptoKey::decode(ipns.hash().digest())?
+                    };
 
-                    if public_key.verify(&signing_input, &signature).is_err() {
-                        return Ok(None);
+                    match crypto_key.key_type {
+                        0/* KeyType::RSA */ => unimplemented!(),
+                        1/* KeyType::Ed25519 */ => {
+                            let public_key = ed25519_dalek::PublicKey::from_bytes(&crypto_key.data)?;
+
+                            let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
+
+                            if public_key.verify(&signing_input, &signature).is_err() {
+                                return Ok(None);
+                            }
+                        },
+                        2/* KeyType::Secp256k1 */ => {
+                            let public_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&crypto_key.data)?;
+
+                            let signature = k256::ecdsa::Signature::from_bytes(&signature)?;
+
+                            if public_key.verify(&signing_input, &signature).is_err() {
+                                return Ok(None);
+                            }
+                        },
+                        3/* KeyType::ECDSA */ => unimplemented!(),
+                        _ => panic!("Enum has only 4 possible values")
                     }
 
                     channel_cid = cid;
 
-                    return Ok(Some(channel_cid));
+                    Ok(Some(channel_cid))
                 });
 
             let stream = stream::once(async move { Ok(channel_cid) }).chain(stream);
@@ -316,7 +229,7 @@ impl Defluencer {
 
                 unvisited = diff.clone();
 
-                return Ok(Some((diff, (identity, visited, unvisited))));
+                Ok(Some((diff, (identity, visited, unvisited))))
             },
         )
     }
@@ -327,9 +240,10 @@ impl Defluencer {
         identities: impl Iterator<Item = &Identity>,
     ) -> HashMap<Cid, ChannelMetadata> {
         let stream: FuturesUnordered<_> = identities
-            .filter_map(|identity| match identity.channel_ipns {
-                Some(ipns) => Some(self.ipfs.name_resolve(ipns.into())),
-                None => None,
+            .filter_map(|identity| {
+                identity
+                    .channel_ipns
+                    .map(|ipns| self.ipfs.name_resolve(ipns.into()))
             })
             .collect();
 
@@ -353,9 +267,10 @@ impl Defluencer {
         channels: impl Iterator<Item = &ChannelMetadata>,
     ) -> HashMap<Cid, Identity> {
         let stream: FuturesUnordered<_> = channels
-            .filter_map(|channel| match channel.follows {
-                Some(ipld) => Some(self.ipfs.dag_get::<&str, Follows>(ipld.link, None)),
-                None => None,
+            .filter_map(|channel| {
+                channel
+                    .follows
+                    .map(|ipld| self.ipfs.dag_get::<&str, Follows>(ipld.link, None))
             })
             .collect();
 
@@ -411,7 +326,7 @@ impl Defluencer {
 
             let months = self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?;
 
-            return Ok(Some((months, iter)));
+            Ok(Some((months, iter)))
         })
     }
 
@@ -426,7 +341,7 @@ impl Defluencer {
 
                 let days = self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await?;
 
-                return Ok(Some((days, iter)));
+                Ok(Some((days, iter)))
             },
         )
     }
@@ -440,7 +355,7 @@ impl Defluencer {
 
             let hours = self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?;
 
-            return Ok(Some((hours, iter)));
+            Ok(Some((hours, iter)))
         })
     }
 
@@ -453,7 +368,7 @@ impl Defluencer {
 
             let minutes = self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?;
 
-            return Ok(Some((minutes, iter)));
+            Ok(Some((minutes, iter)))
         })
     }
 
@@ -473,14 +388,14 @@ impl Defluencer {
                         .second
                         .into_values()
                         .rev()
-                        .map(|item| Result::<_, Error>::Ok(item)),
+                        .map(Result::<_, Error>::Ok),
                 );
 
-                return Ok(Some((stream, iter)));
+                Ok(Some((stream, iter)))
             },
         )
         .try_flatten()
-        .map_ok(|set| stream::iter(set.into_iter().map(|item| Ok(item))))
+        .map_ok(|set| stream::iter(set.into_iter().map(Ok)))
         .try_flatten()
         .map_ok(|ipld| ipld.link)
     }

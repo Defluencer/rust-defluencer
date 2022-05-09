@@ -1,13 +1,15 @@
 use cid::Cid;
 
-use defluencer::{errors::Error, Defluencer};
+use defluencer::{channel::Channel, errors::Error, signatures::TestSigner};
+
+use ipfs_api::IpfsService;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct Friends {
-    /// Channel local key name.
+    /// Channel IPNS Address.
     #[structopt(short, long)]
-    key_name: String,
+    address: Cid,
 
     #[structopt(subcommand)]
     cmd: Command,
@@ -24,8 +26,8 @@ enum Command {
 
 pub async fn friends_cli(cli: Friends) {
     let res = match cli.cmd {
-        Command::Add(args) => add(cli.key_name, args).await,
-        Command::Remove(args) => remove(cli.key_name, args).await,
+        Command::Add(args) => add(cli.address, args).await,
+        Command::Remove(args) => remove(cli.address, args).await,
     };
 
     if let Err(e) = res {
@@ -40,24 +42,28 @@ pub struct Followee {
     identity: Cid,
 }
 
-async fn add(key: String, args: Followee) -> Result<(), Error> {
-    let defluencer = Defluencer::default();
+async fn add(addr: Cid, args: Followee) -> Result<(), Error> {
+    let ipfs = IpfsService::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        channel.follow(args.identity.into()).await?;
-    }
+    let signer = TestSigner::default(); //TODO
+
+    let channel = Channel::new(ipfs, addr.into(), signer);
+
+    channel.follow(args.identity.into()).await?;
 
     println!("✅ Followee Added");
 
     Ok(())
 }
 
-async fn remove(key: String, args: Followee) -> Result<(), Error> {
-    let defluencer = Defluencer::default();
+async fn remove(addr: Cid, args: Followee) -> Result<(), Error> {
+    let ipfs = IpfsService::default();
 
-    if let Some(channel) = defluencer.get_local_channel(key).await? {
-        channel.unfollow(args.identity.into()).await?;
-    }
+    let signer = TestSigner::default(); //TODO
+
+    let channel = Channel::new(ipfs, addr.into(), signer);
+
+    channel.unfollow(args.identity.into()).await?;
 
     println!("✅ Followee Removed");
 
