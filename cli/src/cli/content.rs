@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use cid::Cid;
 
-use defluencer::{channel::Channel, errors::Error, signatures::TestSigner, user::User, Defluencer};
+use defluencer::{
+    channel::Channel, errors::Error, signatures::test_signer::TestSigner, user::User, Defluencer,
+};
 
 use futures_util::pin_mut;
 

@@ -1,4 +1,6 @@
-use defluencer::{channel::Channel, errors::Error, signatures::TestSigner, Defluencer};
+use defluencer::{
+    channel::Channel, errors::Error, signatures::test_signer::TestSigner, Defluencer,
+};
 
 use cid::Cid;
 

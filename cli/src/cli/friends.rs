@@ -1,6 +1,6 @@
 use cid::Cid;
 
-use defluencer::{channel::Channel, errors::Error, signatures::TestSigner};
+use defluencer::{channel::Channel, errors::Error, signatures::test_signer::TestSigner};
 
 use ipfs_api::IpfsService;
 use structopt::StructOpt;

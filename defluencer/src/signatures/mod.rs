@@ -1,12 +1,7 @@
+pub mod bitcoin;
 pub mod dag_jose;
-
-#[cfg(target_arch = "wasm32")]
-mod ethereum;
-#[cfg(target_arch = "wasm32")]
-pub use ethereum::EthereumWebSigner;
-
-mod test_signer;
-pub use test_signer::TestSigner;
+pub mod ethereum;
+pub mod test_signer;
 
 use crate::errors::Error;
 

@@ -142,7 +142,7 @@ impl Defluencer {
 
                     match crypto_key.key_type {
                         0/* KeyType::RSA */ => unimplemented!(),
-                        1/* KeyType::Ed25519 */ => {
+                        1/* KeyType::Ed25519 */ => unimplemented!()/* {
                             let public_key = ed25519_dalek::PublicKey::from_bytes(&crypto_key.data)?;
 
                             let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
@@ -150,7 +150,7 @@ impl Defluencer {
                             if public_key.verify(&signing_input, &signature).is_err() {
                                 return Ok(None);
                             }
-                        },
+                        } */,
                         2/* KeyType::Secp256k1 */ => {
                             let public_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&crypto_key.data)?;
 

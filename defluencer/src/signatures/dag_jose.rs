@@ -8,6 +8,7 @@ use linked_data::{
 use multibase::Base;
 
 use sha3::Keccak256;
+
 use signature::Verifier;
 
 use crate::errors::Error;
@@ -113,7 +114,7 @@ impl JsonWebSignature {
 
                 verif_key.verify(self.signing_input.as_bytes(), &signature)?;
             }
-            (AlgorithmType::EdDSA, KeyType::OctetString, CurveType::Ed25519) => {
+            /* (AlgorithmType::EdDSA, KeyType::OctetString, CurveType::Ed25519) => {
                 let public_key = Base::Base64Url.decode(&jwk.x)?;
                 let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key)?;
 
@@ -121,7 +122,7 @@ impl JsonWebSignature {
                     ed25519_dalek::Signature::from_bytes(&self.signatures[0].signature)?;
 
                 public_key.verify(self.signing_input.as_bytes(), &signature)?;
-            }
+            } */
             _ => return Err(Error::Jose),
         }
 
