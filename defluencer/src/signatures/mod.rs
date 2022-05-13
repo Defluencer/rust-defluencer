@@ -3,6 +3,9 @@ pub mod dag_jose;
 pub mod ethereum;
 pub mod test_signer;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ledger;
+
 use crate::errors::Error;
 
 use async_trait::async_trait;
