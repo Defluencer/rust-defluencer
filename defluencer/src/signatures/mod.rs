@@ -1,4 +1,6 @@
+#[cfg(not(target_arch = "wasm32"))]
 pub mod bitcoin;
+
 pub mod dag_jose;
 pub mod ethereum;
 pub mod test_signer;

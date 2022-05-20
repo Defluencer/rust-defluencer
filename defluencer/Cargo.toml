@@ -29,8 +29,8 @@ prost = { version = "0.10", default-features = false, features = ["std", "prost-
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = [] }
-sha2 = { version = "*", default-features = false, features = [] }
-sha3 = { version = "*", default-features = false, features = [] }
+sha2 = { version = "0.10", default-features = false, features = [] }
+sha3 = { version = "0.10", default-features = false, features = [] }
 signature = { version = "1", default-features = false, features = ["std", "digest-preview"] }
 strum = { version = "0.24", default-features = false, features = ["derive"] }
 thiserror = { version = "1", default-features = false, features = [] }
@@ -41,6 +41,8 @@ tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 ledger-zondax-generic = "0.9"
 ledger-transport-hid = "0.9"
 ledger-transport = "0.9"
+rs_merkle = { version = "1", default-features = false, features = ["std"] }
+bitcoin = { version = "0.28", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bytes = { version = "1", default-features = false, features = [] }
