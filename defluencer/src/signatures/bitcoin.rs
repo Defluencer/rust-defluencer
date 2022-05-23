@@ -6,7 +6,7 @@ use bitcoin::{consensus::Encodable, VarInt};
 
 use sha2::{Digest, Sha256};
 
-use signature::Verifier;
+use signature::DigestVerifier;
 
 use crate::errors::Error;
 
@@ -44,18 +44,11 @@ impl super::Signer for BitcoinSigner {
             temp
         };
 
-        let mut hasher = Sha256::new();
-        hasher.update(btc_message.clone());
-        let hash = hasher.finalize_reset();
-
-        hasher.update(hash);
-        let hash = hasher.finalize();
-
         let signature = self.app.sign_message(&signing_input, 0)?;
 
-        let recovered_key = signature.recover_verifying_key_from_digest_bytes(&hash)?;
-
-        recovered_key.verify(&btc_message, &signature)?;
+        let digest = Sha256::new_with_prefix(btc_message);
+        let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
+        recovered_key.verify_digest(digest, &signature)?;
 
         let public_key = k256::PublicKey::from(recovered_key);
         let signature = k256::ecdsa::Signature::from(signature);
@@ -70,7 +63,8 @@ mod tests {
 
     use bitcoin::VarInt;
 
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use signature::DigestVerifier;
 
     #[test]
     fn addr() {
@@ -83,17 +77,10 @@ mod tests {
 
     #[test]
     fn sign() {
-        use signature::Verifier;
-
         let app = BitcoinLedgerApp::default();
 
-        //let signing_input = b"Hello World!";
-        let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
-
-        /* let merkle_root = vec![
-            127, 131, 177, 101, 127, 241, 252, 83, 185, 45, 193, 129, 72, 161, 214, 93, 252, 45,
-            75, 31, 163, 214, 119, 40, 74, 221, 210, 0, 18, 109, 144, 105,
-        ]; */
+        let signing_input = b"Hello World!";
+        //let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
 
         let msg_length = {
             let mut temp = Vec::with_capacity(9); // Bicoin style Varint
@@ -110,21 +97,23 @@ mod tests {
             temp
         };
 
-        let mut hasher = Sha256::new();
-        hasher.update(btc_message.clone());
-        let hash = hasher.finalize_reset();
+        let mut hasher = sha2::Sha256::new();
 
-        hasher.update(hash);
-        let hash = hasher.finalize();
+        hasher.update(&signing_input);
+        let display_hash = hasher.finalize();
 
-        println!("Message Display Hash: 0x{}", hex::encode(hash));
+        println!("Message Display Hash: 0x{}", hex::encode(display_hash));
 
-        let signature = app.sign_message(signing_input, 0).unwrap();
+        let signature = app.sign_message(signing_input, 0).expect("Msg signature");
+
+        let digest = Sha256::new_with_prefix(btc_message);
 
         let recovered_key = signature
-            .recover_verifying_key_from_digest_bytes(&hash)
-            .unwrap();
+            .recover_verifying_key_from_digest(digest.clone())
+            .expect("Key recovery");
 
-        recovered_key.verify(&hash, &signature).unwrap();
+        recovered_key
+            .verify_digest(digest, &signature)
+            .expect("Verification");
     }
 }

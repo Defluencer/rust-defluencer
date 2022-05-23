@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
 use k256::{
     ecdsa::recoverable::{Id, Signature},
@@ -16,7 +16,6 @@ use rs_merkle::{Hasher, MerkleTree};
 use sha2::Digest;
 
 use bitcoin::consensus::encode::{Decodable, Encodable, VarInt};
-use signature::digest::FixedOutput;
 
 use crate::errors::Error;
 
@@ -350,43 +349,28 @@ impl BitcoinLedgerApp {
             temp
         };
 
-        /* let (prefixed_msg, mut prefix_len) = {
-            let mut temp = Vec::from("\x18Bitcoin Signed Message:\n");
-            temp.extend(&msg_length);
-
-            let prefix_len = temp.len();
-
-            temp.extend_from_slice(&message);
-
-            (temp, prefix_len)
-        }; */
-
         data.extend(msg_length); // Message length
 
         let chunks = message.chunks(64);
 
         let mut datums = Vec::with_capacity(chunks.len());
         let mut hashes: Vec<[u8; 32]> = Vec::with_capacity(chunks.len());
-        let mut merkle_tree = MerkleTree::<BitcoinMerkle>::new();
-        //let mut prefix_lens = Vec::with_capacity(chunks.len());
 
         let mut hasher = sha2::Sha256::new();
 
         for chunk in chunks {
-            hasher.update(&chunk);
+            let mut data = Vec::with_capacity(65);
+            data.push(0x00);
+            data.extend(chunk);
+
+            hasher.update(&data);
             let hash = hasher.finalize_reset();
 
-            datums.push(chunk.to_vec());
+            datums.push(data);
             hashes.push(hash.into());
-            merkle_tree.insert(hash.into());
-
-            /* // Split prefix_len in max chunk.len() chunk if possible
-            let len = chunk.len().clamp(0, prefix_len);
-            prefix_len -= len;
-            prefix_lens.push(len); */
         }
 
-        merkle_tree.commit();
+        let merkle_tree = MerkleTree::<BitcoinMerkle>::from_leaves(&hashes);
 
         let merkle_root = match merkle_tree.root() {
             Some(mk) => mk,
@@ -413,7 +397,7 @@ impl BitcoinLedgerApp {
 
         let mut response = self.transport.exchange(&command)?;
 
-        let mut proof_queue = Vec::with_capacity(10);
+        let mut proof_queue: VecDeque<[u8; 32]> = VecDeque::with_capacity(10);
 
         loop {
             #[cfg(debug_assertions)]
@@ -451,10 +435,7 @@ impl BitcoinLedgerApp {
                     #[cfg(debug_assertions)]
                     println!("Hash: {:?}", hash);
 
-                    let index = match hashes.iter().position(|item| item == hash) {
-                        Some(idx) => idx,
-                        None => return Err(LedgerAppError::Crypto),
-                    };
+                    let index = hashes.iter().position(|item| item == hash).expect("Hash");
 
                     let mut varint = Vec::with_capacity(9);
                     VarInt(datums[index].len() as u64)
@@ -479,7 +460,11 @@ impl BitcoinLedgerApp {
                     #[cfg(debug_assertions)]
                     println!("GET_MERKLE_LEAF_PROOF");
 
-                    let root_hash = &response.data()[1..33];
+                    let root_hash = {
+                        let mut temp = [0u8; 32];
+                        temp.copy_from_slice(&response.data()[1..33]);
+                        temp
+                    };
 
                     let (tree_size, offset) = {
                         let slice = &response.data()[33..];
@@ -499,24 +484,20 @@ impl BitcoinLedgerApp {
                         root_hash, tree_size, leaf_index
                     );
 
-                    if root_hash != merkle_root {
-                        return Err(LedgerAppError::Crypto);
-                    }
+                    let hash = hashes[leaf_index];
 
-                    data.extend(hashes[leaf_index].iter());
+                    data.extend(hash);
 
                     let proof = merkle_tree.proof(&[leaf_index]);
 
-                    let mut proof_hashes = proof.proof_hashes().to_vec();
-                    proof_hashes.reverse();
-                    proof_queue = proof_hashes;
+                    proof_queue.extend(proof.proof_hashes());
 
                     data.push(proof_queue.len() as u8);
 
                     let mut space_left = 6;
                     let mut proofs = Vec::with_capacity(space_left);
 
-                    while let Some(proof) = proof_queue.pop() {
+                    while let Some(proof) = proof_queue.pop_front() {
                         proofs.push(proof);
                         space_left -= 1;
 
@@ -547,10 +528,6 @@ impl BitcoinLedgerApp {
 
                     #[cfg(debug_assertions)]
                     println!("Root: {:?}", root_hash);
-
-                    if root_hash != merkle_root {
-                        return Err(LedgerAppError::Crypto);
-                    }
 
                     let leaf_hash = &response.data()[33..65];
 
@@ -589,7 +566,7 @@ impl BitcoinLedgerApp {
                     let mut space_left = 7;
                     let mut proofs = Vec::with_capacity(space_left);
 
-                    while let Some(proof) = proof_queue.pop() {
+                    while let Some(proof) = proof_queue.pop_front() {
                         proofs.push(proof);
                         space_left -= 1;
 
@@ -633,9 +610,13 @@ impl BitcoinLedgerApp {
 pub struct BitcoinMerkle {}
 
 impl Hasher for BitcoinMerkle {
+    // https://github.com/LedgerHQ/app-bitcoin-new/blob/develop/doc/merkle.md
+
     type Hash = [u8; 32];
 
     fn hash(data: &[u8]) -> [u8; 32] {
+        use sha2::digest::FixedOutput;
+
         let mut hasher = sha2::Sha256::new();
 
         hasher.update(data);
@@ -643,18 +624,22 @@ impl Hasher for BitcoinMerkle {
     }
 
     fn concat_and_hash(left: &Self::Hash, right: Option<&Self::Hash>) -> Self::Hash {
-        let mut concatenated: Vec<u8> = (*left).into();
+        let mut vec = Vec::with_capacity(65);
+        vec.push(0x01); // for internal nodes
 
         match right {
             Some(right_node) => {
-                let mut right_node_clone: Vec<u8> = (*right_node).into();
-                concatenated.append(&mut right_node_clone);
-                Self::hash(&concatenated)
+                vec.extend(left);
+                vec.extend(right_node);
+
+                Self::hash(&vec)
             }
             None => {
-                let mut left_node_clone: Vec<u8> = (*left).into();
-                concatenated.append(&mut left_node_clone);
-                Self::hash(&concatenated)
+                *left
+                //vec.extend(left);
+                //vec.extend(left);
+
+                //Self::hash(&vec)
             }
         }
     }
