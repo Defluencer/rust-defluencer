@@ -15,13 +15,12 @@ use super::ledger::BitcoinLedgerApp;
 #[derive(Clone)]
 pub struct BitcoinSigner {
     app: BitcoinLedgerApp,
+    account_index: u32,
 }
 
 impl BitcoinSigner {
-    pub fn new() -> Self {
-        let app = BitcoinLedgerApp::default();
-
-        Self { app }
+    pub fn new(app: BitcoinLedgerApp, account_index: u32) -> Self {
+        Self { app, account_index }
     }
 }
 
@@ -44,7 +43,7 @@ impl super::Signer for BitcoinSigner {
             temp
         };
 
-        let signature = self.app.sign_message(&signing_input, 0)?;
+        let signature = self.app.sign_message(&signing_input, self.account_index)?;
 
         let digest = Sha256::new_with_prefix(btc_message);
         let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
@@ -70,7 +69,7 @@ mod tests {
     fn addr() {
         let app = BitcoinLedgerApp::default();
 
-        let addr = app.get_extended_pubkey(0).unwrap();
+        let (_, addr) = app.get_extended_pubkey(0).unwrap();
 
         println!("Address: {}", addr);
     }
@@ -79,8 +78,8 @@ mod tests {
     fn sign() {
         let app = BitcoinLedgerApp::default();
 
-        let signing_input = b"Hello World!";
-        //let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
+        //let signing_input = b"Hello World!";
+        let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
 
         let msg_length = {
             let mut temp = Vec::with_capacity(9); // Bicoin style Varint

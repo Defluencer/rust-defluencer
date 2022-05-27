@@ -14,14 +14,14 @@ use tokio::{
 
 use ipfs_api::IpfsService;
 
-use structopt::StructOpt;
+use clap::Parser;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct File {
     /// Socket Address used to ingress video.
     ///
     /// egg. 127.0.0.1:2526
-    #[structopt(long)]
+    #[clap(long)]
     socket_addr: SocketAddr,
 }
 

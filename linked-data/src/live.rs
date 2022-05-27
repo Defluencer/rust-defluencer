@@ -11,12 +11,12 @@ pub struct LiveSettings {
     /// PubSub topic for the live streaming.
     pub video_topic: String,
 
+    /// Should stream be archived.
+    pub archiving: bool,
+
     /// PubSub topic for the live chat.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_topic: Option<String>,
-
-    /// Should stream be archived.
-    pub archiving: bool,
 
     /// Link to banned users address.
     #[serde(skip_serializing_if = "Option::is_none")]

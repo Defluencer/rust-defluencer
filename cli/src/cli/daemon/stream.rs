@@ -22,18 +22,18 @@ use tokio::{
 
 use ipfs_api::IpfsService;
 
-use structopt::StructOpt;
+use clap::Parser;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct Stream {
     /// Socket Address used to ingress video.
     ///
     /// egg. 127.0.0.1:2526
-    #[structopt(long)]
+    #[clap(long)]
     socket_addr: SocketAddr,
 
     /// Channel IPNS Address.
-    #[structopt(long)]
+    #[clap(long)]
     address: Cid,
 }
 

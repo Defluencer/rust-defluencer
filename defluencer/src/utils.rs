@@ -6,11 +6,18 @@ use cid::multibase::Base;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
-use linked_data::media::mime_type::MimeTyped;
+use k256::ecdsa::VerifyingKey;
+
+use linked_data::{
+    media::mime_type::MimeTyped,
+    types::{CryptoKey, IPNSAddress, KeyType},
+};
 
 use either::Either;
 
-use cid::Cid;
+use cid::{multihash::Multihash, Cid};
+
+use prost::Message;
 
 #[cfg(target_arch = "wasm32")]
 pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, Error> {
@@ -145,4 +152,22 @@ pub fn get_path(date_time: DateTime<Utc>) -> String {
         date_time.minute(),
         date_time.second()
     )
+}
+
+pub fn pubkey_to_ipns(public_key: k256::PublicKey) -> IPNSAddress {
+    let verifying_key = VerifyingKey::from(public_key);
+
+    let public_key = CryptoKey {
+        key_type: KeyType::Secp256k1 as i32,
+        data: verifying_key.to_bytes().to_vec(),
+    }
+    .encode_to_vec(); // Protobuf encoding
+
+    let ipns = {
+        let multihash = Multihash::wrap(0x00, &public_key).unwrap();
+
+        Cid::new_v1(0x72, multihash)
+    };
+
+    ipns.into()
 }

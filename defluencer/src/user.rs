@@ -54,9 +54,11 @@ where
         user_name: impl Into<Cow<'static, str>>,
         ipfs: IpfsService,
         signer: T,
+        channel_ipns: Option<IPNSAddress>,
     ) -> Result<Self, Error> {
         let identity = Identity {
             display_name: user_name.into().into_owned(),
+            channel_ipns,
             ..Default::default()
         };
 
@@ -72,14 +74,15 @@ where
     }
 
     /// Update your identity data.
+    ///
+    /// Returns updated identity CID.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn update_identity(
-        &mut self,
+        mut self,
         display_name: Option<String>,
-        avatar: Option<&std::path::Path>,
+        avatar: Option<std::path::PathBuf>,
         channel_ipns: Option<IPNSAddress>,
-        channel_ens: Option<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Cid, Error> {
         let mut identity = self
             .ipfs
             .dag_get::<&str, Identity>(self.identity.link, None)
@@ -90,33 +93,30 @@ where
         }
 
         if let Some(avatar) = avatar {
-            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
+            identity.avatar = Some(add_image(&self.ipfs, &avatar).await?.into());
         }
 
         if let Some(ipns) = channel_ipns {
             identity.channel_ipns = Some(ipns);
         }
 
-        if let Some(ens) = channel_ens {
-            identity.channel_ens = Some(ens);
-        }
-
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
 
         self.identity = cid.into();
 
-        Ok(())
+        Ok(cid)
     }
 
     /// Update your identity data.
+    ///
+    /// Returns updated identity CID.
     #[cfg(target_arch = "wasm32")]
     pub async fn update_identity(
         &mut self,
         display_name: Option<String>,
         avatar: Option<web_sys::File>,
         channel_ipns: Option<IPNSAddress>,
-        channel_ens: Option<String>,
-    ) -> Result<(), Error> {
+    ) -> Result<Cid, Error> {
         let mut identity = self
             .ipfs
             .dag_get::<&str, Identity>(self.identity.link, None)
@@ -127,22 +127,18 @@ where
         }
 
         if let Some(avatar) = avatar {
-            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
+            identity.avatar = Some(add_image(&self.ipfs, avatar).await?.into());
         }
 
         if let Some(ipns) = channel_ipns {
             identity.channel_ipns = Some(ipns);
         }
 
-        if let Some(ens) = channel_ens {
-            identity.channel_ens = Some(ens);
-        }
-
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
 
         self.identity = cid.into();
 
-        Ok(())
+        Ok(cid)
     }
 
     /// Create a new micro blog post.
@@ -262,6 +258,7 @@ where
         self.add_content(&comment, true).await
     }
 
+    /// Returns the CID of the dag-jose block linking to the content
     async fn add_content<V>(&self, metadata: &V, pin: bool) -> Result<Cid, Error>
     where
         V: ?Sized + Serialize,

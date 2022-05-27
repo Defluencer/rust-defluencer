@@ -9,14 +9,13 @@ use super::ledger::EthereumLedgerApp;
 #[derive(Clone)]
 pub struct EthereumSigner {
     app: EthereumLedgerApp,
+    account_index: u32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl EthereumSigner {
-    pub fn new() -> Self {
-        let app = EthereumLedgerApp::default();
-
-        Self { app }
+    pub fn new(app: EthereumLedgerApp, account_index: u32) -> Self {
+        Self { app, account_index }
     }
 }
 
@@ -33,7 +32,9 @@ impl super::Signer for EthereumSigner {
             format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
         eth_message.extend_from_slice(&signing_input);
 
-        let signature = self.app.sign_personal_message(&signing_input, 0)?;
+        let signature = self
+            .app
+            .sign_personal_message(&signing_input, self.account_index)?;
 
         let recovered_key = signature.recover_verifying_key(&eth_message)?; // The fn hash the message
 

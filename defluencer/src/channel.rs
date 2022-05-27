@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Add};
+use std::ops::Add;
 
 use crate::{
     errors::Error,
@@ -48,18 +48,10 @@ where
         Self { ipfs, signer, ipns }
     }
 
-    pub async fn create(
-        name: impl Into<Cow<'static, str>>,
-        ipfs: IpfsService,
-        signer: T,
-    ) -> Result<Self, Error> {
-        let identity = Identity {
-            display_name: name.into().into_owned(),
-            ..Default::default()
-        };
-
+    /// Create a new channel.
+    pub async fn create(ipfs: IpfsService, signer: T, identity: IPLDLink) -> Result<Self, Error> {
         let metadata = ChannelMetadata {
-            identity: ipfs.dag_put(&identity, Codec::default()).await?.into(),
+            identity,
             ..Default::default()
         };
 
@@ -79,7 +71,6 @@ where
         display_name: Option<String>,
         avatar: Option<std::path::PathBuf>,
         channel_ipns: Option<Cid>,
-        channel_ens: Option<String>,
     ) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -93,15 +84,11 @@ where
         }
 
         if let Some(avatar) = avatar {
-            identity.avatar = add_image(&self.ipfs, &avatar).await?.into();
+            identity.avatar = Some(add_image(&self.ipfs, &avatar).await?.into());
         }
 
         if let Some(ipns) = channel_ipns {
             identity.channel_ipns = Some(ipns.into());
-        }
-
-        if let Some(ens) = channel_ens {
-            identity.channel_ens = Some(ens);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -118,7 +105,6 @@ where
         display_name: Option<String>,
         avatar: Option<web_sys::File>,
         channel_ipns: Option<Cid>,
-        channel_ens: Option<String>,
     ) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -132,15 +118,11 @@ where
         }
 
         if let Some(avatar) = avatar {
-            identity.avatar = add_image(&self.ipfs, avatar).await?.into();
+            identity.avatar = Some(add_image(&self.ipfs, avatar).await?.into());
         }
 
         if let Some(ipns) = channel_ipns {
             identity.channel_ipns = Some(ipns.into());
-        }
-
-        if let Some(ens) = channel_ens {
-            identity.channel_ens = Some(ens);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -159,7 +141,7 @@ where
     }
 
     /// Follow a channel.
-    pub async fn follow(&self, identity: IPLDLink) -> Result<Cid, Error> {
+    pub async fn follow(&self, addr: IPNSAddress) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
         let mut follows = match channel.follows {
@@ -167,7 +149,7 @@ where
             None => Follows::default(),
         };
 
-        if !follows.followees.insert(identity) {
+        if !follows.followees.insert(addr) {
             return Err(Error::AlreadyAdded);
         }
 
@@ -179,7 +161,7 @@ where
     }
 
     /// Unfollow a channel.
-    pub async fn unfollow(&self, identity: IPLDLink) -> Result<Cid, Error> {
+    pub async fn unfollow(&self, addr: IPNSAddress) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
         let mut follows = match channel.follows {
@@ -187,7 +169,7 @@ where
             None => return Err(Error::NotFound),
         };
 
-        if !follows.followees.remove(&identity) {
+        if !follows.followees.remove(&addr) {
             return Err(Error::NotFound);
         }
 

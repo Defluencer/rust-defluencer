@@ -186,14 +186,21 @@ impl Defluencer {
 
     /// Returns all followees channels on the social web,
     /// one more degree of separation each iteration without duplicates.
-    pub async fn streaming_web_crawl(
+    pub fn streaming_web_crawl(
         &self,
-        identity: IPLDLink,
+        addr: IPNSAddress,
     ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
         stream::once(async move {
+            let channel_cid = self.ipfs.name_resolve(addr.into()).await?;
+
+            let channel_meta = self
+                .ipfs
+                .dag_get::<&str, ChannelMetadata>(channel_cid, None)
+                .await?;
+
             let id = self
                 .ipfs
-                .dag_get::<&str, Identity>(identity.link, None)
+                .dag_get::<&str, Identity>(channel_meta.identity.link, None)
                 .await?;
 
             Result::<_, Error>::Ok(id)
@@ -282,9 +289,25 @@ impl Defluencer {
                 }
             })
             .flatten()
-            .filter_map(|ipld| async move {
-                match self.ipfs.dag_get::<&str, Identity>(ipld.link, None).await {
-                    Ok(identity) => Some((ipld.link, identity)),
+            .filter_map(|addr| async move {
+                match self.ipfs.name_resolve(addr.into()).await {
+                    Ok(cid) => Some(cid),
+                    Err(_) => None,
+                }
+            })
+            .filter_map(|cid| async move {
+                match self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await {
+                    Ok(channel) => Some(channel),
+                    Err(_) => None,
+                }
+            })
+            .filter_map(|channel| async move {
+                match self
+                    .ipfs
+                    .dag_get::<&str, Identity>(channel.identity.link, None)
+                    .await
+                {
+                    Ok(identity) => Some((channel.identity.link, identity)),
                     Err(_) => None,
                 }
             })
