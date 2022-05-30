@@ -67,13 +67,11 @@ impl Defluencer {
         Ok(())
     }
 
-    /// Subscribe to an IPNS address.
-    /// The first value returned is the current IPNS link.
+    /// Subscribe to a channel.
+    /// The first value returned is the current metadata CID.
     ///
     /// Each update's crypto-signature is verified.
-    ///
-    /// Only works for IPNS address pointing to a CID (for now).
-    pub fn subscribe_ipns_updates(
+    pub fn subscribe_channel_updates(
         &self,
         channel_ipns: IPNSAddress,
         regis: AbortRegistration,

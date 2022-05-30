@@ -3,7 +3,7 @@ name = "linked-data"
 version = "0.1.0"
 authors = ["SionoiS <SionoiS@users.noreply.github.com>"]
 edition = "2021"
-description = "Rust implementation of Defluencer linked data."
+description = "Defluencer linked data."
 
 [dependencies]
 bitvec = { version = "1", default-features = false, features = ["std", "serde"] }

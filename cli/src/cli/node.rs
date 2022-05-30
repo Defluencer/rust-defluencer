@@ -2,7 +2,7 @@ use cid::Cid;
 
 use clap::Parser;
 
-use defluencer::{
+use core::{
     errors::Error,
     signatures::ledger::{BitcoinLedgerApp, EthereumLedgerApp},
     Defluencer,
@@ -22,8 +22,8 @@ pub struct NodeCLI {
 
 #[derive(Debug, Parser)]
 enum Command {
-    // Compute Channel Address from a BTC or ETH account.
-    ChannelAddress(Address),
+    /// Compute channel address from a BTC or ETH account.
+    Address(Address),
 
     /// Recursively pin all channel data on this node.
     ///
@@ -36,8 +36,8 @@ enum Command {
     /// Receive channel updates in real time.
     Subscribe(Subscribe),
 
-    // Stream all the comments for some content on a channel.
-    StreamComments(Stream),
+    /// Stream all the comments for some content on a channel.
+    Comments(Stream),
 
     /// Crawl the social web.
     WebCrawl(WebCrawl),
@@ -45,11 +45,11 @@ enum Command {
 
 pub async fn node_cli(cli: NodeCLI) {
     let res = match cli.cmd {
-        Command::ChannelAddress(args) => address(args).await,
+        Command::Address(args) => address(args).await,
         Command::Pin(args) => pin(args).await,
         Command::Unpin(args) => unpin(args).await,
         Command::Subscribe(args) => subscribe(args).await,
-        Command::StreamComments(args) => stream_comments(args).await,
+        Command::Comments(args) => stream_comments(args).await,
         Command::WebCrawl(args) => web_crawl(args).await,
     };
 
@@ -61,11 +61,11 @@ pub async fn node_cli(cli: NodeCLI) {
 #[derive(Debug, Parser)]
 pub struct Address {
     /// Bitcoin or Ethereum based signatures.
-    #[clap(arg_enum)]
+    #[clap(arg_enum, default_value = "bitcoin")]
     blockchain: Blockchain,
 
     /// Account index (BIP-44).
-    #[clap(long)]
+    #[clap(long, default_value = "0")]
     account: u32,
 }
 
@@ -88,7 +88,7 @@ async fn address(args: Address) -> Result<(), Error> {
                 }
             };
 
-            defluencer::utils::pubkey_to_ipns(public_key).into()
+            core::utils::pubkey_to_ipns(public_key).into()
         }
         Blockchain::Ethereum => {
             let app = EthereumLedgerApp::default();
@@ -101,7 +101,7 @@ async fn address(args: Address) -> Result<(), Error> {
                 }
             };
 
-            defluencer::utils::pubkey_to_ipns(public_key).into()
+            core::utils::pubkey_to_ipns(public_key).into()
         }
     };
 
@@ -150,7 +150,7 @@ async fn subscribe(args: Subscribe) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
     let (handle, regis) = AbortHandle::new_pair();
-    let stream = defluencer.subscribe_ipns_updates(args.address.into(), regis);
+    let stream = defluencer.subscribe_channel_updates(args.address.into(), regis);
     pin_mut!(stream);
 
     let control = tokio::signal::ctrl_c();

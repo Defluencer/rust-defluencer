@@ -2,7 +2,7 @@
 
 members = [
     "linked-data",
-    "defluencer",
+    "core",
     "ipfs-api",
     "cli"
 ]

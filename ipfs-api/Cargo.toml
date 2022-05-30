@@ -1,8 +1,9 @@
 [package]
 name = "ipfs-api"
-description = "Ipfs api for WASM and Desktop"
 version = "0.1.0"
+authors = ["SionoiS <SionoiS@users.noreply.github.com>"]
 edition = "2021"
+description = "Ipfs api for WASM and Desktop"
 
 [dependencies]
 bytes = { version = "1", default-features = false, features = [] }

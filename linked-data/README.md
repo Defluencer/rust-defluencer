@@ -14,13 +14,12 @@ type Comments map [&Comment:&Comment] using ShardedMap # Keys are hashes of Cids
 type CommentIndex map [&Media:&Comments] using ShardedMap # Keys are hashes of Cids
 
 type ChannelMetadata struct {
-    identity Identity
+    seq Int # Growth only counter. Increment every update.
+    identity &Identity
     content_index optional &DateTime
     comment_index optional &CommentIndex
     live optional &LiveSettings
     folows optional &Follows
-    bans optional &Bans
-    mods optional &Moderators
 }
 ```
 
@@ -33,7 +32,6 @@ type Identity struct {
     display_name String 
     avatar &MimeTyped
     channel_ipns optional String
-    channel_ens optional String
 }
 ```
 
@@ -73,7 +71,7 @@ type Video struct {
 type Comment struct {
     identity &Identity
     user_timestamp Int # Unix Time
-    origin String # CID as string prevent recursive pinning.
+    origin String # CID as string to prevent recursive pinning.
     text String
 }
 ```
@@ -84,17 +82,20 @@ type Comment struct {
 type LiveSettings struct {
     peer_id String
     video_topic String
-    chat_topic String
+    archiving Bool
+    chat_topic optional String
+    bans optional &Bans
+    mods optional &Moderators
 }
 ```
 
 ## Follows
 
-List of followees used to build the social web.
+List of followees used to crawl the social web.
 
 ```
 type Follows struct {
-  followees [&Identity]
+  followees [String] # IPNS address of channels
 }
 ```
 
@@ -136,23 +137,12 @@ type MessageType union {
     | Moderator map # The ETH address and peer Id of the new moderator.
 } representation kinded
 
-type ChatID struct {
-    peer_id String
-    name String
-}
-
-type SignedMessage {
-    address ETHAddress
-
-    data ChatID
-
-    signature Bytes # 65 bytes
-}
-
 type ChatMessage struct {
+    name String
+    
     message MessageType
 
-    signature &SignedMessage
+    signature Link # Link to DAG-JOSE block linking to peer id
 }
 ```
 
@@ -175,7 +165,7 @@ type Setup struct {
 type Track struct {
     name String
     codec String # Mime type
-    init_seg Link # Link to the initialization segment data
+    initseg Link # Link to the initialization segment data
     bandwidth Int
 }
 ```

@@ -15,21 +15,21 @@ use crate::cli::{
 };
 
 #[derive(Debug, Parser)]
-#[clap(name = "defluencer", author, version, about, long_about = None, rename_all = "kebab-case")]
+#[clap(name = "defluencer", author = "SionoiS <defluencer@protonmail.com>", version, about, long_about = None, rename_all = "kebab-case")]
 enum CommandLineInterface {
-    /// Start the live streaming daemon.
+    /// Start the video live streaming daemon.
     Stream(Stream),
 
-    /// Start the file streaming daemon.
+    /// Start the video file streaming daemon.
     File(File),
 
-    /// Manage your channel.
+    /// Channel related commands.
     Channel(ChannelCLI),
 
-    /// Manage your user,
+    /// User related commands.
     User(UserCLI),
 
-    /// Manage your node
+    /// Manage your node and other utilities.
     Node(NodeCLI),
 }
 

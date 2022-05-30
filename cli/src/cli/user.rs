@@ -4,7 +4,7 @@ use cid::Cid;
 
 use clap::Parser;
 
-use defluencer::{
+use core::{
     errors::Error,
     signatures::{
         bitcoin::BitcoinSigner,
@@ -23,11 +23,11 @@ use linked_data::identity::Identity;
 #[derive(Debug, Parser)]
 pub struct UserCLI {
     /// Bitcoin or Ethereum based signatures.
-    #[clap(arg_enum)]
+    #[clap(arg_enum, default_value = "bitcoin")]
     blockchain: Blockchain,
 
     /// Account index (BIP-44).
-    #[clap(long)]
+    #[clap(long, default_value = "0")]
     account: u32,
 
     #[clap(subcommand)]
@@ -42,7 +42,7 @@ enum Blockchain {
 
 #[derive(Debug, Parser)]
 enum Command {
-    /// Create a new User identity.
+    /// Create a new user identity.
     Create(Create),
 
     /// Create new content.
@@ -100,7 +100,7 @@ pub struct Create {
 
     /// Channel address.
     ///
-    /// Pre-compute using the CLI or leave empty.
+    /// Pre-compute using the CLI or leave empty if you don't have a channel.
     #[clap(short, long)]
     channel: Option<Cid>,
 }

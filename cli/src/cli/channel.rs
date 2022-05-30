@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use cid::Cid;
 
-use defluencer::{
+use core::{
     channel::Channel,
     errors::Error,
     signatures::{
@@ -22,11 +22,11 @@ use linked_data::types::{IPNSAddress, PeerId};
 #[derive(Debug, Parser)]
 pub struct ChannelCLI {
     /// Bitcoin or Ethereum based signatures.
-    #[clap(arg_enum)]
+    #[clap(arg_enum, default_value = "bitcoin")]
     blockchain: Blockchain,
 
     /// Account index (BIP-44).
-    #[clap(long)]
+    #[clap(long, default_value = "0")]
     account: u32,
 
     #[clap(subcommand)]
@@ -73,7 +73,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
                 }
             };
 
-            let ipns = defluencer::utils::pubkey_to_ipns(public_key);
+            let ipns = core::utils::pubkey_to_ipns(public_key);
 
             let signer = BitcoinSigner::new(app, cli.account);
 
@@ -108,7 +108,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
                 }
             };
 
-            let ipns = defluencer::utils::pubkey_to_ipns(public_key);
+            let ipns = core::utils::pubkey_to_ipns(public_key);
 
             let signer = EthereumSigner::new(app, cli.account);
 
@@ -142,6 +142,8 @@ pub async fn channel_cli(cli: ChannelCLI) {
 #[derive(Debug, Parser)]
 pub struct Create {
     /// Identity CID.
+    ///
+    /// Create an identity using the User CLI.
     #[clap(short, long)]
     identity: Cid,
 }
@@ -189,7 +191,7 @@ async fn add_content(
 
     channel.add_content(args.cid).await?;
 
-    println!("✅ Added Content");
+    println!("✅ Added Content {}", args.cid);
 
     Ok(())
 }
@@ -205,7 +207,7 @@ async fn remove_content(
 
     channel.remove_content(args.cid).await?;
 
-    println!("✅ Comments Cleared & Removed Content");
+    println!("✅ Comments Cleared & Removed Content {}", args.cid);
 
     Ok(())
 }
@@ -272,7 +274,7 @@ async fn add_followee(
 
     channel.follow(args.address.into()).await?;
 
-    println!("✅ Followee Added");
+    println!("✅ Added Followee {}", args.address);
 
     Ok(())
 }
@@ -288,7 +290,7 @@ async fn remove_followee(
 
     channel.unfollow(args.address.into()).await?;
 
-    println!("✅ Followee Removed");
+    println!("✅ Removed Followee {}", args.address);
 
     Ok(())
 }
