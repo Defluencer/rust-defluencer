@@ -8,14 +8,14 @@ use serde::{Deserialize, Serialize};
 /// Direct pin.
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Bans {
-    pub banned_addrs: HashSet<Address>,
+    pub banned_addrs: HashSet<Address>, // Could also use HAMT to store crypto address since they are hash based.
 }
 
 /// List of moderators.
 /// Direct pin.
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Moderators {
-    pub moderator_addrs: HashSet<Address>,
+    pub moderator_addrs: HashSet<Address>, // Could also use HAMT to store crypto address since they are hash based.
 }
 
 /// Message to ban/unban a user.

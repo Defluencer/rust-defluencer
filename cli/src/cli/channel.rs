@@ -48,7 +48,7 @@ enum Command {
     Content(ContentLog),
 
     /// Update your identity.
-    UpdateIdentity(Identity),
+    Identity(Identity),
 
     /// Manage your followees.
     Follow(Friends),
@@ -83,7 +83,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
                     ContentCommand::Add(args) => add_content(args, ipns, signer).await,
                     ContentCommand::Remove(args) => remove_content(args, ipns, signer).await,
                 },
-                Command::UpdateIdentity(args) => update_identity(args, ipns, signer).await,
+                Command::Identity(args) => update_identity(args, ipns, signer).await,
                 Command::Follow(args) => match args.cmd {
                     FollowCommand::Add(args) => add_followee(args, ipns, signer).await,
                     FollowCommand::Remove(args) => remove_followee(args, ipns, signer).await,
@@ -91,9 +91,9 @@ pub async fn channel_cli(cli: ChannelCLI) {
                 Command::Live(args) => update_live(args, ipns, signer).await,
                 Command::Moderation(args) => match args.cmd {
                     ModerationCommand::Ban(args) => ban_user(args, ipns, signer).await,
-                    ModerationCommand::UnBan(args) => unban_user(args, ipns, signer).await,
+                    ModerationCommand::Unban(args) => unban_user(args, ipns, signer).await,
                     ModerationCommand::Mod(args) => mod_user(args, ipns, signer).await,
-                    ModerationCommand::UnMod(args) => unmod_user(args, ipns, signer).await,
+                    ModerationCommand::Unmod(args) => unmod_user(args, ipns, signer).await,
                 },
             }
         }
@@ -118,7 +118,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
                     ContentCommand::Add(args) => add_content(args, ipns, signer).await,
                     ContentCommand::Remove(args) => remove_content(args, ipns, signer).await,
                 },
-                Command::UpdateIdentity(args) => update_identity(args, ipns, signer).await,
+                Command::Identity(args) => update_identity(args, ipns, signer).await,
                 Command::Follow(args) => match args.cmd {
                     FollowCommand::Add(args) => add_followee(args, ipns, signer).await,
                     FollowCommand::Remove(args) => remove_followee(args, ipns, signer).await,
@@ -126,9 +126,9 @@ pub async fn channel_cli(cli: ChannelCLI) {
                 Command::Live(args) => update_live(args, ipns, signer).await,
                 Command::Moderation(args) => match args.cmd {
                     ModerationCommand::Ban(args) => ban_user(args, ipns, signer).await,
-                    ModerationCommand::UnBan(args) => unban_user(args, ipns, signer).await,
+                    ModerationCommand::Unban(args) => unban_user(args, ipns, signer).await,
                     ModerationCommand::Mod(args) => mod_user(args, ipns, signer).await,
-                    ModerationCommand::UnMod(args) => unmod_user(args, ipns, signer).await,
+                    ModerationCommand::Unmod(args) => unmod_user(args, ipns, signer).await,
                 },
             }
         }
@@ -364,13 +364,13 @@ enum ModerationCommand {
     Ban(Ban),
 
     /// Unban users.
-    UnBan(Ban),
+    Unban(Ban),
 
     /// Promote user to moderator position.
     Mod(Mod),
 
     /// Demote user from moderator position.
-    UnMod(Mod),
+    Unmod(Mod),
 }
 
 #[derive(Debug, Parser)]

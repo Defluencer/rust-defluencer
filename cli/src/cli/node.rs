@@ -36,11 +36,11 @@ enum Command {
     /// Receive channel updates in real time.
     Subscribe(Subscribe),
 
-    /// Stream all the comments for some content on a channel.
-    Comments(Stream),
+    /// Stream content & comments from a channel.
+    Stream(Stream),
 
     /// Crawl the social web.
-    WebCrawl(WebCrawl),
+    Webcrawl(WebCrawl),
 }
 
 pub async fn node_cli(cli: NodeCLI) {
@@ -49,8 +49,11 @@ pub async fn node_cli(cli: NodeCLI) {
         Command::Pin(args) => pin(args).await,
         Command::Unpin(args) => unpin(args).await,
         Command::Subscribe(args) => subscribe(args).await,
-        Command::Comments(args) => stream_comments(args).await,
-        Command::WebCrawl(args) => web_crawl(args).await,
+        Command::Stream(stream_cli) => match stream_cli.cmd {
+            SubCommand::Content => stream_content(stream_cli.address).await,
+            SubCommand::Comments(args) => stream_comments(stream_cli.address, args).await,
+        },
+        Command::Webcrawl(args) => web_crawl(args).await,
     };
 
     if let Err(e) = res {
@@ -76,30 +79,20 @@ enum Blockchain {
 }
 
 async fn address(args: Address) -> Result<(), Error> {
+    println!("Authorize Your Hardware Wallet...");
+
     let ipns: Cid = match args.blockchain {
         Blockchain::Bitcoin => {
             let app = BitcoinLedgerApp::default();
 
-            let public_key = match app.get_extended_pubkey(args.account) {
-                Ok((public_key, _)) => public_key,
-                Err(_) => {
-                    eprintln!("❗ User Denied Account Access");
-                    return Ok(());
-                }
-            };
+            let (public_key, _) = app.get_extended_pubkey(args.account)?;
 
             core::utils::pubkey_to_ipns(public_key).into()
         }
         Blockchain::Ethereum => {
             let app = EthereumLedgerApp::default();
 
-            let public_key = match app.get_public_address(args.account) {
-                Ok((public_key, _)) => public_key,
-                Err(_) => {
-                    eprintln!("❗ User Denied Account Access");
-                    return Ok(());
-                }
-            };
+            let (public_key, _) = app.get_public_address(args.account)?;
 
             core::utils::pubkey_to_ipns(public_key).into()
         }
@@ -186,24 +179,39 @@ pub struct Stream {
     #[clap(short, long)]
     address: Cid,
 
+    #[clap(subcommand)]
+    cmd: SubCommand,
+}
+
+#[derive(Debug, Parser)]
+pub enum SubCommand {
+    /// Stream all the content on a channel.
+    Content,
+
+    /// Stream all the comments for some content on a channel.
+    Comments(Comments),
+}
+
+#[derive(Debug, Parser)]
+pub struct Comments {
     /// Content CID.
     #[clap(short, long)]
     content: Cid,
 }
 
-async fn stream_comments(args: Stream) -> Result<(), Error> {
+async fn stream_comments(addr: Cid, args: Comments) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let ipfs = IpfsService::default();
     let defluencer = Defluencer::new(ipfs.clone());
 
-    let cid = ipfs.name_resolve(args.address).await?;
+    let cid = ipfs.name_resolve(addr).await?;
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
 
     let index = match metadata.comment_index {
         Some(ipns) => ipns,
         None => {
-            eprintln!("❗ This channel has no comments.");
+            eprintln!("❗ This channel's content has no comments.");
             return Ok(());
         }
     };
@@ -212,11 +220,45 @@ async fn stream_comments(args: Stream) -> Result<(), Error> {
         .stream_comments(index, args.content)
         .boxed_local();
 
+    println!("Streaming Comments CIDs...");
+
     while let Some(cid) = stream.try_next().await? {
         println!("{}", cid);
     }
 
     println!("✅ Comments Stream Ended");
+
+    Ok(())
+}
+
+async fn stream_content(addr: Cid) -> Result<(), Error> {
+    use futures_util::TryStreamExt;
+
+    let ipfs = IpfsService::default();
+    let defluencer = Defluencer::new(ipfs.clone());
+
+    let cid = ipfs.name_resolve(addr).await?;
+    let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+
+    let index = match metadata.content_index {
+        Some(ipns) => ipns,
+        None => {
+            eprintln!("❗ This channel has no content.");
+            return Ok(());
+        }
+    };
+
+    let mut stream = defluencer
+        .stream_content_chronologically(index)
+        .boxed_local();
+
+    println!("Streaming Content CIDs...");
+
+    while let Some(cid) = stream.try_next().await? {
+        println!("{}", cid);
+    }
+
+    println!("✅ Content Stream Ended");
 
     Ok(())
 }

@@ -39,7 +39,7 @@ thiserror = { version = "1", default-features = false, features = [] }
 tokio = { version = "1", default-features = false, features = ["fs"]}
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 ledger-zondax-generic = "0.9"
-ledger-transport-hid = "0.9"
+ledger-transport-hid = { version = "0.9", git = "https://github.com/SionoiS/ledger-rs", branch = "windows" }
 ledger-transport = "0.9"
 rs_merkle = { version = "1", default-features = false, features = ["std"] }
 bitcoin = { version = "0.28", default-features = false, features = ["std"] }
