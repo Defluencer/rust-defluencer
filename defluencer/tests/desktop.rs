@@ -2,28 +2,20 @@
 
 #[cfg(test)]
 mod tests {
-    /* use std::ops::Add;
-
-    use bip39::{Language, Mnemonic};
     use chrono::{Duration, SecondsFormat, Utc};
+
     use cid::Cid;
+    use sha3::Keccak256;
 
-    use defluencer::{signatures::dag_jose::JsonWebSignature, Defluencer};
+    use std::ops::Add;
 
-    use ed25519::KeypairBytes;
-
-    use futures::future::AbortHandle;
     use ipfs_api::IpfsService;
 
-    use linked_data::{
-        signature::RawJWS,
-        types::{CryptoKey, IPNSAddress, IPNSRecord, KeyType, ValidityType},
-    };
+    use linked_data::types::{CryptoKey, IPNSAddress, IPNSRecord, KeyType, ValidityType};
 
     use multihash::Multihash;
-    use pkcs8::{EncodePrivateKey, LineEnding};
 
-    use rand_core::{OsRng, RngCore}; */
+    use rand_core::OsRng;
 
     /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ed25519_roundtrip() {
@@ -101,11 +93,9 @@ mod tests {
         println!("New {}", cid);
     } */
 
-    /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ipns_esoteric_record() {
-        //use pkcs8::EncodePublicKey;
         use prost::Message;
-        use signature::Signer;
 
         let cid =
             Cid::try_from("bafyreieoextjee6sm5hpaxdhkseypz3by6vzcwddhxa673ozmxxjwv3hv4").unwrap();
@@ -132,8 +122,11 @@ mod tests {
             signing_input.extend(validity.iter());
             signing_input.extend(validity_type.to_string().as_bytes());
 
-            let signature: k256::ecdsa::Signature =
-                signing_key.try_sign(&mut signing_input).unwrap();
+            use sha3::Digest;
+            use signature::DigestSigner;
+            let digest = Keccak256::new_with_prefix(signing_input);
+            // IPNS verify record with sha2-256 signed message but ETH use Keccak256
+            let signature: k256::ecdsa::Signature = signing_key.sign_digest(digest);
 
             signature.to_der().to_bytes().into_vec()
         };
@@ -152,11 +145,6 @@ mod tests {
         };
 
         let address = {
-            /* let mut hasher = Sha2_256::default();
-            hasher.update(&public_key);
-            let digest = hasher.finalize();
-            let multihash = Multihash::wrap(0x12, &digest).unwrap(); */
-
             let multihash = Multihash::wrap(0x00, &public_key).unwrap();
 
             Cid::new_v1(0x72, multihash)
@@ -187,5 +175,14 @@ mod tests {
             cid,
             response,
         );
-    } */
+    }
+
+    //eth
+    // identity bafyreib6i3k6l6hd76n5vqxhjo7o7ydxof63rvpt5voikwgks6bbq4b4dq
+    // channel bafzaajiiaijccavtasabjomtp25agq274vd2aqkaydixfopjawpj5anncnaccw3cj4
+    // post bagcqcerasgsjnyyzw75synr4ur3qjgt2r73rhxt4p52ulgv6wzf6slezhgra
+
+    //btc
+    //channel bafzaajiiaijcca4hunx6ozn5i223eabdahovnzwtv3ciuoxr5rj5xdzbpcya4gqww4
+    // identity bafyreiexgf7atvbjaa55mnzr4eiac3n3ynrl6tfafmq6kvhc75sbbjcmbm
 }

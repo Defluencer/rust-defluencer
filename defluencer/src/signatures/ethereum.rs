@@ -1,6 +1,11 @@
 use async_trait::async_trait;
+use sha3::Keccak256;
 
 use crate::errors::Error;
+
+use sha3::Digest;
+
+use signature::DigestVerifier;
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::ledger::EthereumLedgerApp;
@@ -26,8 +31,6 @@ impl super::Signer for EthereumSigner {
         &self,
         signing_input: Vec<u8>,
     ) -> Result<(k256::PublicKey, k256::ecdsa::Signature), Error> {
-        use signature::Verifier;
-
         let mut eth_message =
             format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
         eth_message.extend_from_slice(&signing_input);
@@ -36,9 +39,9 @@ impl super::Signer for EthereumSigner {
             .app
             .sign_personal_message(&signing_input, self.account_index)?;
 
-        let recovered_key = signature.recover_verifying_key(&eth_message)?; // The fn hash the message
-
-        recovered_key.verify(&eth_message, &signature)?;
+        let digest = Keccak256::new_with_prefix(eth_message);
+        let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
+        recovered_key.verify_digest(digest, &signature)?;
 
         let public_key = k256::PublicKey::from(recovered_key);
         let signature = k256::ecdsa::Signature::from(signature);
@@ -89,9 +92,9 @@ impl super::Signer for EthereumSigner {
 
         let signature = k256::ecdsa::recoverable::Signature::from_bytes(&sig.to_fixed_bytes())?;
 
-        let recovered_key = signature.recover_verifying_key(&eth_message)?; // The fn hash the message
-
-        recovered_key.verify(&eth_message, &signature)?;
+        let digest = Keccak256::new_with_prefix(eth_message);
+        let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
+        recovered_key.verify_digest(digest, &signature)?;
 
         let public_key = k256::PublicKey::from(recovered_key);
         let signature = k256::ecdsa::Signature::from(signature);
@@ -105,12 +108,9 @@ mod tests {
     use super::*;
 
     use sha2::{Digest, Sha256};
-    //use sha3::{Digest, Keccak256};
 
     #[test]
     fn sign() {
-        use signature::Verifier;
-
         let app = EthereumLedgerApp::default();
 
         let signing_input = b"Hello World!";
@@ -127,9 +127,11 @@ mod tests {
 
         let signature = app.sign_personal_message(signing_input, 0).unwrap();
 
-        let recovered_key = signature.recover_verifying_key(&eth_message).unwrap(); // The fn hash the message
-
-        recovered_key.verify(&eth_message, &signature).unwrap();
+        let digest = Keccak256::new_with_prefix(eth_message);
+        let recovered_key = signature
+            .recover_verifying_key_from_digest(digest.clone())
+            .unwrap();
+        recovered_key.verify_digest(digest, &signature).unwrap();
     }
 
     #[test]

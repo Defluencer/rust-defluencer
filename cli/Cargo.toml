@@ -8,7 +8,7 @@ description = "Defluencer Command Line Interface."
 [dependencies]
 cid = "0.8"
 clap = { version = "3", default-features = false, features = ["std", "derive"] }
-core = { path = "../core" }
+defluencer = { path = "../defluencer" }
 either = {version = "1.6", features = ["serde"]}
 futures-util = "0.3"
 hex = "0.4"

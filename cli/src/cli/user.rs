@@ -4,7 +4,7 @@ use cid::Cid;
 
 use clap::Parser;
 
-use core::{
+use defluencer::{
     errors::Error,
     signatures::{
         bitcoin::BitcoinSigner,
@@ -59,7 +59,7 @@ pub async fn user_cli(cli: UserCLI) {
             match cli.cmd {
                 Command::Create(args) => create_user(args).await,
                 Command::Content(content) => match content.cmd {
-                    Media::MicroBlog(args) => micro_blog(content.creator, args, signer).await,
+                    Media::Microblog(args) => micro_blog(content.creator, args, signer).await,
                     Media::Blog(args) => blog(content.creator, args, signer).await,
                     Media::Video(args) => video(content.creator, args, signer).await,
                     Media::Comment(args) => comment(content.creator, args, signer).await,
@@ -74,7 +74,7 @@ pub async fn user_cli(cli: UserCLI) {
             match cli.cmd {
                 Command::Create(args) => create_user(args).await,
                 Command::Content(content) => match content.cmd {
-                    Media::MicroBlog(args) => micro_blog(content.creator, args, signer).await,
+                    Media::Microblog(args) => micro_blog(content.creator, args, signer).await,
                     Media::Blog(args) => blog(content.creator, args, signer).await,
                     Media::Video(args) => video(content.creator, args, signer).await,
                     Media::Comment(args) => comment(content.creator, args, signer).await,
@@ -149,7 +149,7 @@ pub struct Content {
 #[derive(Debug, Parser)]
 enum Media {
     /// Create new micro post.
-    MicroBlog(MicroBlog),
+    Microblog(MicroBlog),
 
     /// Create new blog post.
     Blog(Blog),
@@ -179,7 +179,7 @@ async fn micro_blog(
 
     let cid = user.create_micro_blog_post(args.content).await?;
 
-    println!("✅ Added Micro Blog Post {}", cid);
+    println!("✅ Created Micro Blog Post {}", cid);
 
     Ok(())
 }
@@ -212,7 +212,7 @@ async fn blog(identity: Cid, args: Blog, signer: impl Signer + Clone) -> Result<
 
     let cid = user.create_blog_post(title, &image, &content).await?;
 
-    println!("✅ Added Blog Post {}", cid);
+    println!("✅ Created Blog Post {}", cid);
 
     Ok(())
 }
@@ -245,7 +245,7 @@ async fn video(identity: Cid, args: Video, signer: impl Signer + Clone) -> Resul
 
     let cid = user.create_video_post(title, video, &image).await?;
 
-    println!("✅ Added Video {}", cid);
+    println!("✅ Created Video {}", cid);
 
     Ok(())
 }
@@ -268,7 +268,7 @@ async fn comment(identity: Cid, args: Comment, signer: impl Signer + Clone) -> R
 
     let cid = user.create_comment(args.origin, args.content).await?;
 
-    println!("✅ Added Comment {}", cid);
+    println!("✅ Created Comment {}", cid);
 
     Ok(())
 }

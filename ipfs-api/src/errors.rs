@@ -11,6 +11,9 @@ pub enum Error {
     #[error("UTF-8: {0}")]
     FromUtf8(#[from] std::string::FromUtf8Error),
 
+    #[error("UTF-8: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
+
     #[error("Reqwest: {0}")]
     Reqwest(#[from] reqwest::Error),
 

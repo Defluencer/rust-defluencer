@@ -65,4 +65,7 @@ pub enum Error {
 
     #[error("Defluencer: Cannot process file, please use a markdown file")]
     Markdown,
+
+    #[error("IPNS Address Mismatch")]
+    IPNSMismatch,
 }

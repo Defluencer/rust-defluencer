@@ -2,7 +2,7 @@ use cid::Cid;
 
 use clap::Parser;
 
-use core::{
+use defluencer::{
     errors::Error,
     signatures::ledger::{BitcoinLedgerApp, EthereumLedgerApp},
     Defluencer,
@@ -87,14 +87,14 @@ async fn address(args: Address) -> Result<(), Error> {
 
             let (public_key, _) = app.get_extended_pubkey(args.account)?;
 
-            core::utils::pubkey_to_ipns(public_key).into()
+            defluencer::utils::pubkey_to_ipns(public_key).into()
         }
         Blockchain::Ethereum => {
             let app = EthereumLedgerApp::default();
 
             let (public_key, _) = app.get_public_address(args.account)?;
 
-            core::utils::pubkey_to_ipns(public_key).into()
+            defluencer::utils::pubkey_to_ipns(public_key).into()
         }
     };
 
@@ -115,7 +115,7 @@ async fn pin(args: Pinning) -> Result<(), Error> {
 
     defluencer.pin_channel(args.address.into()).await?;
 
-    println!("Channel's Content Pinned ✅");
+    println!("✅ Channel's Content Pinned");
 
     Ok(())
 }
@@ -125,7 +125,7 @@ async fn unpin(args: Pinning) -> Result<(), Error> {
 
     defluencer.unpin_channel(args.address.into()).await?;
 
-    println!("Channel's Content Unpinned ✅");
+    println!("✅ Channel's Content Unpinned");
 
     Ok(())
 }

@@ -49,6 +49,7 @@ where
         }
     }
 
+    /// Create a new user.
     pub async fn create(
         &self,
         user_name: impl Into<Cow<'static, str>>,
@@ -74,8 +75,6 @@ where
     }
 
     /// Update your identity data.
-    ///
-    /// Returns updated identity CID.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn update_identity(
         mut self,
@@ -108,8 +107,6 @@ where
     }
 
     /// Update your identity data.
-    ///
-    /// Returns updated identity CID.
     #[cfg(target_arch = "wasm32")]
     pub async fn update_identity(
         &mut self,

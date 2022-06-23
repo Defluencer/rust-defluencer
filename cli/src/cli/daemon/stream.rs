@@ -7,7 +7,7 @@ use crate::{
 
 use cid::Cid;
 
-use core::errors::Error;
+use defluencer::errors::Error;
 
 use linked_data::{
     channel::ChannelMetadata,

@@ -13,7 +13,6 @@ use cid::Cid;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
-use k256::ecdsa::VerifyingKey;
 use linked_data::{
     channel::ChannelMetadata,
     comments::Comment,
@@ -29,6 +28,8 @@ use linked_data::{
 use cid::multihash::Multihash;
 
 use prost::Message;
+
+use sha2::Digest;
 
 #[derive(Clone)]
 pub struct Channel<T>
@@ -95,7 +96,9 @@ where
 
         channel.identity = cid.into();
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(cid)
     }
 
     /// Update your identity data.
@@ -129,15 +132,20 @@ where
 
         channel.identity = cid.into();
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(cid)
     }
 
+    /// Replace your current Identity.
     pub async fn replace_identity(&self, identity: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
         channel.identity = identity;
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(identity.link)
     }
 
     /// Follow a channel.
@@ -157,7 +165,9 @@ where
 
         channel.follows = Some(cid.into());
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(cid)
     }
 
     /// Unfollow a channel.
@@ -177,20 +187,23 @@ where
 
         channel.follows = Some(cid.into());
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(cid)
     }
 
+    /// Replace your follow list.
     pub async fn replace_follow_list(&self, follows: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
         channel.follows = Some(follows);
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(follows.link)
     }
 
     /// Update live chat & streaming settings.
-    ///
-    /// Returns CID of new settings.
     pub async fn update_live_settings(
         &self,
         peer_id: Option<Cid>,
@@ -234,15 +247,18 @@ where
         Ok(cid)
     }
 
+    /// Replace your live chat & streaming settings.
     pub async fn replace_live_settings(&self, settings: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
         channel.live = Some(settings);
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(settings.link)
     }
 
-    /// Returns new list if a user was banned.
+    /// Add a user to your ban list.
     pub async fn ban_user(&self, user: Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -275,7 +291,7 @@ where
         Ok(Some(bans_cid))
     }
 
-    /// Returns new list if a user was unbanned.
+    /// Remove a user from your ban list.
     pub async fn unban_user(&self, user: &Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -308,6 +324,7 @@ where
         Ok(Some(bans_cid))
     }
 
+    /// Replace your ban list.
     pub async fn replace_ban_list(&self, bans: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -325,10 +342,12 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(bans.link)
     }
 
-    /// Returns new channel Cid if a moderator was added.
+    /// Add a moderator to your list.
     pub async fn add_moderator(&self, user: Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -356,12 +375,12 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        let new_channel = self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(channel_cid, &channel).await?;
 
-        Ok(Some(new_channel))
+        Ok(Some(mods_cid))
     }
 
-    /// Returns new channel Cid if a moderator was removed.
+    /// Remove a moderator from your list.
     pub async fn remove_moderator(&self, user: &Address) -> Result<Option<Cid>, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -389,11 +408,12 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        let new_channel = self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(channel_cid, &channel).await?;
 
-        Ok(Some(new_channel))
+        Ok(Some(mods_cid))
     }
 
+    /// Replace your moderator list.
     pub async fn replace_moderator_list(&self, moderators: IPLDLink) -> Result<Cid, Error> {
         let (channel_cid, mut channel) = self.get_metadata().await?;
 
@@ -411,7 +431,9 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(channel_cid, &channel).await?;
+
+        Ok(moderators.link)
     }
 
     /// Add new content.
@@ -538,7 +560,7 @@ where
         let ipns = create_ipns_record(new_cid, &self.ipfs, &self.signer, channel.seq + 1).await?;
 
         if ipns != self.ipns {
-            return Err(Error::AlreadyAdded); //TODO add custom error
+            return Err(Error::IPNSMismatch);
         }
 
         Ok(new_cid)
@@ -555,7 +577,7 @@ async fn create_ipns_record(
     signer: &impl Signer,
     sequence: u64,
 ) -> Result<IPNSAddress, Error> {
-    let value = format!("/ipfs/{}", cid).into_bytes();
+    let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
 
     let validity = Utc::now()
         .add(Duration::weeks(52))
@@ -578,7 +600,8 @@ async fn create_ipns_record(
 
     let (public_key, signature) = signer.sign(signing_input).await?;
 
-    let verifying_key = VerifyingKey::from(public_key);
+    let verifying_key = k256::ecdsa::VerifyingKey::from(public_key);
+    let signature = signature.to_der().to_bytes().into_vec();
 
     let public_key = CryptoKey {
         key_type: KeyType::Secp256k1 as i32,
@@ -586,10 +609,14 @@ async fn create_ipns_record(
     }
     .encode_to_vec(); // Protobuf encoding
 
-    let signature = signature.to_der().to_bytes().into_vec();
-
     let ipns = {
-        let multihash = Multihash::wrap(0x00, &public_key).unwrap();
+        let multihash = if public_key.len() <= 42 {
+            Multihash::wrap(0x00, &public_key).unwrap()
+        } else {
+            let hash = sha2::Sha256::new_with_prefix(&public_key).finalize();
+
+            Multihash::wrap(0x12, &hash).unwrap()
+        };
 
         Cid::new_v1(0x72, multihash)
     };

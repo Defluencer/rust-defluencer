@@ -5,7 +5,7 @@ use crate::{
     server::start_server,
 };
 
-use core::errors::Error;
+use defluencer::errors::Error;
 
 use tokio::{
     signal::ctrl_c,

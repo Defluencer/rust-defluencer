@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use cid::Cid;
 
-use core::{
+use defluencer::{
     channel::Channel,
     errors::Error,
     signatures::{
@@ -61,6 +61,8 @@ enum Command {
 }
 
 pub async fn channel_cli(cli: ChannelCLI) {
+    println!("Confirm Address On Your Hardware Wallet...");
+
     let res = match cli.blockchain {
         Blockchain::Bitcoin => {
             let app = BitcoinLedgerApp::default();
@@ -73,7 +75,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
                 }
             };
 
-            let ipns = core::utils::pubkey_to_ipns(public_key);
+            let ipns = defluencer::utils::pubkey_to_ipns(public_key);
 
             let signer = BitcoinSigner::new(app, cli.account);
 
@@ -108,7 +110,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
                 }
             };
 
-            let ipns = core::utils::pubkey_to_ipns(public_key);
+            let ipns = defluencer::utils::pubkey_to_ipns(public_key);
 
             let signer = EthereumSigner::new(app, cli.account);
 
@@ -151,6 +153,8 @@ pub struct Create {
 async fn create_channel(args: Create, signer: impl Signer + Clone) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
+    println!("Confirm Signature On Your Hardware Wallet...");
+
     let channel = Channel::create(ipfs, signer, args.identity.into()).await?;
 
     println!("✅ Created Channel {}", channel.get_address());
@@ -188,6 +192,8 @@ async fn add_content(
     let ipfs = IpfsService::default();
 
     let channel = Channel::new(ipfs, ipns, signer);
+
+    println!("Confirm Signature On Your Hardware Wallet...");
 
     channel.add_content(args.cid).await?;
 
@@ -232,11 +238,11 @@ async fn update_identity(
 
     let channel = Channel::new(ipfs, ipns, signer);
 
-    channel
+    let cid = channel
         .update_identity(args.display_name, args.path, Some(ipns.into()))
         .await?;
 
-    println!("✅ Updated Channel Identity");
+    println!("✅ Updated Channel Identity {}", cid);
 
     Ok(())
 }
@@ -343,11 +349,11 @@ async fn update_live(
         None
     };
 
-    channel
+    let cid = channel
         .update_live_settings(peer_id, video_topic, chat_topic, archiving)
         .await?;
 
-    println!("✅ Updated Live Settings");
+    println!("✅ Updated Live Settings {}", cid);
 
     Ok(())
 }
