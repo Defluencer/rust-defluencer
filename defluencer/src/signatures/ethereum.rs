@@ -1,11 +1,10 @@
 use async_trait::async_trait;
-use sha3::Keccak256;
 
 use crate::errors::Error;
 
-use sha3::Digest;
+use sha3::{Digest, Keccak256};
 
-use signature::DigestVerifier;
+use super::signed_link::HashAlgorithm;
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::ledger::EthereumLedgerApp;
@@ -29,24 +28,30 @@ impl EthereumSigner {
 impl super::Signer for EthereumSigner {
     async fn sign(
         &self,
-        signing_input: Vec<u8>,
-    ) -> Result<(k256::PublicKey, k256::ecdsa::Signature), Error> {
-        let mut eth_message =
-            format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
-        eth_message.extend_from_slice(&signing_input);
-
+        signing_input: &[u8],
+    ) -> Result<
+        (
+            k256::ecdsa::VerifyingKey,
+            k256::ecdsa::Signature,
+            HashAlgorithm,
+        ),
+        Error,
+    > {
         let signature = self
             .app
-            .sign_personal_message(&signing_input, self.account_index)?;
+            .sign_personal_message(signing_input, self.account_index)?;
+
+        let mut eth_message =
+            format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
+        eth_message.extend_from_slice(signing_input);
 
         let digest = Keccak256::new_with_prefix(eth_message);
-        let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
-        recovered_key.verify_digest(digest, &signature)?;
 
-        let public_key = k256::PublicKey::from(recovered_key);
+        let recovered_key = signature.recover_verifying_key_from_digest(digest)?;
+
         let signature = k256::ecdsa::Signature::from(signature);
 
-        Ok((public_key, signature))
+        Ok((recovered_key, signature, HashAlgorithm::EthereumLedgerApp))
     }
 }
 
@@ -75,14 +80,17 @@ impl EthereumSigner {
 impl super::Signer for EthereumSigner {
     async fn sign(
         &self,
-        signing_input: Vec<u8>,
-    ) -> Result<(k256::PublicKey, k256::ecdsa::Signature), Error> {
+        signing_input: &[u8],
+    ) -> Result<
+        (
+            k256::ecdsa::VerifyingKey,
+            k256::ecdsa::Signature,
+            HashAlgorithm,
+        ),
+        Error,
+    > {
         use signature::Signature;
         use signature::Verifier;
-
-        let mut eth_message =
-            format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
-        eth_message.extend_from_slice(&signing_input);
 
         let sig = self
             .web3
@@ -92,14 +100,17 @@ impl super::Signer for EthereumSigner {
 
         let signature = k256::ecdsa::recoverable::Signature::from_bytes(&sig.to_fixed_bytes())?;
 
-        let digest = Keccak256::new_with_prefix(eth_message);
-        let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
-        recovered_key.verify_digest(digest, &signature)?;
+        let mut eth_message =
+            format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
+        eth_message.extend_from_slice(signing_input);
 
-        let public_key = k256::PublicKey::from(recovered_key);
+        let digest = Keccak256::new_with_prefix(eth_message);
+
+        let recovered_key = signature.recover_verifying_key_from_digest(digest)?;
+
         let signature = k256::ecdsa::Signature::from(signature);
 
-        Ok((public_key, signature))
+        Ok((recovered_key, signature, HashAlgorithm::Keccak256))
     }
 }
 
@@ -107,31 +118,41 @@ impl super::Signer for EthereumSigner {
 mod tests {
     use super::*;
 
-    use sha2::{Digest, Sha256};
+    use k256::ecdsa::VerifyingKey;
+
+    use sha2::Digest;
+
+    use signature::DigestVerifier;
 
     #[test]
-    fn sign() {
+    fn sign_test() {
         let app = EthereumLedgerApp::default();
+        let account_index = 0;
 
-        let signing_input = b"Hello World!";
+        let (pub_key, _account) = app.get_public_address(account_index).unwrap();
+        let verif_key = VerifyingKey::from(pub_key);
+
+        //let signing_input = b"Hello World!";
+        let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
+        //let signing_input = &[255_u8; 85];
+
+        let signature = app
+            .sign_personal_message(signing_input, account_index)
+            .unwrap();
 
         let mut eth_message =
             format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
         eth_message.extend_from_slice(signing_input);
 
-        let mut hasher = Sha256::new();
-        hasher.update(signing_input.clone());
-        let hash = hasher.finalize();
-
-        println!("Hash: {}", hex::encode(hash));
-
-        let signature = app.sign_personal_message(signing_input, 0).unwrap();
-
         let digest = Keccak256::new_with_prefix(eth_message);
+
         let recovered_key = signature
             .recover_verifying_key_from_digest(digest.clone())
             .unwrap();
-        recovered_key.verify_digest(digest, &signature).unwrap();
+
+        assert_eq!(recovered_key, verif_key);
+
+        verif_key.verify_digest(digest, &signature).unwrap();
     }
 
     #[test]

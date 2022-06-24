@@ -75,7 +75,7 @@ impl EthereumLedgerApp {
         Ok((public_key, address))
     }
 
-    /// The hash displayed on the screen is the SHA-256 of the message.
+    /// The message displayed on the screen is UTF-8 or hex encoded.
     ///
     /// The signature is standard ETH signature scheme.
     /// Message with prefix hashed with Keccak256.
@@ -648,13 +648,7 @@ impl Hasher for BitcoinMerkle {
 
                 Self::hash(&vec)
             }
-            None => {
-                *left
-                //vec.extend(left);
-                //vec.extend(left);
-
-                //Self::hash(&vec)
-            }
+            None => *left,
         }
     }
 }

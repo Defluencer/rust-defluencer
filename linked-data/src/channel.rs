@@ -8,10 +8,9 @@ use serde::{Deserialize, Serialize};
 /// Blockchains are best suited for this.
 #[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq)]
 pub struct ChannelMetadata {
-    /// Growth only counter.
+    /* // Growth only counter.
     /// Increment every update.
-    pub seq: u64,
-
+    pub seq: u64, */
     pub identity: IPLDLink,
 
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -26,12 +26,14 @@ use linked_data::{
     follows::Follows,
     identity::Identity,
     indexes::date_time::*,
-    types::{CryptoKey, IPLDLink, IPNSAddress, IPNSRecord, ValidityType},
+    types::{IPLDLink, IPNSAddress, IPNSRecord},
 };
 
 use ipfs_api::{responses::PubSubMessage, IpfsService};
 
 use prost::Message;
+
+use signatures::signed_link::SignedLink;
 
 #[derive(Default, Clone)]
 pub struct Defluencer {
@@ -76,10 +78,54 @@ impl Defluencer {
         channel_ipns: IPNSAddress,
         regis: AbortRegistration,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        use signature::Signature;
-        use signature::Verifier;
-
         stream::once(async move {
+            let ipns = channel_ipns.into();
+            let mut signed_link_cid = self.ipfs.name_resolve(ipns).await?;
+
+            let topic = channel_ipns.to_pubsub_topic();
+
+            let stream = self
+                .ipfs
+                .pubsub_sub(topic.into_bytes(), regis)
+                .err_into()
+                .try_filter_map(move |msg| async move {
+                    let PubSubMessage { from: _, data } = msg;
+
+                    let IPNSRecord {
+                        value,
+                        signature: _,
+                        validity_type: _,
+                        validity: _,
+                        sequence: _,
+                        ttl: _,
+                        public_key: _,
+                    } = IPNSRecord::decode(data.as_ref())?;
+
+                    let cid_str = std::str::from_utf8(&value)?;
+                    let cid = Cid::try_from(cid_str)?;
+
+                    if cid == signed_link_cid {
+                        return Ok(None);
+                    }
+
+                    let signed_link = self.ipfs.dag_get::<&str, SignedLink>(cid, None).await?;
+
+                    if !signed_link.verify() {
+                        return Ok(None);
+                    }
+
+                    signed_link_cid = cid;
+
+                    Ok(Some(signed_link_cid))
+                });
+
+            let stream = stream::once(async move { Ok(signed_link_cid) }).chain(stream);
+
+            Result::<_, Error>::Ok(stream)
+        })
+        .try_flatten()
+
+        /* stream::once(async move {
             let ipns = channel_ipns.into();
             let mut channel_cid = self.ipfs.name_resolve(ipns).await?;
 
@@ -119,9 +165,9 @@ impl Defluencer {
                         return Ok(None);
                     }
 
-                    if sequence <= metadata.seq {
+                    /* if sequence <= metadata.seq {
                         return Ok(None);
-                    }
+                    } */
 
                     let mut signing_input = Vec::with_capacity(
                         value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
@@ -171,7 +217,7 @@ impl Defluencer {
 
             Result::<_, Error>::Ok(stream)
         })
-        .try_flatten()
+        .try_flatten() */
         /* .and_then(move |cid| async move {
             let channel = self
                 .ipfs

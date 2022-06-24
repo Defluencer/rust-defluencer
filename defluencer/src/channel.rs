@@ -1,16 +1,15 @@
-use std::ops::Add;
-
 use crate::{
     errors::Error,
     indexing::{datetime, hamt},
-    signatures::Signer,
+    signatures::{signed_link::SignedLink, Signer},
     utils::add_image,
 };
 
-use chrono::{Duration, SecondsFormat, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 
 use cid::Cid;
 
+use heck::ToSnakeCase;
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
@@ -22,14 +21,8 @@ use linked_data::{
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
-    types::{Address, CryptoKey, IPLDLink, IPNSAddress, IPNSRecord, KeyType, ValidityType},
+    types::{Address, IPLDLink, IPNSAddress},
 };
-
-use cid::multihash::Multihash;
-
-use prost::Message;
-
-use sha2::Digest;
 
 #[derive(Clone)]
 pub struct Channel<T>
@@ -37,7 +30,7 @@ where
     T: Signer + Clone,
 {
     ipfs: IpfsService,
-    ipns: IPNSAddress,
+    key: String,
     signer: T,
 }
 
@@ -45,22 +38,44 @@ impl<T> Channel<T>
 where
     T: Signer + Clone,
 {
-    pub fn new(ipfs: IpfsService, ipns: IPNSAddress, signer: T) -> Self {
-        Self { ipfs, signer, ipns }
+    pub fn new(ipfs: IpfsService, key: String, signer: T) -> Self {
+        Self { ipfs, signer, key }
     }
 
     /// Create a new channel.
-    pub async fn create(ipfs: IpfsService, signer: T, identity: IPLDLink) -> Result<Self, Error> {
+    pub async fn create(
+        ipfs: IpfsService,
+        signer: T,
+        mut identity: Identity,
+    ) -> Result<Self, Error> {
+        // init a channel
+        let cid = ipfs.dag_put(&identity, Codec::default()).await?;
+
         let metadata = ChannelMetadata {
-            identity,
+            identity: cid.into(),
             ..Default::default()
         };
 
-        let cid = ipfs.dag_put(&metadata, Codec::default()).await?;
+        let old_cid = ipfs.dag_put(&metadata, Codec::default()).await?;
+        ipfs.pin_add(old_cid, true).await?;
 
-        let ipns = create_ipns_record(cid, &ipfs, &signer, metadata.seq).await?;
+        // Then "update" the channel
 
-        let channel = Self { ipfs, signer, ipns };
+        let key = identity.display_name.to_snake_case();
+        let key_pair = ipfs.key_gen(key.clone()).await?;
+
+        let ipns = IPNSAddress::try_from(key_pair.id.as_str())?;
+        identity.channel_ipns = Some(ipns);
+
+        let cid = ipfs.dag_put(&identity, Codec::default()).await?;
+        let channel_meta = ChannelMetadata {
+            identity: cid.into(),
+            ..Default::default()
+        };
+
+        let channel = Channel::<T>::new(ipfs, key, signer);
+
+        channel.update_metadata(old_cid, &channel_meta).await?;
 
         Ok(channel)
     }
@@ -545,14 +560,19 @@ where
         Ok(())
     }
 
-    pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
+    /* pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
         let cid = self.ipfs.name_resolve(self.ipns.into()).await?;
         let channel: ChannelMetadata = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
 
         Ok((cid, channel))
+    } */
+
+    pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
+        let response = self.ipfs.ipns_get(self.key.clone()).await?;
+        Ok(response)
     }
 
-    async fn update_metadata(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
+    /* async fn update_metadata(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
         let new_cid = self.ipfs.dag_put(channel, Codec::default()).await?;
 
         self.ipfs.pin_update(old_cid, new_cid).await?;
@@ -564,14 +584,37 @@ where
         }
 
         Ok(new_cid)
+    } */
+
+    async fn update_metadata(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
+        let new_cid = self.ipfs.dag_put(channel, Codec::default()).await?;
+
+        let root = self.create_signed_link(new_cid).await?;
+
+        self.ipfs.pin_update(old_cid, root).await?;
+
+        self.ipfs.name_publish(root, self.key.clone()).await?;
+
+        Ok(root)
     }
 
-    pub fn get_address(&self) -> IPNSAddress {
-        self.ipns
+    async fn create_signed_link(&self, cid: Cid) -> Result<Cid, Error> {
+        let (verif_key, signature, hash_algo) = self.signer.sign(cid.hash().digest()).await?;
+
+        let signed_link = SignedLink {
+            link: cid.into(),
+            public_key: verif_key.to_bytes().to_vec(),
+            hash_algo,
+            signature: signature.to_der().as_bytes().to_vec(),
+        };
+
+        let cid = self.ipfs.dag_put(&signed_link, Default::default()).await?;
+
+        Ok(cid)
     }
 }
 
-async fn create_ipns_record(
+/* async fn create_ipns_record(
     cid: Cid,
     ipfs: &IpfsService,
     signer: &impl Signer,
@@ -598,7 +641,7 @@ async fn create_ipns_record(
         data
     };
 
-    let (public_key, signature) = signer.sign(signing_input).await?;
+    let (public_key, signature) = signer.sign(&signing_input).await?;
 
     let verifying_key = k256::ecdsa::VerifyingKey::from(public_key);
     let signature = signature.to_der().to_bytes().into_vec();
@@ -636,4 +679,4 @@ async fn create_ipns_record(
     ipfs.dht_put(ipns, record_data).await?;
 
     Ok(ipns.into())
-}
+} */

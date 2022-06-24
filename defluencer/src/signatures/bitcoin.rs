@@ -6,11 +6,9 @@ use bitcoin::{consensus::Encodable, VarInt};
 
 use sha2::{Digest, Sha256};
 
-use signature::DigestVerifier;
-
 use crate::errors::Error;
 
-use super::ledger::BitcoinLedgerApp;
+use super::{ledger::BitcoinLedgerApp, signed_link::HashAlgorithm};
 
 #[derive(Clone)]
 pub struct BitcoinSigner {
@@ -28,8 +26,17 @@ impl BitcoinSigner {
 impl super::Signer for BitcoinSigner {
     async fn sign(
         &self,
-        signing_input: Vec<u8>,
-    ) -> Result<(k256::PublicKey, k256::ecdsa::Signature), Error> {
+        signing_input: &[u8],
+    ) -> Result<
+        (
+            k256::ecdsa::VerifyingKey,
+            k256::ecdsa::Signature,
+            HashAlgorithm,
+        ),
+        Error,
+    > {
+        let signature = self.app.sign_message(signing_input, self.account_index)?;
+
         let btc_message = {
             let mut temp = Vec::from("\x18Bitcoin Signed Message:\n");
 
@@ -39,20 +46,17 @@ impl super::Signer for BitcoinSigner {
                 .expect("VarInt encoded message length");
 
             temp.extend(&msg_len);
-            temp.extend(signing_input.iter());
+            temp.extend(signing_input);
             temp
         };
 
-        let signature = self.app.sign_message(&signing_input, self.account_index)?;
+        let hash = Sha256::new_with_prefix(btc_message).finalize();
+        let digest = Sha256::new_with_prefix(hash);
+        let recovered_key = signature.recover_verifying_key_from_digest(digest)?;
 
-        let digest = Sha256::new_with_prefix(btc_message);
-        let recovered_key = signature.recover_verifying_key_from_digest(digest.clone())?;
-        recovered_key.verify_digest(digest, &signature)?;
-
-        let public_key = k256::PublicKey::from(recovered_key);
         let signature = k256::ecdsa::Signature::from(signature);
 
-        Ok((public_key, signature))
+        Ok((recovered_key, signature, HashAlgorithm::BitcoinLedgerApp))
     }
 }
 
@@ -62,7 +66,10 @@ mod tests {
 
     use bitcoin::VarInt;
 
+    use k256::ecdsa::VerifyingKey;
+
     use sha2::Digest;
+
     use signature::DigestVerifier;
 
     #[test]
@@ -75,11 +82,22 @@ mod tests {
     }
 
     #[test]
-    fn sign() {
+    fn sign_test() {
         let app = BitcoinLedgerApp::default();
+        let account_index = 0;
+
+        let (pub_key, _addr) = app.get_extended_pubkey(account_index).unwrap();
+        let verif_key = VerifyingKey::from(pub_key);
 
         //let signing_input = b"Hello World!";
         let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
+
+        let display_hash = Sha256::new_with_prefix(signing_input).finalize();
+        println!("Message Display Hash: 0x{}", hex::encode(display_hash));
+
+        let signature = app
+            .sign_message(signing_input, account_index)
+            .expect("Msg signature");
 
         let msg_length = {
             let mut temp = Vec::with_capacity(9); // Bicoin style Varint
@@ -96,22 +114,16 @@ mod tests {
             temp
         };
 
-        let mut hasher = sha2::Sha256::new();
+        let hash = Sha256::new_with_prefix(btc_message).finalize();
+        let digest = Sha256::new_with_prefix(hash);
 
-        hasher.update(&signing_input);
-        let display_hash = hasher.finalize();
-
-        println!("Message Display Hash: 0x{}", hex::encode(display_hash));
-
-        let signature = app.sign_message(signing_input, 0).expect("Msg signature");
-
-        let digest = Sha256::new_with_prefix(btc_message);
-
-        let recovered_key = signature
+        let recov_key = signature
             .recover_verifying_key_from_digest(digest.clone())
-            .expect("Key recovery");
+            .unwrap();
 
-        recovered_key
+        assert_eq!(recov_key, verif_key);
+
+        verif_key
             .verify_digest(digest, &signature)
             .expect("Verification");
     }

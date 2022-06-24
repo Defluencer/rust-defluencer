@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::{
     errors::Error,
-    signatures::Signer,
+    signatures::{signed_link::SignedLink, Signer},
     utils::{add_image, add_markdown},
 };
 
@@ -19,11 +19,8 @@ use linked_data::{
         blog::{FullPost, MicroPost},
         video::{Day, Hour, Minute, Video},
     },
-    signature::{AlgorithmType, Header, JsonWebKey, RawJWS, RawSignature},
     types::{IPLDLink, IPNSAddress},
 };
-
-use multibase::Base;
 
 use serde::Serialize;
 
@@ -262,7 +259,7 @@ where
     {
         let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
 
-        let signed_cid = self.create_dag_jose(content_cid).await?;
+        let signed_cid = self.create_signed_link(content_cid).await?;
 
         self.ipfs.pin_add(signed_cid, pin).await?;
 
@@ -297,12 +294,27 @@ where
     pub async fn chat_signature(&self) -> Result<Cid, Error> {
         let peer = self.ipfs.peer_id().await?;
 
-        let cid = self.create_dag_jose(peer).await?;
+        let cid = self.create_signed_link(peer).await?;
 
         Ok(cid)
     }
 
-    async fn create_dag_jose(&self, cid: Cid) -> Result<Cid, Error> {
+    async fn create_signed_link(&self, cid: Cid) -> Result<Cid, Error> {
+        let (verif_key, signature, hash_algo) = self.signer.sign(cid.hash().digest()).await?;
+
+        let signed_link = SignedLink {
+            link: cid.into(),
+            public_key: verif_key.to_bytes().to_vec(),
+            hash_algo,
+            signature: signature.to_der().as_bytes().to_vec(),
+        };
+
+        let cid = self.ipfs.dag_put(&signed_link, Default::default()).await?;
+
+        Ok(cid)
+    }
+
+    /* async fn create_dag_jose(&self, cid: Cid) -> Result<Cid, Error> {
         let payload = cid.to_bytes();
         let payload = Base::Base64Url.encode(payload);
 
@@ -316,7 +328,7 @@ where
 
         let message = format!("{}.{}", payload, protected);
 
-        let (public_key, signature) = self.signer.sign(message.into_bytes()).await?;
+        let (public_key, signature) = self.signer.sign(message.as_bytes()).await?;
 
         // Lazy Hack: Deserialize then serialize as the other type
         let jwk_string = public_key.to_jwk_string();
@@ -342,5 +354,5 @@ where
         let cid = self.ipfs.dag_put(&json, Codec::DagJose).await?;
 
         Ok(cid)
-    }
+    } */
 }
