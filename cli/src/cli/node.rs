@@ -2,11 +2,7 @@ use cid::Cid;
 
 use clap::Parser;
 
-use defluencer::{
-    errors::Error,
-    signatures::ledger::{BitcoinLedgerApp, EthereumLedgerApp},
-    Defluencer,
-};
+use defluencer::{errors::Error, Defluencer};
 
 use futures_util::{future::AbortHandle, pin_mut, FutureExt, StreamExt};
 
@@ -22,9 +18,8 @@ pub struct NodeCLI {
 
 #[derive(Debug, Parser)]
 enum Command {
-    /// Compute channel address from a BTC or ETH account.
-    Address(Address),
-
+    /* /// Compute channel address from a BTC or ETH account.
+    Address(Address), */
     /// Recursively pin all channel data on this node.
     ///
     /// CAUTION: The amount of data to download could be MASSIVE.
@@ -45,7 +40,7 @@ enum Command {
 
 pub async fn node_cli(cli: NodeCLI) {
     let res = match cli.cmd {
-        Command::Address(args) => address(args).await,
+        //Command::Address(args) => address(args).await,
         Command::Pin(args) => pin(args).await,
         Command::Unpin(args) => unpin(args).await,
         Command::Subscribe(args) => subscribe(args).await,
@@ -61,7 +56,7 @@ pub async fn node_cli(cli: NodeCLI) {
     }
 }
 
-#[derive(Debug, Parser)]
+/* #[derive(Debug, Parser)]
 pub struct Address {
     /// Bitcoin or Ethereum based signatures.
     #[clap(arg_enum, default_value = "bitcoin")]
@@ -70,15 +65,15 @@ pub struct Address {
     /// Account index (BIP-44).
     #[clap(long, default_value = "0")]
     account: u32,
-}
+} */
 
-#[derive(clap::ArgEnum, Clone, Debug)]
+/* #[derive(clap::ArgEnum, Clone, Debug)]
 enum Blockchain {
     Bitcoin,
     Ethereum,
-}
+} */
 
-async fn address(args: Address) -> Result<(), Error> {
+/* async fn address(args: Address) -> Result<(), Error> {
     println!("Authorize Your Hardware Wallet...");
 
     let ipns: Cid = match args.blockchain {
@@ -101,7 +96,7 @@ async fn address(args: Address) -> Result<(), Error> {
     println!("✅ Channel Address {}", ipns);
 
     Ok(())
-}
+} */
 
 #[derive(Debug, Parser)]
 pub struct Pinning {

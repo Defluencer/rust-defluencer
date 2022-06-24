@@ -18,7 +18,9 @@ use defluencer::{
 
 use ipfs_api::{responses::Codec, IpfsService};
 
-use linked_data::identity::Identity;
+use linked_data::{identity::Identity, types::IPNSAddress};
+
+use heck::ToSnakeCase;
 
 #[derive(Debug, Parser)]
 pub struct UserCLI {
@@ -98,18 +100,21 @@ pub struct Create {
     #[clap(short, long)]
     path: Option<PathBuf>,
 
-    /// Channel address.
-    ///
-    /// Pre-compute using the CLI or leave empty if you don't have a channel.
+    /// Create Channel?
     #[clap(short, long)]
-    channel: Option<Cid>,
+    channel: bool,
 }
 
 async fn create_user(args: Create) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let channel_ipns = if let Some(cid) = args.channel {
-        Some(cid.into())
+    let channel_ipns = if args.channel {
+        let key = args.display_name.to_snake_case();
+        let key_pair = ipfs.key_gen(key.clone()).await?;
+
+        let ipns = IPNSAddress::try_from(key_pair.id.as_str())?;
+
+        Some(ipns)
     } else {
         None
     };
@@ -128,10 +133,7 @@ async fn create_user(args: Create) -> Result<(), Error> {
 
     let cid = ipfs.dag_put(&identity, Codec::default()).await?;
 
-    println!(
-        "✅ User Identity Created\nName: {}\nAvatar: {:?}\nChannel Address: {:?}\nIdentity CID: {}",
-        identity.display_name, identity.avatar, channel_ipns, cid
-    );
+    println!("✅ User Identity Created\nCID: {}", cid);
 
     Ok(())
 }
@@ -179,7 +181,7 @@ async fn micro_blog(
 
     let cid = user.create_micro_blog_post(args.content).await?;
 
-    println!("✅ Created Micro Blog Post {}", cid);
+    println!("✅ Created Micro Blog Post\nCID: {}", cid);
 
     Ok(())
 }
@@ -212,7 +214,7 @@ async fn blog(identity: Cid, args: Blog, signer: impl Signer + Clone) -> Result<
 
     let cid = user.create_blog_post(title, &image, &content).await?;
 
-    println!("✅ Created Blog Post {}", cid);
+    println!("✅ Created Blog Post\nCID: {}", cid);
 
     Ok(())
 }
@@ -245,7 +247,7 @@ async fn video(identity: Cid, args: Video, signer: impl Signer + Clone) -> Resul
 
     let cid = user.create_video_post(title, video, &image).await?;
 
-    println!("✅ Created Video {}", cid);
+    println!("✅ Created Video\nCID: {}", cid);
 
     Ok(())
 }
@@ -268,7 +270,7 @@ async fn comment(identity: Cid, args: Comment, signer: impl Signer + Clone) -> R
 
     let cid = user.create_comment(args.origin, args.content).await?;
 
-    println!("✅ Created Comment {}", cid);
+    println!("✅ Created Comment\nCID: {}", cid);
 
     Ok(())
 }

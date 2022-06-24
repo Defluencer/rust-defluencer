@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use cid::Cid;
 
 use defluencer::{
@@ -13,11 +11,12 @@ use defluencer::{
     },
 };
 
+use heck::ToSnakeCase;
 use ipfs_api::IpfsService;
 
 use clap::Parser;
 
-use linked_data::types::{IPNSAddress, PeerId};
+use linked_data::{channel::ChannelMetadata, identity::Identity, types::PeerId};
 
 #[derive(Debug, Parser)]
 pub struct ChannelCLI {
@@ -28,6 +27,10 @@ pub struct ChannelCLI {
     /// Account index (BIP-44).
     #[clap(long, default_value = "0")]
     account: u32,
+
+    /// Identity CID.
+    #[clap(short, long)]
+    identity: Cid,
 
     #[clap(subcommand)]
     cmd: Command,
@@ -42,14 +45,13 @@ enum Blockchain {
 #[derive(Debug, Parser)]
 enum Command {
     /// Create a new channel.
-    Create(Create),
+    Create,
 
     /// Manage your content.
     Content(ContentLog),
 
-    /// Update your identity.
-    Identity(Identity),
-
+    /* /// Update your identity.
+    Identity(Identity), */
     /// Manage your followees.
     Follow(Friends),
 
@@ -61,76 +63,62 @@ enum Command {
 }
 
 pub async fn channel_cli(cli: ChannelCLI) {
-    println!("Confirm Address On Your Hardware Wallet...");
-
     let res = match cli.blockchain {
         Blockchain::Bitcoin => {
             let app = BitcoinLedgerApp::default();
 
-            let public_key = match app.get_extended_pubkey(cli.account) {
-                Ok((public_key, _)) => public_key,
-                Err(_) => {
-                    eprintln!("❗ User Denied Account Access");
-                    return;
-                }
-            };
-
-            let ipns = defluencer::utils::pubkey_to_ipns(public_key);
-
             let signer = BitcoinSigner::new(app, cli.account);
 
             match cli.cmd {
-                Command::Create(args) => create_channel(args, signer).await,
+                Command::Create => create_channel(cli.identity).await,
                 Command::Content(args) => match args.cmd {
-                    ContentCommand::Add(args) => add_content(args, ipns, signer).await,
-                    ContentCommand::Remove(args) => remove_content(args, ipns, signer).await,
+                    ContentCommand::Add(args) => add_content(cli.identity, args, signer).await,
+                    ContentCommand::Remove(args) => {
+                        remove_content(cli.identity, args, signer).await
+                    }
                 },
-                Command::Identity(args) => update_identity(args, ipns, signer).await,
+                //Command::Identity(args) => update_identity(args, ipns, signer).await,
                 Command::Follow(args) => match args.cmd {
-                    FollowCommand::Add(args) => add_followee(args, ipns, signer).await,
-                    FollowCommand::Remove(args) => remove_followee(args, ipns, signer).await,
+                    FollowCommand::Add(args) => add_followee(cli.identity, args, signer).await,
+                    FollowCommand::Remove(args) => {
+                        remove_followee(cli.identity, args, signer).await
+                    }
                 },
-                Command::Live(args) => update_live(args, ipns, signer).await,
+                Command::Live(args) => update_live(cli.identity, args, signer).await,
                 Command::Moderation(args) => match args.cmd {
-                    ModerationCommand::Ban(args) => ban_user(args, ipns, signer).await,
-                    ModerationCommand::Unban(args) => unban_user(args, ipns, signer).await,
-                    ModerationCommand::Mod(args) => mod_user(args, ipns, signer).await,
-                    ModerationCommand::Unmod(args) => unmod_user(args, ipns, signer).await,
+                    ModerationCommand::Ban(args) => ban_user(cli.identity, args, signer).await,
+                    ModerationCommand::Unban(args) => unban_user(cli.identity, args, signer).await,
+                    ModerationCommand::Mod(args) => mod_user(cli.identity, args, signer).await,
+                    ModerationCommand::Unmod(args) => unmod_user(cli.identity, args, signer).await,
                 },
             }
         }
         Blockchain::Ethereum => {
             let app = EthereumLedgerApp::default();
 
-            let public_key = match app.get_public_address(cli.account) {
-                Ok((public_key, _)) => public_key,
-                Err(_) => {
-                    println!("❗ User Denied Account Access");
-                    return;
-                }
-            };
-
-            let ipns = defluencer::utils::pubkey_to_ipns(public_key);
-
             let signer = EthereumSigner::new(app, cli.account);
 
             match cli.cmd {
-                Command::Create(args) => create_channel(args, signer).await,
+                Command::Create => create_channel(cli.identity).await,
                 Command::Content(args) => match args.cmd {
-                    ContentCommand::Add(args) => add_content(args, ipns, signer).await,
-                    ContentCommand::Remove(args) => remove_content(args, ipns, signer).await,
+                    ContentCommand::Add(args) => add_content(cli.identity, args, signer).await,
+                    ContentCommand::Remove(args) => {
+                        remove_content(cli.identity, args, signer).await
+                    }
                 },
-                Command::Identity(args) => update_identity(args, ipns, signer).await,
+                //Command::Identity(args) => update_identity(args, ipns, signer).await,
                 Command::Follow(args) => match args.cmd {
-                    FollowCommand::Add(args) => add_followee(args, ipns, signer).await,
-                    FollowCommand::Remove(args) => remove_followee(args, ipns, signer).await,
+                    FollowCommand::Add(args) => add_followee(cli.identity, args, signer).await,
+                    FollowCommand::Remove(args) => {
+                        remove_followee(cli.identity, args, signer).await
+                    }
                 },
-                Command::Live(args) => update_live(args, ipns, signer).await,
+                Command::Live(args) => update_live(cli.identity, args, signer).await,
                 Command::Moderation(args) => match args.cmd {
-                    ModerationCommand::Ban(args) => ban_user(args, ipns, signer).await,
-                    ModerationCommand::Unban(args) => unban_user(args, ipns, signer).await,
-                    ModerationCommand::Mod(args) => mod_user(args, ipns, signer).await,
-                    ModerationCommand::Unmod(args) => unmod_user(args, ipns, signer).await,
+                    ModerationCommand::Ban(args) => ban_user(cli.identity, args, signer).await,
+                    ModerationCommand::Unban(args) => unban_user(cli.identity, args, signer).await,
+                    ModerationCommand::Mod(args) => mod_user(cli.identity, args, signer).await,
+                    ModerationCommand::Unmod(args) => unmod_user(cli.identity, args, signer).await,
                 },
             }
         }
@@ -141,23 +129,24 @@ pub async fn channel_cli(cli: ChannelCLI) {
     }
 }
 
-#[derive(Debug, Parser)]
-pub struct Create {
-    /// Identity CID.
-    ///
-    /// Create an identity using the User CLI.
-    #[clap(short, long)]
-    identity: Cid,
-}
+/* #[derive(Debug, Parser)]
+pub struct Create {} */
 
-async fn create_channel(args: Create, signer: impl Signer + Clone) -> Result<(), Error> {
+async fn create_channel(identity: Cid) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    println!("Confirm Signature On Your Hardware Wallet...");
+    let metadata = ChannelMetadata {
+        identity: identity.into(),
+        ..Default::default()
+    };
 
-    let channel = Channel::create(ipfs, signer, args.identity.into()).await?;
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
 
-    println!("✅ Created Channel {}", channel.get_address());
+    let key = identity.display_name.to_snake_case();
+
+    ipfs.ipns_put(key, true, &metadata).await?;
+
+    println!("✅ Created Channel");
 
     Ok(())
 }
@@ -185,13 +174,16 @@ pub struct Content {
 }
 
 async fn add_content(
+    identity: Cid,
     args: Content,
-    ipns: IPNSAddress,
     signer: impl Signer + Clone,
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     println!("Confirm Signature On Your Hardware Wallet...");
 
@@ -203,13 +195,16 @@ async fn add_content(
 }
 
 async fn remove_content(
+    identity: Cid,
     args: Content,
-    ipns: IPNSAddress,
     signer: impl Signer + Clone,
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     channel.remove_content(args.cid).await?;
 
@@ -218,7 +213,7 @@ async fn remove_content(
     Ok(())
 }
 
-#[derive(Debug, Parser)]
+/* #[derive(Debug, Parser)]
 pub struct Identity {
     /// Display name.
     #[clap(short, long)]
@@ -245,7 +240,7 @@ async fn update_identity(
     println!("✅ Updated Channel Identity {}", cid);
 
     Ok(())
-}
+} */
 
 #[derive(Debug, Parser)]
 pub struct Friends {
@@ -270,13 +265,17 @@ pub struct Followee {
 }
 
 async fn add_followee(
+    identity: Cid,
     args: Followee,
-    ipns: IPNSAddress,
+
     signer: impl Signer + Clone,
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     channel.follow(args.address.into()).await?;
 
@@ -286,13 +285,16 @@ async fn add_followee(
 }
 
 async fn remove_followee(
+    identity: Cid,
     args: Followee,
-    ipns: IPNSAddress,
     signer: impl Signer + Clone,
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     channel.unfollow(args.address.into()).await?;
 
@@ -320,11 +322,7 @@ pub struct Live {
     archiving: Option<bool>,
 }
 
-async fn update_live(
-    args: Live,
-    ipns: IPNSAddress,
-    signer: impl Signer + Clone,
-) -> Result<(), Error> {
+async fn update_live(identity: Cid, args: Live, signer: impl Signer + Clone) -> Result<(), Error> {
     let Live {
         peer_id,
         video_topic,
@@ -334,7 +332,10 @@ async fn update_live(
 
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     let peer_id = if let Some(peer) = peer_id {
         match PeerId::try_from(peer) {
@@ -403,12 +404,15 @@ fn parse_address(addrs: &str) -> [u8; 20] {
     <[u8; 20]>::from_hex(&addrs).expect("Invalid Ethereum Address")
 }
 
-async fn ban_user(args: Ban, ipns: IPNSAddress, signer: impl Signer + Clone) -> Result<(), Error> {
+async fn ban_user(identity: Cid, args: Ban, signer: impl Signer + Clone) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     if channel.ban_user(address).await?.is_some() {
         println!("✅ User {} Banned", args.address);
@@ -421,16 +425,15 @@ async fn ban_user(args: Ban, ipns: IPNSAddress, signer: impl Signer + Clone) -> 
     Ok(())
 }
 
-async fn unban_user(
-    args: Ban,
-    ipns: IPNSAddress,
-    signer: impl Signer + Clone,
-) -> Result<(), Error> {
+async fn unban_user(identity: Cid, args: Ban, signer: impl Signer + Clone) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     if channel.unban_user(&address).await?.is_some() {
         println!("✅ User {} Unbanned", args.address);
@@ -443,12 +446,15 @@ async fn unban_user(
     Ok(())
 }
 
-async fn mod_user(args: Mod, ipns: IPNSAddress, signer: impl Signer + Clone) -> Result<(), Error> {
+async fn mod_user(identity: Cid, args: Mod, signer: impl Signer + Clone) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     if channel.add_moderator(address).await?.is_some() {
         println!("✅ User {} Promoted To Moderator", args.address);
@@ -461,16 +467,15 @@ async fn mod_user(args: Mod, ipns: IPNSAddress, signer: impl Signer + Clone) -> 
     Ok(())
 }
 
-async fn unmod_user(
-    args: Mod,
-    ipns: IPNSAddress,
-    signer: impl Signer + Clone,
-) -> Result<(), Error> {
+async fn unmod_user(identity: Cid, args: Mod, signer: impl Signer + Clone) -> Result<(), Error> {
     let address = parse_address(&args.address);
 
     let ipfs = IpfsService::default();
 
-    let channel = Channel::new(ipfs, ipns, signer);
+    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let key = identity.display_name.to_snake_case();
+
+    let channel = Channel::new(ipfs, key, signer);
 
     if channel.remove_moderator(&address).await?.is_some() {
         println!("✅ Moderator {} Demoted", args.address);

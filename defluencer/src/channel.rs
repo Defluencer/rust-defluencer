@@ -43,41 +43,19 @@ where
     }
 
     /// Create a new channel.
-    pub async fn create(
-        ipfs: IpfsService,
-        signer: T,
-        mut identity: Identity,
-    ) -> Result<Self, Error> {
-        // init a channel
-        let cid = ipfs.dag_put(&identity, Codec::default()).await?;
-
+    pub async fn create(ipfs: IpfsService, identity: Cid) -> Result<(), Error> {
         let metadata = ChannelMetadata {
-            identity: cid.into(),
+            identity: identity.into(),
             ..Default::default()
         };
 
-        let old_cid = ipfs.dag_put(&metadata, Codec::default()).await?;
-        ipfs.pin_add(old_cid, true).await?;
-
-        // Then "update" the channel
+        let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
 
         let key = identity.display_name.to_snake_case();
-        let key_pair = ipfs.key_gen(key.clone()).await?;
 
-        let ipns = IPNSAddress::try_from(key_pair.id.as_str())?;
-        identity.channel_ipns = Some(ipns);
+        ipfs.ipns_put(key, true, &metadata).await?;
 
-        let cid = ipfs.dag_put(&identity, Codec::default()).await?;
-        let channel_meta = ChannelMetadata {
-            identity: cid.into(),
-            ..Default::default()
-        };
-
-        let channel = Channel::<T>::new(ipfs, key, signer);
-
-        channel.update_metadata(old_cid, &channel_meta).await?;
-
-        Ok(channel)
+        Ok(())
     }
 
     /// Update your identity data.
@@ -453,7 +431,7 @@ where
 
     /// Add new content.
     pub async fn add_content(&self, content_cid: Cid) -> Result<Cid, Error> {
-        // path "/link" to skip dag-jose block
+        // path "/link" to skip signature block
         let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
         let datetime = Utc.timestamp(media.user_timestamp(), 0);
 

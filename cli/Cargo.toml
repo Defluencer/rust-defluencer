@@ -11,6 +11,7 @@ clap = { version = "3", default-features = false, features = ["std", "derive"] }
 defluencer = { path = "../defluencer" }
 either = {version = "1.6", features = ["serde"]}
 futures-util = "0.3"
+heck = { version = "0.4", default-features = false, features = [] }
 hex = "0.4"
 hyper = { version = "0.14", features = ["http1", "server", "runtime", "stream"] }
 ipfs-api = { path = "../ipfs-api" }
