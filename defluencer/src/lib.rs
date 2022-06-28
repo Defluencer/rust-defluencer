@@ -26,6 +26,7 @@ use linked_data::{
     follows::Follows,
     identity::Identity,
     indexes::date_time::*,
+    media::Media,
     types::{IPLDLink, IPNSAddress, IPNSRecord},
 };
 
@@ -69,8 +70,30 @@ impl Defluencer {
         Ok(())
     }
 
+    /// Receive updates from the agregation channel.
+    ///
+    /// Each update is the CID of some content.
+    pub fn subscribe_agregation_updates(
+        &self,
+        channel: String,
+        regis: AbortRegistration,
+    ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+        self.ipfs
+            .pubsub_sub(channel.into_bytes(), regis)
+            .err_into()
+            .try_filter_map(move |msg| async move {
+                let PubSubMessage { from: _, data } = msg;
+
+                let cid = Cid::try_from(data)?;
+
+                let _media = self.ipfs.dag_get::<String, Media>(cid, None).await?;
+
+                Ok(Some(cid))
+            })
+    }
+
     /// Subscribe to a channel.
-    /// The first value returned is the current metadata CID.
+    /// The first value returned is the current root signature CID of the channel metadata.
     ///
     /// Each update's crypto-signature is verified.
     pub fn subscribe_channel_updates(
@@ -79,8 +102,7 @@ impl Defluencer {
         regis: AbortRegistration,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
         stream::once(async move {
-            let ipns = channel_ipns.into();
-            let mut signed_link_cid = self.ipfs.name_resolve(ipns).await?;
+            let mut signed_link_cid = self.ipfs.name_resolve(channel_ipns.into()).await?;
 
             let topic = channel_ipns.to_pubsub_topic();
 
@@ -111,6 +133,25 @@ impl Defluencer {
                     let signed_link = self.ipfs.dag_get::<&str, SignedLink>(cid, None).await?;
 
                     if !signed_link.verify() {
+                        return Ok(None);
+                    }
+
+                    // Even if the IPNS record were created from HW wallet, anyone could send a valid record.
+                    // Must check if the record is not only valid but sent by the channel owner.
+
+                    let meta = self
+                        .ipfs
+                        .dag_get::<&str, ChannelMetadata>(signed_link.link.link, None)
+                        .await?;
+
+                    let identity = self
+                        .ipfs
+                        .dag_get::<&str, Identity>(meta.identity.link, None)
+                        .await?;
+
+                    if identity.channel_ipns.is_none()
+                        || identity.channel_ipns.unwrap() != channel_ipns
+                    {
                         return Ok(None);
                     }
 
@@ -272,10 +313,12 @@ impl Defluencer {
 
                 let diff = map
                     .into_iter()
-                    .filter_map(|(key, channel)| match visited.insert(key, channel) {
-                        Some(_) => None,
-                        None => Some((key, channel)),
-                    })
+                    .filter_map(
+                        |(key, channel)| match visited.insert(key, channel.clone()) {
+                            Some(_) => None,
+                            None => Some((key, channel)),
+                        },
+                    )
                     .collect::<HashMap<Cid, ChannelMetadata>>();
 
                 unvisited = diff.clone();

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The Cid of this object should be publicly available and trusted to be the latest version.
 /// Blockchains are best suited for this.
-#[derive(Deserialize, Serialize, Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
 pub struct ChannelMetadata {
     /* // Growth only counter.
     /// Increment every update.
@@ -24,4 +24,7 @@ pub struct ChannelMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follows: Option<IPLDLink>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agregation_channel: Option<String>,
 }

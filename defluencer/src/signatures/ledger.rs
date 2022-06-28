@@ -674,10 +674,12 @@ impl App for TestLedgerApp {
 }
 
 impl TestLedgerApp {
+    //https://github.com/LedgerHQ/rust-app
+
     pub fn sign_personal_message(&self, message: &[u8]) -> Result<k256::ecdsa::Signature, Error> {
         let response = self.sign(message)?;
 
-        //strip 0x00 padding
+        //strip 0x00 right padding
         let mut len = 0;
         for item in response.data().iter().rev() {
             if *item == 0 {
@@ -687,7 +689,7 @@ impl TestLedgerApp {
             }
         }
 
-        let data = &response.data()[0..(73 - len)];
+        let data = &response.data()[0..(73 - len)]; // DER encoded signatures are max 73 bytes
 
         let signature = k256::ecdsa::Signature::from_der(data)?;
 
@@ -695,8 +697,6 @@ impl TestLedgerApp {
     }
 
     fn sign(&self, message: &[u8]) -> Result<APDUAnswer<Vec<u8>>, LedgerAppError<LedgerHIDError>> {
-        // https://github.com/LedgerHQ/app-ethereum/blob/master/doc/ethapp.asc#sign-eth-personal-message
-
         if message.is_empty() {
             return Err(LedgerAppError::InvalidEmptyMessage);
         }
@@ -826,7 +826,9 @@ mod tests {
         );
 
         let signature = {
-            let mut sig = app.sign_personal_message(&SIGNING_INPUT).unwrap();
+            let hash = Sha256::new_with_prefix(SIGNING_INPUT).finalize();
+
+            let mut sig = app.sign_personal_message(&hash).unwrap();
 
             if let Some(signature) = sig.normalize_s() {
                 sig = signature;
