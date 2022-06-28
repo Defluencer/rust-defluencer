@@ -90,7 +90,6 @@ impl super::Signer for EthereumSigner {
         Error,
     > {
         use signature::Signature;
-        use signature::Verifier;
 
         let sig = self
             .web3
@@ -110,7 +109,7 @@ impl super::Signer for EthereumSigner {
 
         let signature = k256::ecdsa::Signature::from(signature);
 
-        Ok((recovered_key, signature, HashAlgorithm::Keccak256))
+        Ok((recovered_key, signature, HashAlgorithm::EthereumLedgerApp))
     }
 }
 
