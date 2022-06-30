@@ -100,7 +100,7 @@ pub struct Create {
     #[clap(short, long)]
     path: Option<PathBuf>,
 
-    /// Create Channel?
+    /// Create Channel Too?
     #[clap(short, long)]
     channel: bool,
 }

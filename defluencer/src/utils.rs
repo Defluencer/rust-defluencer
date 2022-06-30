@@ -21,6 +21,7 @@ use prost::Message;
 
 #[cfg(target_arch = "wasm32")]
 pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, Error> {
+    use bytes::Bytes;
     use futures::AsyncReadExt;
     use wasm_bindgen::JsCast;
 
@@ -32,18 +33,25 @@ pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, E
 
     let size = file.size() as usize;
 
-    // TODO disallow image that are too big.
-
     let readable_stream = wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
-
     let mut async_read = readable_stream.into_async_read();
 
-    let mut bytes = Vec::with_capacity(size);
-    async_read.read_to_end(&mut bytes).await?;
+    let mut vec = Vec::with_capacity(size);
+    async_read.read_to_end(&mut vec).await?;
 
-    let mime_typed = MimeTyped {
-        mime_type,
-        data: either::Either::Right(bytes),
+    let mime_typed = if size > 1_000_000 {
+        let bytes = Bytes::from(vec);
+        let cid = ipfs.add(bytes).await?;
+
+        MimeTyped {
+            mime_type,
+            data: either::Either::Left(cid.into()),
+        }
+    } else {
+        MimeTyped {
+            mime_type,
+            data: either::Either::Right(vec),
+        }
     };
 
     let cid = ipfs.dag_put(&mime_typed, Codec::default()).await?;
@@ -53,6 +61,8 @@ pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, E
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid, Error> {
+    use tokio::{fs::File, io::AsyncReadExt};
+
     let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
         Some(mime) => mime.to_owned(),
         None => return Err(Error::Image),
@@ -62,13 +72,25 @@ pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid
         return Err(Error::Image);
     };
 
-    let file = tokio::fs::File::open(path).await?;
-    let stream = tokio_util::io::ReaderStream::new(file);
-    let cid = ipfs.add(stream).await?;
+    let mut file = File::open(path).await?;
+    let meta = file.metadata().await?;
 
-    let mime_typed = MimeTyped {
-        mime_type,
-        data: either::Either::Left(cid.into()),
+    let mime_typed = if meta.len() > 1_000_000 {
+        let stream = tokio_util::io::ReaderStream::new(file);
+        let cid = ipfs.add(stream).await?;
+
+        MimeTyped {
+            mime_type,
+            data: either::Either::Left(cid.into()),
+        }
+    } else {
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await?;
+
+        MimeTyped {
+            mime_type,
+            data: either::Either::Right(buffer),
+        }
     };
 
     let cid = ipfs.dag_put(&mime_typed, Codec::default()).await?;

@@ -16,7 +16,7 @@ use ipfs_api::IpfsService;
 
 use clap::Parser;
 
-use linked_data::{channel::ChannelMetadata, identity::Identity, types::PeerId};
+use linked_data::{identity::Identity, types::PeerId};
 
 #[derive(Debug, Parser)]
 pub struct ChannelCLI {
@@ -70,7 +70,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
             let signer = BitcoinSigner::new(app, cli.account);
 
             match cli.cmd {
-                Command::Create => create_channel(cli.identity).await,
+                Command::Create => create_channel(cli.identity, signer).await,
                 Command::Content(args) => match args.cmd {
                     ContentCommand::Add(args) => add_content(cli.identity, args, signer).await,
                     ContentCommand::Remove(args) => {
@@ -99,7 +99,7 @@ pub async fn channel_cli(cli: ChannelCLI) {
             let signer = EthereumSigner::new(app, cli.account);
 
             match cli.cmd {
-                Command::Create => create_channel(cli.identity).await,
+                Command::Create => create_channel(cli.identity, signer).await,
                 Command::Content(args) => match args.cmd {
                     ContentCommand::Add(args) => add_content(cli.identity, args, signer).await,
                     ContentCommand::Remove(args) => {
@@ -132,19 +132,12 @@ pub async fn channel_cli(cli: ChannelCLI) {
 /* #[derive(Debug, Parser)]
 pub struct Create {} */
 
-async fn create_channel(identity: Cid) -> Result<(), Error> {
+async fn create_channel(identity: Cid, signer: impl Signer + Clone) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let metadata = ChannelMetadata {
-        identity: identity.into(),
-        ..Default::default()
-    };
+    println!("Confirm Signature On Your Hardware Wallet...");
 
-    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
-
-    let key = identity.display_name.to_snake_case();
-
-    ipfs.ipns_put(key, true, &metadata).await?;
+    Channel::create(ipfs, identity, signer).await?;
 
     println!("✅ Created Channel");
 

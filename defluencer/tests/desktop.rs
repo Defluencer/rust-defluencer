@@ -177,12 +177,7 @@ mod tests {
         );
     }
 
-    //eth
-    // identity bafyreib6i3k6l6hd76n5vqxhjo7o7ydxof63rvpt5voikwgks6bbq4b4dq
-    // channel bafzaajiiaijccavtasabjomtp25agq274vd2aqkaydixfopjawpj5anncnaccw3cj4
-    // post bagcqcerasgsjnyyzw75synr4ur3qjgt2r73rhxt4p52ulgv6wzf6slezhgra
-
     //btc
-    //channel bafzaajiiaijcca4hunx6ozn5i223eabdahovnzwtv3ciuoxr5rj5xdzbpcya4gqww4
-    // identity bafyreiexgf7atvbjaa55mnzr4eiac3n3ynrl6tfafmq6kvhc75sbbjcmbm
+    // identity bafyreickdtfrlbpowjxj3ovqnr6ys2jaqquwai2osmuhasxd6y527irf6m
+    //channel bafzaajaiaejcbisrjbhnlu2sbp7q5spgi4caua7j52bwpeszw5fpxxnq3nyrhmuk
 }

@@ -11,6 +11,8 @@ use either::Either;
 #[derive(Serialize, Deserialize)]
 pub struct MimeTyped {
     pub mime_type: String,
+
+    #[serde(with = "either::serde_untagged")]
     pub data: Either<IPLDLink, Vec<u8>>,
 }
 

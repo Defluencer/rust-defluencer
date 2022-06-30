@@ -43,17 +43,24 @@ where
     }
 
     /// Create a new channel.
-    pub async fn create(ipfs: IpfsService, identity: Cid) -> Result<(), Error> {
+    pub async fn create(ipfs: IpfsService, identity: Cid, signer: T) -> Result<(), Error> {
         let metadata = ChannelMetadata {
             identity: identity.into(),
             ..Default::default()
         };
 
-        let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+        let meta_cid = ipfs.dag_put(&metadata, Codec::default()).await?;
 
+        let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
         let key = identity.display_name.to_snake_case();
 
-        ipfs.ipns_put(key, true, &metadata).await?;
+        let channel = Channel::new(ipfs.clone(), key.clone(), signer);
+
+        let cid = channel.create_signed_link(meta_cid).await?;
+
+        ipfs.pin_add(cid, true).await?;
+
+        ipfs.name_publish(cid, key).await?;
 
         Ok(())
     }
@@ -66,7 +73,7 @@ where
         avatar: Option<std::path::PathBuf>,
         channel_ipns: Option<Cid>,
     ) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut identity = self
             .ipfs
@@ -89,7 +96,7 @@ where
 
         channel.identity = cid.into();
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(cid)
     }
@@ -102,7 +109,7 @@ where
         avatar: Option<web_sys::File>,
         channel_ipns: Option<Cid>,
     ) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut identity = self
             .ipfs
@@ -125,25 +132,25 @@ where
 
         channel.identity = cid.into();
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(cid)
     }
 
     /// Replace your current Identity.
     pub async fn replace_identity(&self, identity: IPLDLink) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         channel.identity = identity;
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(identity.link)
     }
 
     /// Follow a channel.
     pub async fn follow(&self, addr: IPNSAddress) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut follows = match channel.follows {
             Some(ipld) => self.ipfs.dag_get::<&str, Follows>(ipld.link, None).await?,
@@ -158,14 +165,14 @@ where
 
         channel.follows = Some(cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(cid)
     }
 
     /// Unfollow a channel.
     pub async fn unfollow(&self, addr: IPNSAddress) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut follows = match channel.follows {
             Some(ipld) => self.ipfs.dag_get::<&str, Follows>(ipld.link, None).await?,
@@ -180,18 +187,18 @@ where
 
         channel.follows = Some(cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(cid)
     }
 
     /// Replace your follow list.
     pub async fn replace_follow_list(&self, follows: IPLDLink) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         channel.follows = Some(follows);
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(follows.link)
     }
@@ -204,7 +211,7 @@ where
         chat_topic: Option<String>,
         archiving: Option<bool>,
     ) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -235,25 +242,25 @@ where
 
         channel.live = Some(cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(cid)
     }
 
     /// Replace your live chat & streaming settings.
     pub async fn replace_live_settings(&self, settings: IPLDLink) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         channel.live = Some(settings);
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(settings.link)
     }
 
     /// Add a user to your ban list.
     pub async fn ban_user(&self, user: Address) -> Result<Option<Cid>, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -279,14 +286,14 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(Some(bans_cid))
     }
 
     /// Remove a user from your ban list.
     pub async fn unban_user(&self, user: &Address) -> Result<Option<Cid>, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -312,14 +319,14 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(Some(bans_cid))
     }
 
     /// Replace your ban list.
     pub async fn replace_ban_list(&self, bans: IPLDLink) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -335,14 +342,14 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(bans.link)
     }
 
     /// Add a moderator to your list.
     pub async fn add_moderator(&self, user: Address) -> Result<Option<Cid>, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -368,14 +375,14 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(Some(mods_cid))
     }
 
     /// Remove a moderator from your list.
     pub async fn remove_moderator(&self, user: &Address) -> Result<Option<Cid>, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -401,14 +408,14 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(Some(mods_cid))
     }
 
     /// Replace your moderator list.
     pub async fn replace_moderator_list(&self, moderators: IPLDLink) -> Result<Cid, Error> {
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut live = match channel.live {
             Some(ipld) => {
@@ -424,7 +431,7 @@ where
         let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
         channel.live = Some(live_cid.into());
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
         Ok(moderators.link)
     }
@@ -435,7 +442,7 @@ where
         let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
         let datetime = Utc.timestamp(media.user_timestamp(), 0);
 
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         datetime::insert(
             &self.ipfs,
@@ -445,19 +452,21 @@ where
         )
         .await?;
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(root_cid, &channel).await?;
+
+        Ok(content_cid)
     }
 
     /// Remove a specific media.
     /// Also remove associated comments.
-    pub async fn remove_content(&self, content_cid: Cid) -> Result<Cid, Error> {
+    pub async fn remove_content(&self, content_cid: Cid) -> Result<Option<Cid>, Error> {
         let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
         let datetime = Utc.timestamp(media.user_timestamp(), 0);
 
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         if channel.content_index.is_none() {
-            return Ok(channel_cid);
+            return Ok(None);
         };
 
         datetime::remove(
@@ -473,15 +482,17 @@ where
             hamt::remove(&self.ipfs, index, content_cid).await?;
         }
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(root_cid, &channel).await?;
+
+        Ok(Some(content_cid))
     }
 
     /// Add a new comment on the specified media.
-    pub async fn add_comment(&self, comment_cid: Cid) -> Result<Cid, Error> {
+    pub async fn add_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
         let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
         let media_cid = comment.origin;
 
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut index = match channel.comment_index {
             Some(index) => index,
@@ -507,24 +518,26 @@ where
 
         channel.comment_index = Some(index);
 
-        self.update_metadata(channel_cid, &channel).await
+        self.update_metadata(root_cid, &channel).await?;
+
+        Ok(Some(comment_cid))
     }
 
     /// Remove a specific comment.
-    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<(), Error> {
+    pub async fn remove_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
         let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
         let media_cid = comment.origin;
 
-        let (channel_cid, mut channel) = self.get_metadata().await?;
+        let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut index = match channel.comment_index {
             Some(it) => it,
-            _ => return Ok(()),
+            _ => return Ok(None),
         };
 
         let mut comments = match hamt::get(&self.ipfs, index, media_cid).await? {
             Some(comments) => comments.into(),
-            None => return Ok(()),
+            None => return Ok(None),
         };
 
         hamt::remove(&self.ipfs, &mut comments, comment_cid).await?;
@@ -533,9 +546,9 @@ where
 
         channel.comment_index = Some(index);
 
-        self.update_metadata(channel_cid, &channel).await?;
+        self.update_metadata(root_cid, &channel).await?;
 
-        Ok(())
+        Ok(Some(comment_cid))
     }
 
     /* pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
@@ -546,8 +559,14 @@ where
     } */
 
     pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
-        let response = self.ipfs.ipns_get(self.key.clone()).await?;
-        Ok(response)
+        let (cid, signed_link): (Cid, SignedLink) = self.ipfs.ipns_get(self.key.clone()).await?;
+
+        let meta = self
+            .ipfs
+            .dag_get(signed_link.link.link, Option::<&str>::None)
+            .await?;
+
+        Ok((cid, meta))
     }
 
     /* async fn update_metadata(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
