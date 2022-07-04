@@ -14,12 +14,12 @@ type Comments map [&Comment:&Comment] using ShardedMap # Keys are hashes of Cids
 type CommentIndex map [&Media:&Comments] using ShardedMap # Keys are hashes of Cids
 
 type ChannelMetadata struct {
-    seq Int # Growth only counter. Increment every update.
     identity &Identity
     content_index optional &DateTime
     comment_index optional &CommentIndex
     live optional &LiveSettings
     folows optional &Follows
+    agregation_channel optional String # Name of the pubsub channel used.
 }
 ```
 

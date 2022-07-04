@@ -9,7 +9,6 @@ For more info on the commands available to you.
 ## How To
 
 ### Channel Creation
-- Precompute a channel address. Command: ```defluencer node address --help```
 - Create a new user identity. Command: ```defluencer user create --help```
 - Create a new channel. Command: ```defluencer channel create --help```
 
