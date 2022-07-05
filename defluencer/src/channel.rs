@@ -460,7 +460,7 @@ where
     /// Remove a specific media.
     /// Also remove associated comments.
     pub async fn remove_content(&self, content_cid: Cid) -> Result<Option<Cid>, Error> {
-        let media: Media = self.ipfs.dag_get(content_cid, Option::<&str>::None).await?;
+        let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
         let datetime = Utc.timestamp(media.user_timestamp(), 0);
 
         let (root_cid, mut channel) = self.get_metadata().await?;
@@ -489,7 +489,7 @@ where
 
     /// Add a new comment on the specified media.
     pub async fn add_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
-        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
+        let comment: Comment = self.ipfs.dag_get(comment_cid, Some("/link")).await?;
         let media_cid = comment.origin;
 
         let (root_cid, mut channel) = self.get_metadata().await?;
@@ -525,7 +525,7 @@ where
 
     /// Remove a specific comment.
     pub async fn remove_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
-        let comment: Comment = self.ipfs.dag_get(comment_cid, Option::<&str>::None).await?;
+        let comment: Comment = self.ipfs.dag_get(comment_cid, Some("/link")).await?;
         let media_cid = comment.origin;
 
         let (root_cid, mut channel) = self.get_metadata().await?;

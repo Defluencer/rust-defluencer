@@ -165,7 +165,7 @@ enum Media {
 
 #[derive(Debug, Parser)]
 pub struct MicroBlog {
-    /// The micro post content.
+    /// The micro post text content.
     #[clap(short, long)]
     content: String,
 }
@@ -178,6 +178,8 @@ async fn micro_blog(
     let ipfs = IpfsService::default();
 
     let user = User::new(ipfs, signer, identity);
+
+    println!("Confirm Signature On Your Hardware Wallet...");
 
     let cid = user.create_micro_blog_post(args.content).await?;
 
@@ -212,6 +214,8 @@ async fn blog(identity: Cid, args: Blog, signer: impl Signer + Clone) -> Result<
 
     let user = User::new(ipfs, signer, identity);
 
+    println!("Confirm Signature On Your Hardware Wallet...");
+
     let cid = user.create_blog_post(title, &image, &content).await?;
 
     println!("✅ Created Blog Post\nCID: {}", cid);
@@ -245,6 +249,8 @@ async fn video(identity: Cid, args: Video, signer: impl Signer + Clone) -> Resul
 
     let user = User::new(ipfs, signer, identity);
 
+    println!("Confirm Signature On Your Hardware Wallet...");
+
     let cid = user.create_video_post(title, video, &image).await?;
 
     println!("✅ Created Video\nCID: {}", cid);
@@ -254,7 +260,7 @@ async fn video(identity: Cid, args: Video, signer: impl Signer + Clone) -> Resul
 
 #[derive(Debug, Parser)]
 pub struct Comment {
-    /// Comment origin AKA the media being commented on.
+    /// Origin CID AKA the media being commented on.
     #[clap(long)]
     origin: Cid,
 
@@ -267,6 +273,8 @@ async fn comment(identity: Cid, args: Comment, signer: impl Signer + Clone) -> R
     let ipfs = IpfsService::default();
 
     let user = User::new(ipfs, signer, identity);
+
+    println!("Confirm Signature On Your Hardware Wallet...");
 
     let cid = user.create_comment(args.origin, args.content).await?;
 

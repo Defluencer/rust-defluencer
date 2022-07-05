@@ -38,7 +38,7 @@ enum Command {
     /// Stream all content & comments from a channel.
     Stream(Stream),
 
-    /// Crawl the social web.
+    /// Crawl the social web, one degree of separation at a time.
     Webcrawl(WebCrawl),
 }
 
@@ -149,7 +149,7 @@ async fn subscribe(args: Subscribe) -> Result<(), Error> {
     let control = tokio::signal::ctrl_c();
     pin_mut!(control);
 
-    println!("Press CRTL-C to exit...");
+    println!("Receiver Ready!\nPress CRTL-C to exit...");
 
     loop {
         tokio::select! {
@@ -190,7 +190,7 @@ async fn agregate(args: Agregate) -> Result<(), Error> {
     let control = tokio::signal::ctrl_c();
     pin_mut!(control);
 
-    println!("Press CRTL-C to exit...");
+    println!("Receiver Ready!\nPress CRTL-C to exit...");
 
     loop {
         tokio::select! {

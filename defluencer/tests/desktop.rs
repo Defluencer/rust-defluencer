@@ -179,5 +179,9 @@ mod tests {
 
     //btc
     // identity bafyreickdtfrlbpowjxj3ovqnr6ys2jaqquwai2osmuhasxd6y527irf6m
-    //channel bafzaajaiaejcbisrjbhnlu2sbp7q5spgi4caua7j52bwpeszw5fpxxnq3nyrhmuk
+    // channel bafzaajaiaejcbisrjbhnlu2sbp7q5spgi4caua7j52bwpeszw5fpxxnq3nyrhmuk
+    // microblog bafyreiawmuaooj2qevyns2ni3yoa7iszngppcug3u6udr2oarlkklxcjay
+    // comment bafyreib3zu6mdx4fysfu3e5byzwnyglylwo5i5lee7lf6zvr7ifr55bboa
+
+    // root bafyreihkvkha7spbsrbkl4eyx6hjbpaxreutdsll6aisce53m5at2rnry4
 }
