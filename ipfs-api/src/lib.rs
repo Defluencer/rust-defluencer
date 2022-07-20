@@ -45,12 +45,13 @@ impl Default for IpfsService {
 }
 
 impl IpfsService {
-    pub fn new(url: Url) -> Self {
-        let base_url = Arc::from(url);
+    pub fn new(url: &str) -> Result<Self, Error> {
+        let base_url = Url::parse(url)?;
+        let base_url = Arc::from(base_url);
 
         let client = Client::new();
 
-        Self { client, base_url }
+        Ok(Self { client, base_url })
     }
 
     #[cfg(target_arch = "wasm32")]
