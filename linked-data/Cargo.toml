@@ -11,8 +11,8 @@ either = { version = "1", default-features = false, features = ["serde"] }
 cid = { version = "0.8", default-features = false, features = ["std"] }
 prost = { version = "0.10", default-features = false, features = ["prost-derive"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = { version = "1", default-features = false, features = [] }
-serde_with = { version = "1", default-features = false, features = ["macros"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+serde_with = { version = "2", default-features = false, features = ["macros"] }
 strum = { version = "0.24", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
