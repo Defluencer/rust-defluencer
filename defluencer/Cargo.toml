@@ -25,6 +25,7 @@ k256 = { version = "0.11", default-features = false, features = ["std", "ecdsa",
 linked-data = { path = "../linked-data" }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = [] }
+multihash = { version = "0.16", default-features = false, features = ["std", "multihash-impl"] }
 pkcs8 = { version = "0.9", default-features = false, features = ["std", "alloc", "pem"] }
 prost = { version = "0.10", default-features = false, features = ["std", "prost-derive"] }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
@@ -39,9 +40,9 @@ thiserror = { version = "1", default-features = false, features = [] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", default-features = false, features = ["fs"]}
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
-ledger-zondax-generic = "0.9"
-ledger-transport-hid = { version = "0.9", git = "https://github.com/SionoiS/ledger-rs", branch = "windows" }
-ledger-transport = "0.9"
+ledger-zondax-generic = "0.10"
+ledger-transport-hid = "0.10"
+ledger-transport = "0.10"
 rs_merkle = { version = "1", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -55,7 +56,6 @@ web-sys = { version = "0.3", features = ['console']}
 tokio = { version = "1", features = ['full']}
 rand = "0.8"
 rand_xoshiro = "0.6"
-multihash = "0.16"
 hex = "0.4"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

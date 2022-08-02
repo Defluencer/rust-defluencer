@@ -15,7 +15,9 @@ use linked_data::{
 
 use either::Either;
 
-use cid::{multihash::Multihash, Cid};
+use cid::Cid;
+
+use multihash::Multihash;
 
 use prost::Message;
 
