@@ -4,6 +4,10 @@ use crate::indexing::hamt;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[cfg(target_arch = "wasm32")]
+    #[error("JS: {0}")]
+    JsError(js_sys::JsString),
+
     #[cfg(not(target_arch = "wasm32"))]
     #[error("Ledger: {0}")]
     Ledger(#[from] ledger_zondax_generic::LedgerAppError<ledger_transport_hid::LedgerHIDError>),

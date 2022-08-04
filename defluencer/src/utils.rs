@@ -24,7 +24,7 @@ use prost::Message;
 #[cfg(target_arch = "wasm32")]
 pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, Error> {
     use bytes::Bytes;
-    use futures::AsyncReadExt;
+    use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen::JsCast;
 
     let mime_type = file.type_();
@@ -35,11 +35,22 @@ pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, E
 
     let size = file.size() as usize;
 
-    let readable_stream = wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
+    let js_value = match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+        Ok(js_value) => js_value,
+        Err(js_value) => {
+            let error: js_sys::Error = js_value.unchecked_into();
+            return Err(Error::JsError(error.to_string()));
+        }
+    };
+    let array_buffer: ArrayBuffer = js_value.unchecked_into();
+    let uint8_array: Uint8Array = Uint8Array::new(&array_buffer);
+    let vec = uint8_array.to_vec();
+
+    /* let readable_stream = wasm_streams::ReadableStream::from_raw(file.stream().unchecked_into());
     let mut async_read = readable_stream.into_async_read();
 
     let mut vec = Vec::with_capacity(size);
-    async_read.read_to_end(&mut vec).await?;
+    async_read.read_to_end(&mut vec).await?; */
 
     let mime_typed = if size > 1_000_000 {
         let bytes = Bytes::from(vec);
