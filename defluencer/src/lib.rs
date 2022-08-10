@@ -7,7 +7,7 @@ pub mod signatures;
 pub mod user;
 pub mod utils;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cid::Cid;
 
@@ -269,32 +269,123 @@ impl Defluencer {
         }) */
     }
 
-    /// Returns all followees channels on the social web,
-    /// one more degree of separation each iteration without duplicates.
+    /// Returns all followees channels on the social web without duplicates.
+    ///
+    /// WARNING! This search will crawl the entire web. Limiting the number of result is best.
     pub fn streaming_web_crawl(
         &self,
-        addr: IPNSAddress,
-    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
-        stream::once(async move {
-            let channel_cid = self.ipfs.name_resolve(addr.into()).await?;
+        addresses: impl Iterator<Item = IPNSAddress>,
+    ) -> impl Stream<Item = Result<(Cid, ChannelMetadata), Error>> + '_ {
+        let set = HashSet::new();
 
-            let channel_meta = self
-                .ipfs
-                .dag_get::<&str, ChannelMetadata>(channel_cid, None)
-                .await?;
+        let resolve_pool = FuturesUnordered::<_>::new();
+        let metadata_pool = FuturesUnordered::<_>::new();
+        let follows_pool = FuturesUnordered::<_>::new();
+
+        for addr in addresses {
+            resolve_pool.push(self.ipfs.name_resolve(addr.into()));
+        }
+
+        stream::try_unfold(
+            (set, resolve_pool, metadata_pool, follows_pool),
+            move |(mut set, mut resolve_pool, mut metadata_pool, mut follows_pool)| async move {
+                futures::select! {
+                    result = resolve_pool.try_next() => {
+                        let cid = match result? {
+                            Some(cid) => cid,
+                            None => return Result::<_, Error>::Ok(None),
+                        };
+
+                        if !set.insert(cid) {
+                            return Ok(None);
+                        }
+
+                        //TODO remove link from path when IPNS records are signed with HW
+                        metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, Some("/link")).await) });
+                    },
+                    option = metadata_pool.next() => {
+                         let (cid, metadata) = match option {
+                            Some(mt) => mt,
+                            None => return Ok(None),
+                        };
+
+                        let metadata = metadata?;
+
+                        if let Some(ipld) = metadata.follows {
+                            follows_pool.push(self.ipfs.dag_get::<&str, Follows>(ipld.link, None));
+                        }
+
+                        let next_item = (cid, metadata.clone());
+
+                        return Ok(Some((next_item,
+                            (set, resolve_pool, metadata_pool, follows_pool),
+                        )));
+                    },
+                    result = follows_pool.try_next() => {
+                         let follows = match result? {
+                            Some(fl) => fl,
+                            None => return Ok(None),
+                        };
+
+                        for addr in follows.followees {
+                            resolve_pool.push(self.ipfs.name_resolve(addr.into()));
+                        }
+                    },
+                }
+
+                Ok(None)
+            },
+        )
+
+        /* stream::once(async move {
+            let channel_cid = self.ipfs.name_resolve(addr.into()).await?;
 
             let id = self
                 .ipfs
-                .dag_get::<&str, Identity>(channel_meta.identity.link, None)
+                .dag_get::<&str, Identity>(channel_cid, Some("/link/identity"))
                 .await?;
 
             Result::<_, Error>::Ok(id)
         })
         .map_ok(|identity| self.web_crawl_step(identity))
-        .try_flatten()
+        .try_flatten() */
     }
 
-    fn web_crawl_step(
+    /* fn web_crawl_step(
+        &self,
+        channels: HashMap<Cid, ChannelMetadata>,
+    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
+        stream::try_unfold(
+            (channels.clone(), channels),
+            move |(mut visited, mut unvisited)| async move {
+                let map = if unvisited.len() > 0 {
+                    let identities = self.followees_identity(unvisited.values()).await;
+
+                    self.channels_metadata(identities.values()).await
+                } else {
+                    return Result::<_, Error>::Ok(None);
+                };
+
+                let diff = map
+                    .into_iter()
+                    .filter_map(|(key, channel)| match visited.contains_key(&key) {
+                        true => None,
+                        false => {
+                            visited.insert(key, channel.clone());
+
+                            Some((key, channel))
+                        }
+                    })
+                    .collect::<HashMap<Cid, ChannelMetadata>>();
+
+                unvisited = diff.clone();
+
+                Ok(Some((diff, (visited, unvisited))))
+            },
+        )
+    } */
+
+    /* fn web_crawl_step(
         &self,
         identity: Identity,
     ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
@@ -326,7 +417,7 @@ impl Defluencer {
                 Ok(Some((diff, (identity, visited, unvisited))))
             },
         )
-    }
+    } */
 
     /// Return all the cids and channels of all the identities provided.
     pub async fn channels_metadata(
@@ -510,7 +601,7 @@ impl Defluencer {
         .map_ok(|ipld| ipld.link)
     }
 
-    /// Lazily stream all the comments for some content on the channel
+    /// Stream all the comments for some content on the channel.
     pub fn stream_comments(
         &self,
         comment_index: IPLDLink,
