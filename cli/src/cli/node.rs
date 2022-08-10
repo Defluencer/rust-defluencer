@@ -8,7 +8,7 @@ use futures_util::{future::AbortHandle, pin_mut, FutureExt, StreamExt};
 
 use ipfs_api::IpfsService;
 
-use linked_data::channel::ChannelMetadata;
+use linked_data::{channel::ChannelMetadata, types::IPNSAddress};
 
 #[derive(Debug, Parser)]
 pub struct NodeCLI {
@@ -312,13 +312,13 @@ pub struct WebCrawl {
 async fn web_crawl(args: WebCrawl) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
+    let ipns: IPNSAddress = args.address.into();
+
     let mut stream = defluencer
-        .streaming_web_crawl(args.address.into())
+        .streaming_web_crawl(std::iter::once(ipns))
         .boxed_local();
 
     let mut control = tokio::signal::ctrl_c().boxed_local();
-
-    let mut degree = 1;
 
     println!("Crawling Start\nPress CRTL-C to exit...");
 
@@ -333,10 +333,8 @@ async fn web_crawl(args: WebCrawl) -> Result<(), Error> {
 
             option = stream.next() => match option {
                 Some(result) => match result {
-                    Ok(map) => {
-                        println!("Degree: {}\nChannels Metadata: {:#?}", degree, map.keys());
-
-                        degree += 1;
+                    Ok((cid, _channel)) => {
+                        println!("Channel Metadata CID: {}",  cid);
                     },
                     Err(_) => continue,
 
