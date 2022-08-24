@@ -97,7 +97,13 @@ impl super::Signer for EthereumSigner {
             .sign(signing_input.into(), self.addr.into(), "")
             .await?;
 
-        let signature = k256::ecdsa::recoverable::Signature::from_bytes(&sig.to_fixed_bytes())?;
+        // The k256 crate expect 0 OR 1 as recovery ID, instead Metamask return 27 OR 28
+        let mut bytes = sig.to_fixed_bytes();
+        if bytes[64] == 27 || bytes[64] == 28 {
+            bytes[64] -= 27;
+        }
+
+        let signature = k256::ecdsa::recoverable::Signature::from_bytes(&bytes)?;
 
         let mut eth_message =
             format!("\x19Ethereum Signed Message:\n{}", signing_input.len()).into_bytes();
@@ -113,6 +119,7 @@ impl super::Signer for EthereumSigner {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
     use super::*;
