@@ -34,6 +34,15 @@ where
     signer: T,
 }
 
+impl<T> PartialEq for Channel<T>
+where
+    T: Signer + Clone,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
 impl<T> Channel<T>
 where
     T: Signer + Clone,

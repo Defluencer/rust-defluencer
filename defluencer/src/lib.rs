@@ -1,5 +1,4 @@
 pub mod channel;
-pub mod content_cache;
 pub mod errors;
 pub mod indexing;
 pub mod moderation_cache;

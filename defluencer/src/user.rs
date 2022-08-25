@@ -34,6 +34,15 @@ where
     signer: T,
 }
 
+impl<T> PartialEq for User<T>
+where
+    T: Signer + Clone,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity
+    }
+}
+
 impl<T> User<T>
 where
     T: Signer + Clone,
