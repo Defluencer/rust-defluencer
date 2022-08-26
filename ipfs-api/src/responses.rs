@@ -107,9 +107,11 @@ pub struct KeyListResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct KeyPair {
+    /// Address
     #[serde(rename = "Id")]
     pub id: String,
 
+    /// Key Name
     #[serde(rename = "Name")]
     pub name: String,
 }
