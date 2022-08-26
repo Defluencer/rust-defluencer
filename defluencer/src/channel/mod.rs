@@ -44,6 +44,15 @@ where
     updater: T,
 }
 
+impl<T> PartialEq for Channel<T>
+where
+    T: IpnsUpdater + Clone,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr
+    }
+}
+
 impl Channel<LocalUpdater> {
     /// Create a new channel with your IPFS node local keys.
     ///
