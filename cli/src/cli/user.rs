@@ -58,7 +58,13 @@ pub async fn user_cli(cli: UserCLI) {
 
             let signer = BitcoinSigner::new(app, cli.account);
 
-            let addr = signer.get_public_address()?;
+            let addr = match signer.get_public_address() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("❗ Wallet: {:#?}", e);
+                    return;
+                }
+            };
 
             match cli.cmd {
                 Command::Create(args) => create_user(args, addr).await,
@@ -75,7 +81,13 @@ pub async fn user_cli(cli: UserCLI) {
 
             let signer = EthereumSigner::new(app, cli.account);
 
-            let addr = signer.get_public_address()?;
+            let addr = match signer.get_public_address() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    eprintln!("❗ Wallet: {:#?}", e);
+                    return;
+                }
+            };
 
             match cli.cmd {
                 Command::Create(args) => create_user(args, addr).await,
