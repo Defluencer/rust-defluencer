@@ -391,6 +391,32 @@ impl IpfsService {
         Err(error.into())
     }
 
+    pub async fn key_rm<U>(&self, key: U) -> Result<KeyListResponse, Error>
+    where
+        U: Into<Cow<'static, str>>,
+    {
+        let url = self.base_url.join("key/rm")?;
+
+        let bytes = self
+            .client
+            .post(url)
+            .query(&[("arg", key.into())])
+            .send()
+            .await?
+            .bytes()
+            .await?;
+
+        //println!("{}", std::str::from_utf8(&bytes).unwrap());
+
+        if let Ok(res) = serde_json::from_slice::<KeyListResponse>(&bytes) {
+            return Ok(res);
+        }
+
+        let error = serde_json::from_slice::<IPFSError>(&bytes)?;
+
+        Err(error.into())
+    }
+
     /// Publish new IPNS record.
     pub async fn name_publish<U>(&self, cid: Cid, key: U) -> Result<NamePublishResponse, Error>
     where
