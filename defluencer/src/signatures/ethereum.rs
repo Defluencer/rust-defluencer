@@ -21,6 +21,12 @@ impl EthereumSigner {
     pub fn new(app: EthereumLedgerApp, account_index: u32) -> Self {
         Self { app, account_index }
     }
+
+    pub fn get_public_address(&self) -> Result<String, Error> {
+        let (_, addr) = self.app.get_public_address(self.account_index)?;
+
+        Ok(addr)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

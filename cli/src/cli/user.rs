@@ -58,8 +58,10 @@ pub async fn user_cli(cli: UserCLI) {
 
             let signer = BitcoinSigner::new(app, cli.account);
 
+            let addr = signer.get_public_address()?;
+
             match cli.cmd {
-                Command::Create(args) => create_user(args).await,
+                Command::Create(args) => create_user(args, addr).await,
                 Command::Content(content) => match content.cmd {
                     Media::Microblog(args) => micro_blog(content.creator, args, signer).await,
                     Media::Blog(args) => blog(content.creator, args, signer).await,
@@ -73,8 +75,10 @@ pub async fn user_cli(cli: UserCLI) {
 
             let signer = EthereumSigner::new(app, cli.account);
 
+            let addr = signer.get_public_address()?;
+
             match cli.cmd {
-                Command::Create(args) => create_user(args).await,
+                Command::Create(args) => create_user(args, addr).await,
                 Command::Content(content) => match content.cmd {
                     Media::Microblog(args) => micro_blog(content.creator, args, signer).await,
                     Media::Blog(args) => blog(content.creator, args, signer).await,
@@ -105,7 +109,7 @@ pub struct Create {
     channel: bool,
 }
 
-async fn create_user(args: Create) -> Result<(), Error> {
+async fn create_user(args: Create, addr: String) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
     let channel_ipns = if args.channel {
@@ -129,6 +133,7 @@ async fn create_user(args: Create) -> Result<(), Error> {
         display_name: args.display_name,
         avatar,
         channel_ipns,
+        addr: Some(addr),
     };
 
     let cid = ipfs.dag_put(&identity, Codec::default()).await?;

@@ -20,6 +20,12 @@ impl BitcoinSigner {
     pub fn new(app: BitcoinLedgerApp, account_index: u32) -> Self {
         Self { app, account_index }
     }
+
+    pub fn get_public_address(&self) -> Result<String, Error> {
+        let (_, addr) = self.app.get_extended_pubkey(self.account_index)?;
+
+        Ok(addr)
+    }
 }
 
 #[async_trait(?Send)]

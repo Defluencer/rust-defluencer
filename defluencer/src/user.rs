@@ -65,8 +65,9 @@ where
     ) -> Result<Self, Error> {
         let identity = Identity {
             display_name: user_name.into().into_owned(),
+            avatar: None,
             channel_ipns,
-            ..Default::default()
+            addr: None,
         };
 
         let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
