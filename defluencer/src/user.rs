@@ -10,6 +10,8 @@ use chrono::Utc;
 
 use cid::Cid;
 
+use elliptic_curve::sec1::ToEncodedPoint;
+
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
@@ -314,7 +316,7 @@ where
 
         let signed_link = SignedLink {
             link: cid.into(),
-            public_key: verif_key.to_bytes().to_vec(),
+            public_key: verif_key.to_encoded_point(false).as_bytes().to_vec(),
             hash_algo,
             signature: signature.to_der().as_bytes().to_vec(),
         };

@@ -2,6 +2,10 @@ use linked_data::types::IPLDLink;
 
 use serde::{Deserialize, Serialize};
 
+use sha2::Digest;
+
+use sha3::Keccak256;
+
 use signature::DigestVerifier;
 
 /// Verification is done by applying the hash algo to the CID's hash then verifiying with ECDSA.
@@ -10,7 +14,7 @@ pub struct SignedLink {
     /// The root hash of the DAG being signed.
     pub link: IPLDLink,
 
-    /// SEC1 encoded public key with point compression applied.
+    /// SEC1 encoded public key.
     pub public_key: Vec<u8>,
 
     /// What algo to apply before signing
@@ -27,6 +31,35 @@ pub enum HashAlgorithm {
 }
 
 impl SignedLink {
+    pub fn get_address(&self) -> String {
+        match self.hash_algo {
+            HashAlgorithm::BitcoinLedgerApp => self.get_eth_address(),
+            HashAlgorithm::EthereumLedgerApp => self.get_btc_address(),
+        }
+    }
+
+    fn get_btc_address(&self) -> String {
+        unimplemented!()
+    }
+
+    fn get_eth_address(&self) -> String {
+        let data = &self.public_key[1..]; // the first byte is a flag
+
+        let gen_array = Keccak256::new_with_prefix(data).finalize();
+
+        let mut address = [0u8; 20];
+        for (i, byte) in gen_array.into_iter().skip(12).enumerate() {
+            address[i] = byte;
+        }
+
+        let mut prefix = String::from("0x");
+        let addr = hex::encode(address);
+
+        prefix.push_str(&addr);
+
+        prefix
+    }
+
     pub fn verify(&self) -> bool {
         match self.hash_algo {
             HashAlgorithm::BitcoinLedgerApp => self.verify_btc(),
@@ -36,7 +69,7 @@ impl SignedLink {
 
     fn verify_btc(&self) -> bool {
         use bitcoin::{consensus::Encodable, VarInt};
-        use sha2::{Digest, Sha256};
+        use sha2::Sha256;
 
         let signing_input = self.link.link.hash().digest();
 
@@ -72,8 +105,6 @@ impl SignedLink {
     }
 
     fn verify_eth(&self) -> bool {
-        use sha3::{Digest, Keccak256};
-
         let signing_input = self.link.link.hash().digest();
 
         let verif_key = match k256::ecdsa::VerifyingKey::from_sec1_bytes(&self.public_key) {
