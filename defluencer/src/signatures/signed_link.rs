@@ -33,8 +33,8 @@ pub enum HashAlgorithm {
 impl SignedLink {
     pub fn get_address(&self) -> String {
         match self.hash_algo {
-            HashAlgorithm::BitcoinLedgerApp => self.get_eth_address(),
-            HashAlgorithm::EthereumLedgerApp => self.get_btc_address(),
+            HashAlgorithm::BitcoinLedgerApp => self.get_btc_address(),
+            HashAlgorithm::EthereumLedgerApp => self.get_eth_address(),
         }
     }
 
