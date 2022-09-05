@@ -57,6 +57,10 @@ where
         }
     }
 
+    pub fn get_identity(&self) -> Cid {
+        self.identity.link
+    }
+
     /// Create a new user.
     pub async fn create(
         &self,
