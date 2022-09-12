@@ -6,5 +6,4 @@ pub mod indexes;
 pub mod live;
 pub mod media;
 pub mod moderation;
-pub mod signature;
 pub mod types;

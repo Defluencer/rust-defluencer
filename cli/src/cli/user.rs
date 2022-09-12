@@ -5,13 +5,13 @@ use cid::Cid;
 use clap::Parser;
 
 use defluencer::{
-    errors::Error,
-    signatures::{
+    crypto::{
         bitcoin::BitcoinSigner,
         ethereum::EthereumSigner,
         ledger::{BitcoinLedgerApp, EthereumLedgerApp},
         Signer,
     },
+    errors::Error,
     user::User,
     utils::add_image,
 };

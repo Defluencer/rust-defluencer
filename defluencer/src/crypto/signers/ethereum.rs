@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 
-use crate::errors::Error;
-
 use sha3::{Digest, Keccak256};
 
-use super::signed_link::HashAlgorithm;
-
 #[cfg(not(target_arch = "wasm32"))]
-use super::ledger::EthereumLedgerApp;
+use crate::crypto::ledger::EthereumLedgerApp;
+
+use crate::{crypto::signed_link::HashAlgorithm, errors::Error};
+
+use super::Signer;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
@@ -31,7 +31,7 @@ impl EthereumSigner {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
-impl super::Signer for EthereumSigner {
+impl Signer for EthereumSigner {
     async fn sign(
         &self,
         signing_input: &[u8],
@@ -132,12 +132,10 @@ mod tests {
 
     use k256::ecdsa::VerifyingKey;
 
-    use sha2::Digest;
-
-    use signature::DigestVerifier;
-
     #[test]
     fn sign_test() {
+        use k256::ecdsa::signature::DigestVerifier;
+
         let app = EthereumLedgerApp::default();
         let account_index = 0;
 

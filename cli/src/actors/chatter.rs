@@ -1,6 +1,6 @@
 use crate::actors::archivist::Archive;
 
-use defluencer::{moderation_cache::ChatModerationCache, signatures::dag_jose::JsonWebSignature};
+use defluencer::{crypto::dag_jose::JsonWebSignature, moderation_cache::ChatModerationCache};
 
 use futures_util::{future::AbortHandle, StreamExt, TryStreamExt};
 

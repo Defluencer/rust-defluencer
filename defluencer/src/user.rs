@@ -1,16 +1,14 @@
 use std::borrow::Cow;
 
 use crate::{
+    crypto::{signed_link::SignedLink, signers::Signer},
     errors::Error,
-    signatures::{signed_link::SignedLink, Signer},
     utils::{add_image, add_markdown},
 };
 
 use chrono::Utc;
 
 use cid::Cid;
-
-use elliptic_curve::sec1::ToEncodedPoint;
 
 use ipfs_api::{responses::Codec, IpfsService};
 
@@ -316,6 +314,8 @@ where
     }
 
     async fn create_signed_link(&self, cid: Cid) -> Result<Cid, Error> {
+        use k256::elliptic_curve::sec1::ToEncodedPoint;
+
         let (verif_key, signature, hash_algo) = self.signer.sign(cid.hash().digest()).await?;
 
         let signed_link = SignedLink {
@@ -329,46 +329,4 @@ where
 
         Ok(cid)
     }
-
-    /* async fn create_dag_jose(&self, cid: Cid) -> Result<Cid, Error> {
-        let payload = cid.to_bytes();
-        let payload = Base::Base64Url.encode(payload);
-
-        let protected = Header {
-            algorithm: Some(AlgorithmType::ES256K),
-            json_web_key: None,
-        };
-
-        let protected = serde_json::to_vec(&protected)?;
-        let protected = Base::Base64Url.encode(protected);
-
-        let message = format!("{}.{}", payload, protected);
-
-        let (public_key, signature) = self.signer.sign(message.as_bytes()).await?;
-
-        // Lazy Hack: Deserialize then serialize as the other type
-        let jwk_string = public_key.to_jwk_string();
-        let jwk: JsonWebKey = serde_json::from_str(&jwk_string)?;
-
-        let header = Some(Header {
-            algorithm: None,
-            json_web_key: Some(jwk),
-        });
-
-        let signature = Base::Base64Url.encode(signature);
-
-        let json = RawJWS {
-            payload,
-            signatures: vec![RawSignature {
-                header,
-                protected,
-                signature,
-            }],
-            link: cid.into(), // ignored when serializing
-        };
-
-        let cid = self.ipfs.dag_put(&json, Codec::DagJose).await?;
-
-        Ok(cid)
-    } */
 }

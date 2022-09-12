@@ -5,9 +5,6 @@ use serde_with::{serde_as, DisplayFromStr};
 
 use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
 
-use prost::{self, Enumeration, Message};
-use strum::Display;
-
 /// Ethereum address
 pub type Address = [u8; 20];
 
@@ -111,57 +108,6 @@ impl Display for IPNSAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration, Display)]
-#[repr(i32)]
-pub enum ValidityType {
-    EOL = 0,
-}
-
-// https://github.com/ipfs/specs/blob/master/IPNS.md#ipns-record
-#[derive(Clone, PartialEq, Message)]
-pub struct IPNSRecord {
-    #[prost(bytes)]
-    pub value: Vec<u8>,
-
-    #[prost(bytes)]
-    pub signature: Vec<u8>,
-
-    #[prost(enumeration = "ValidityType")]
-    pub validity_type: i32,
-
-    #[prost(bytes)]
-    pub validity: Vec<u8>,
-
-    #[prost(uint64)]
-    pub sequence: u64,
-
-    #[prost(uint64)]
-    pub ttl: u64,
-
-    #[prost(bytes)]
-    pub public_key: Vec<u8>,
-}
-
-// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#key-types
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
-#[repr(i32)]
-pub enum KeyType {
-    RSA = 0,
-    Ed25519 = 1,
-    Secp256k1 = 2,
-    ECDSA = 3,
-}
-
-// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#keys
-#[derive(Clone, PartialEq, Message)]
-pub struct CryptoKey {
-    #[prost(enumeration = "KeyType")]
-    pub key_type: i32,
-
-    #[prost(bytes)]
-    pub data: Vec<u8>,
 }
 
 #[serde_as]

@@ -1,8 +1,8 @@
 pub mod channel;
+pub mod crypto;
 pub mod errors;
 pub mod indexing;
 pub mod moderation_cache;
-pub mod signatures;
 pub mod user;
 pub mod utils;
 
@@ -20,20 +20,17 @@ use futures::{
 
 use indexing::hamt;
 
+use ipns_records::IPNSRecord;
 use linked_data::{
     channel::ChannelMetadata,
     follows::Follows,
     identity::Identity,
     indexes::date_time::*,
     media::Media,
-    types::{IPLDLink, IPNSAddress, IPNSRecord},
+    types::{IPLDLink, IPNSAddress},
 };
 
 use ipfs_api::{responses::PubSubMessage, IpfsService};
-
-use prost::Message;
-
-use signatures::signed_link::SignedLink;
 
 #[derive(Default, Clone)]
 pub struct Defluencer {
@@ -92,180 +89,60 @@ impl Defluencer {
     }
 
     /// Subscribe to a channel.
-    /// The first value returned is the current root signature CID of the channel metadata.
     ///
-    /// Each update's crypto-signature is verified.
+    /// Return CID of the latest channel metadata.
     pub fn subscribe_channel_updates(
         &self,
-        channel_ipns: IPNSAddress,
+        channel_addr: IPNSAddress,
         regis: AbortRegistration,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
-        stream::once(async move {
-            let mut signed_link_cid = self.ipfs.name_resolve(channel_ipns.into()).await?;
+        let topic = channel_addr.to_pubsub_topic();
 
-            let topic = channel_ipns.to_pubsub_topic();
+        let stream = self
+            .ipfs
+            .pubsub_sub(topic.into_bytes(), regis)
+            .boxed_local();
 
-            let stream = self
-                .ipfs
-                .pubsub_sub(topic.into_bytes(), regis)
-                .err_into()
-                .try_filter_map(move |msg| async move {
-                    let PubSubMessage { from: _, data } = msg;
+        let latest_channel_cid = Cid::default();
+        let sequence = 0;
 
-                    let IPNSRecord {
-                        value,
-                        signature: _,
-                        validity_type: _,
-                        validity: _,
-                        sequence: _,
-                        ttl: _,
-                        public_key: _,
-                    } = IPNSRecord::decode(data.as_ref())?;
+        stream::try_unfold(
+            (sequence, latest_channel_cid, stream),
+            move |(mut sequence, mut latest_channel_cid, mut stream)| async move {
+                let msg = match stream.try_next().await? {
+                    Some(msg) => msg,
+                    None => return Result::<_, Error>::Ok(None),
+                };
 
-                    let cid_str = std::str::from_utf8(&value)?;
-                    let cid = Cid::try_from(cid_str)?;
+                let PubSubMessage { from: _, data } = msg;
 
-                    if cid == signed_link_cid {
-                        return Ok(None);
-                    }
+                let record = IPNSRecord::from_bytes(&data)?;
 
-                    let signed_link = self.ipfs.dag_get::<&str, SignedLink>(cid, None).await?;
+                let seq = record.get_sequence();
 
-                    if !signed_link.verify() {
-                        return Ok(None);
-                    }
+                if sequence >= seq {
+                    return Ok(None);
+                }
 
-                    // Even if the IPNS record were created from HW wallet, anyone could send a valid record.
-                    // Must check if the record is not only valid but sent by the channel owner.
+                let cid = record.get_value();
 
-                    let meta = self
-                        .ipfs
-                        .dag_get::<&str, ChannelMetadata>(signed_link.link.link, None)
-                        .await?;
+                if latest_channel_cid == cid {
+                    return Ok(None);
+                }
 
-                    let identity = self
-                        .ipfs
-                        .dag_get::<&str, Identity>(meta.identity.link, None)
-                        .await?;
+                if record.verify(channel_addr.into()).is_err() {
+                    return Ok(None);
+                }
 
-                    if identity.channel_ipns.is_none()
-                        || identity.channel_ipns.unwrap() != channel_ipns
-                    {
-                        return Ok(None);
-                    }
+                sequence = seq;
+                latest_channel_cid = cid;
 
-                    signed_link_cid = cid;
-
-                    Ok(Some(signed_link_cid))
-                });
-
-            let stream = stream::once(async move { Ok(signed_link_cid) }).chain(stream);
-
-            Result::<_, Error>::Ok(stream)
-        })
-        .try_flatten()
-
-        /* stream::once(async move {
-            let ipns = channel_ipns.into();
-            let mut channel_cid = self.ipfs.name_resolve(ipns).await?;
-
-            let metadata = self
-                .ipfs
-                .dag_get::<&str, ChannelMetadata>(channel_cid, None)
-                .await?;
-
-            let topic = channel_ipns.to_pubsub_topic();
-
-            let stream = self
-                .ipfs
-                .pubsub_sub(topic.into_bytes(), regis)
-                .err_into()
-                .try_filter_map(move |msg| async move {
-                    let PubSubMessage { from: _, data } = msg;
-
-                    let IPNSRecord {
-                        value,
-                        signature,
-                        validity_type,
-                        validity,
-                        sequence,
-                        ttl: _,
-                        public_key,
-                    } = IPNSRecord::decode(data.as_ref())?;
-
-                    let validity_type = match validity_type {
-                        0 => ValidityType::EOL, // The only possible answer for now
-                        _ => panic!("Does ValidityType now has more than one variant?"),
-                    };
-
-                    let cid_str = std::str::from_utf8(&value)?;
-                    let cid = Cid::try_from(cid_str)?;
-
-                    if cid == channel_cid {
-                        return Ok(None);
-                    }
-
-                    /* if sequence <= metadata.seq {
-                        return Ok(None);
-                    } */
-
-                    let mut signing_input = Vec::with_capacity(
-                        value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
-                    );
-
-                    signing_input.extend(value);
-                    signing_input.extend(validity);
-                    signing_input.extend(validity_type.to_string().as_bytes());
-
-                    // If the pub key is not in the record use the peer id
-                    let crypto_key = if !public_key.is_empty() {
-                        CryptoKey::decode(public_key.as_ref())?
-                    } else {
-                        CryptoKey::decode(ipns.hash().digest())?
-                    };
-
-                    match crypto_key.key_type {
-                        0/* KeyType::RSA */ => unimplemented!(),
-                        1/* KeyType::Ed25519 */ => unimplemented!()/* {
-                            let public_key = ed25519_dalek::PublicKey::from_bytes(&crypto_key.data)?;
-
-                            let signature = ed25519_dalek::Signature::from_bytes(&signature)?;
-
-                            if public_key.verify(&signing_input, &signature).is_err() {
-                                return Ok(None);
-                            }
-                        } */,
-                        2/* KeyType::Secp256k1 */ => {
-                            let public_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&crypto_key.data)?;
-
-                            let signature = k256::ecdsa::Signature::from_bytes(&signature)?;
-
-                            if public_key.verify(&signing_input, &signature).is_err() {
-                                return Ok(None);
-                            }
-                        },
-                        3/* KeyType::ECDSA */ => unimplemented!(),
-                        _ => panic!("Enum has only 4 possible values")
-                    }
-
-                    channel_cid = cid;
-
-                    Ok(Some(channel_cid))
-                });
-
-            let stream = stream::once(async move { Ok(channel_cid) }).chain(stream);
-
-            Result::<_, Error>::Ok(stream)
-        })
-        .try_flatten() */
-        /* .and_then(move |cid| async move {
-            let channel = self
-                .ipfs
-                .dag_get::<&str, ChannelMetadata>(cid, None)
-                .await?;
-
-            return Ok((cid, channel));
-        }) */
+                Ok(Some((
+                    latest_channel_cid,
+                    (sequence, latest_channel_cid, stream),
+                )))
+            },
+        )
     }
 
     /// Returns all followees channels on the social web without duplicates.
@@ -299,8 +176,7 @@ impl Defluencer {
                             return Ok(None);
                         }
 
-                        //TODO remove link from path when IPNS records are signed with HW
-                        metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, Some("/link")).await) });
+                        metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await) });
                     },
                     option = metadata_pool.next() => {
                          let (cid, metadata) = match option {

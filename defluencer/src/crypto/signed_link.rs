@@ -6,7 +6,7 @@ use sha2::Digest;
 
 use sha3::Keccak256;
 
-use signature::DigestVerifier;
+use k256::ecdsa::signature::DigestVerifier;
 
 /// Verification is done by applying the hash algo to the CID's hash then verifiying with ECDSA.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

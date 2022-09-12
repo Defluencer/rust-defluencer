@@ -1,11 +1,8 @@
-#[cfg(not(target_arch = "wasm32"))]
-pub mod bitcoin;
-pub mod dag_jose;
-pub mod ethereum;
-pub mod signed_link;
+mod bitcoin;
+mod ethereum;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod ledger;
+pub use self::bitcoin::BitcoinSigner;
+pub use ethereum::EthereumSigner;
 
 use crate::errors::Error;
 
@@ -13,7 +10,7 @@ use async_trait::async_trait;
 
 use k256::ecdsa::{Signature, VerifyingKey};
 
-use self::signed_link::HashAlgorithm;
+use super::signed_link::HashAlgorithm;
 
 #[async_trait(?Send)]
 pub trait Signer {

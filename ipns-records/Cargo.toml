@@ -1,0 +1,27 @@
+[package]
+name = "ipns-records"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
+cid = { version = "0.8", default-features = false, features = ["std"] }
+ecdsa = { version = "0.14", default-features = false, features = ["sign", "verify"] }
+ed25519 = { version = "1", default-features = false, features = [] }
+ed25519-dalek = { version = "1", default-features = false, features = ["u64_backend"] }
+elliptic-curve = { version = "0.12", default-features = false, features = [] }
+multihash = { version = "0.16", default-features = false, features = ["std", "multihash-impl"] }
+k256 = { version = "0.11", default-features = false, features = ["std", "ecdsa"] }
+prost = { version = "0.11", default-features = false, features = ["std", "prost-derive"] }
+sha2 = { version = "0.10", default-features = false, features = [] }
+signatory = { version = "0.26", default-features = false, features = ["std", "ed25519", "secp256k1"] }
+signature = { version = "1", default-features = false, features = ["std"] }
+strum = { version = "0.24", default-features = false, features = ["derive"] }
+thiserror = { version = "1", default-features = false, features = [] }
+
+[dev-dependencies]
+#rand_core = { version = "0.6", features = ["getrandom"] }
+rand_core = { version = "0.5", features = ["getrandom"] }
+ed25519-dalek = { version = "1", default-features = false, features = ["rand"] }

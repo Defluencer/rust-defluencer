@@ -23,11 +23,11 @@ use web3::{
     Web3,
 };
 
-use defluencer::signatures::ethereum::EthereumSigner;
+use defluencer::crypto::ethereum::EthereumSigner;
 
 use cid::Cid;
 
-use defluencer::signatures::Signer;
+use defluencer::crypto::Signer;
 
 use signature::DigestVerifier;
 

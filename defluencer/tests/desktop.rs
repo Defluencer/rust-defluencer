@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, SecondsFormat, Utc};
+    /* use chrono::{Duration, SecondsFormat, Utc};
 
     use cid::Cid;
     use sha3::Keccak256;
@@ -11,11 +11,11 @@ mod tests {
 
     use ipfs_api::IpfsService;
 
-    use linked_data::types::{CryptoKey, IPNSAddress, IPNSRecord, KeyType, ValidityType};
+    use linked_data::types::IPNSAddress;
 
     use multihash::Multihash;
 
-    use rand_core::OsRng;
+    use rand_core::OsRng; */
 
     /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ed25519_roundtrip() {
@@ -93,7 +93,7 @@ mod tests {
         println!("New {}", cid);
     } */
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /* #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn ipns_esoteric_record() {
         use prost::Message;
 
@@ -175,7 +175,7 @@ mod tests {
             cid,
             response,
         );
-    }
+    } */
 
     //btc
     // identity bafyreickdtfrlbpowjxj3ovqnr6ys2jaqquwai2osmuhasxd6y527irf6m

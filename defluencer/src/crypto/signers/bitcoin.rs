@@ -6,9 +6,12 @@ use bitcoin::{consensus::Encodable, VarInt};
 
 use sha2::{Digest, Sha256};
 
-use crate::errors::Error;
+use crate::{
+    crypto::{ledger::BitcoinLedgerApp, signed_link::HashAlgorithm},
+    errors::Error,
+};
 
-use super::{ledger::BitcoinLedgerApp, signed_link::HashAlgorithm};
+use super::Signer;
 
 #[derive(Clone)]
 pub struct BitcoinSigner {
@@ -29,7 +32,7 @@ impl BitcoinSigner {
 }
 
 #[async_trait(?Send)]
-impl super::Signer for BitcoinSigner {
+impl Signer for BitcoinSigner {
     async fn sign(
         &self,
         signing_input: &[u8],
@@ -76,8 +79,6 @@ mod tests {
 
     use sha2::Digest;
 
-    use signature::DigestVerifier;
-
     #[test]
     fn addr() {
         let app = BitcoinLedgerApp::default();
@@ -89,6 +90,8 @@ mod tests {
 
     #[test]
     fn sign_test() {
+        use k256::ecdsa::signature::DigestVerifier;
+
         let app = BitcoinLedgerApp::default();
         let account_index = 0;
 
