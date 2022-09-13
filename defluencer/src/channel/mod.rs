@@ -505,13 +505,16 @@ where
             return Ok(None);
         };
 
-        datetime::remove(
+        if !datetime::remove(
             &self.ipfs,
             datetime,
             &mut channel.content_index,
             content_cid,
         )
-        .await?;
+        .await?
+        {
+            return Ok(None);
+        }
 
         // Remove comments too!
         if let Some(index) = channel.comment_index.as_mut() {

@@ -369,7 +369,7 @@ impl Defluencer {
     }
 
     /// Lazily stream a channel's content.
-    pub fn stream_content_chronologically(
+    pub fn stream_content_rev_chrono(
         &self,
         content_index: IPLDLink,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {

@@ -27,9 +27,6 @@ pub enum HAMTError {
 
     #[error("Wrong hash algorithm")]
     HashAlgo,
-
-    #[error("Cannot remove key, not present")]
-    RemoveFailed,
 }
 
 pub(crate) async fn get(
@@ -187,24 +184,25 @@ async fn set(
 pub(crate) async fn remove(
     ipfs: &IpfsService,
     index: &mut IPLDLink,
-    key: Cid,
-) -> Result<(), Error> {
-    if key.hash().code() != HASH_ALGORITHM as u64 {
+    cid: Cid,
+) -> Result<Option<Cid>, Error> {
+    if cid.hash().code() != HASH_ALGORITHM as u64 {
         return Err(HAMTError::HashAlgo.into());
     }
 
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key.hash().digest().iter().copied().collect();
+    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = cid.hash().digest().iter().copied().collect();
     let key = key.into_inner().unwrap();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
 
-    delete(ipfs, key, 0, &mut root.hamt).await?;
+    if let Some(_) = delete(ipfs, key, 0, &mut root.hamt).await? {
+        let new_idx = ipfs.dag_put(&root, Codec::default()).await?;
+        *index = new_idx.into();
 
-    let cid = ipfs.dag_put(&root, Codec::default()).await?;
+        return Ok(Some(cid));
+    }
 
-    *index = cid.into();
-
-    Ok(())
+    Ok(None)
 }
 
 #[async_recursion(?Send)]
@@ -213,7 +211,7 @@ async fn delete(
     key: [u8; DIGEST_LENGTH_BYTES],
     depth: usize,
     node: &mut HAMTNode,
-) -> Result<Element, Error> {
+) -> Result<Option<Element>, Error> {
     let index = key[depth] as usize;
     let mut map = BitField::from(node.map);
     let data_index = map[0..index].count_ones();
@@ -224,7 +222,7 @@ async fn delete(
     ); */
 
     if !map[index] {
-        return Err(HAMTError::RemoveFailed.into());
+        return Ok(None);
     }
 
     if let Element::Link(ipld) = node.data[data_index] {
@@ -236,14 +234,16 @@ async fn delete(
 
         let mut new_node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
 
-        let element = delete(ipfs, key, depth + 1, &mut new_node).await?;
-
-        node.data[data_index] = element;
+        if let Some(element) = delete(ipfs, key, depth + 1, &mut new_node).await? {
+            node.data[data_index] = element;
+        } else {
+            return Ok(None);
+        }
 
         if let Element::Link(_) = node.data[data_index] {
             let cid = ipfs.dag_put(&node, Codec::default()).await?;
 
-            return Ok(Element::Link(cid.into()));
+            return Ok(Some(Element::Link(cid.into())));
         }
     }
 
@@ -289,7 +289,7 @@ async fn delete(
 
             let cid = ipfs.dag_put(&node, Codec::default()).await?;
 
-            return Ok(Element::Link(cid.into()));
+            return Ok(Some(Element::Link(cid.into())));
         }
     }
 
@@ -318,7 +318,7 @@ async fn delete(
         //println!("Entry removed");
     }
 
-    Ok(Element::Bucket(btree))
+    Ok(Some(Element::Bucket(btree)))
 }
 
 pub(crate) fn values(
@@ -379,6 +379,17 @@ mod tests {
     use rand::Rng;
     use rand_core::RngCore;
 
+    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+
+    fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
+        let mut hash = [0u8; 32];
+        rng.fill_bytes(&mut hash);
+
+        let multihash = Multihash::wrap(0x12, &hash).unwrap();
+
+        Cid::new_v1(0x71, multihash)
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn empty_hamt_get_remove() {
         let ipfs = IpfsService::default();
@@ -399,7 +410,7 @@ mod tests {
 
         let result = remove(&ipfs, &mut root, key).await;
 
-        assert!(result.is_err());
+        assert!(result.unwrap().is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -441,19 +452,8 @@ mod tests {
         println!("Root {}", root.link);
     }
 
-    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
-
-    fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
-        let mut hash = [0u8; 32];
-        rng.fill_bytes(&mut hash);
-
-        let multihash = Multihash::wrap(0x12, &hash).unwrap();
-
-        Cid::new_v1(0x71, multihash)
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn hamt_linear_insert() {
+    async fn hamt_sequential_insert() {
         let ipfs = IpfsService::default();
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
@@ -489,7 +489,7 @@ mod tests {
     async fn hamt_remove_collapse() {
         let ipfs = IpfsService::default();
 
-        // Pre-generated with hamt_linear_insert;
+        // Pre-generated with hamt_sequential_insert;
         let mut root = Cid::try_from("bafyreibk3jg65ukzj5i3lolkmm6cl6yzz7mzrqesrja4msro7lfo3s6exy")
             .unwrap()
             .into();
@@ -505,18 +505,22 @@ mod tests {
             Cid::try_from("bafyreiark2h2b2yumkvhzqttaw66eyu4benkpbyk34qwokj6s6ftafxl6m").unwrap();
 
         match remove(&ipfs, &mut root, key).await {
-            Ok(()) => println!("Root: {}", root.link),
+            Ok(cid) => {
+                println!("Root: {}", root.link);
+
+                assert_eq!(cid, Some(key))
+            }
             Err(e) => panic!("Root: {} Key: {} Error: {}", root.link, key, e),
         }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn hamt_linear_remove() {
+    async fn hamt_sequential_remove() {
         let ipfs = IpfsService::default();
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
 
-        // Pre-generated with hamt_random_insert;
+        // Pre-generated with hamt_sequential_insert;
         let mut root = Cid::try_from("bafyreibk3jg65ukzj5i3lolkmm6cl6yzz7mzrqesrja4msro7lfo3s6exy")
             .unwrap()
             .into();
@@ -524,8 +528,9 @@ mod tests {
         for _ in 0..256 {
             let key = random_cid(&mut rng);
 
-            if let Err(e) = remove(&ipfs, &mut root, key).await {
-                panic!("Root: {} Key: {} Error: {}", root.link, key, e);
+            match remove(&ipfs, &mut root, key).await {
+                Ok(option) => assert_eq!(option, Some(key)),
+                Err(e) => panic!("Root: {} Key: {} Error: {}", root.link, key, e),
             }
         }
 
@@ -568,8 +573,9 @@ mod tests {
 
                 let key = keys.remove(idx);
 
-                if let Err(e) = remove(&ipfs, &mut root, key).await {
-                    panic!("Root: {} Key: {} Error: {}", root.link, key, e);
+                match remove(&ipfs, &mut root, key).await {
+                    Ok(option) => assert_eq!(option, Some(key)),
+                    Err(e) => panic!("Root: {} Key: {} Error: {}", root.link, key, e),
                 }
             }
         }
