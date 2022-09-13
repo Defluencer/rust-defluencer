@@ -1,7 +1,11 @@
+#[cfg(not(target_arch = "wasm32"))]
 mod bitcoin;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use self::bitcoin::BitcoinSigner;
+
 mod ethereum;
 
-pub use self::bitcoin::BitcoinSigner;
 pub use ethereum::EthereumSigner;
 
 use crate::errors::Error;

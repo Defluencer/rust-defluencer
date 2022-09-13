@@ -128,7 +128,7 @@ pub async fn add_markdown(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid
         return Err(Error::Markdown);
     };
 
-    let size = file.size() as usize;
+    //let size = file.size() as usize;
 
     let js_value = match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
         Ok(js_value) => js_value,

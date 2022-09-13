@@ -83,7 +83,7 @@ impl EthereumSigner {
 
 #[cfg(target_arch = "wasm32")]
 #[async_trait(?Send)]
-impl super::Signer for EthereumSigner {
+impl Signer for EthereumSigner {
     async fn sign(
         &self,
         signing_input: &[u8],
@@ -95,7 +95,7 @@ impl super::Signer for EthereumSigner {
         ),
         Error,
     > {
-        use signature::Signature;
+        use k256::ecdsa::signature::Signature;
 
         let sig = self
             .web3
