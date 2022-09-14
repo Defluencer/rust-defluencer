@@ -3,7 +3,12 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
+use cid::Cid;
+
+use multibase::Base;
+
+use multihash::MultihashGeneric;
+type Multihash = MultihashGeneric<64>;
 
 /// Ethereum address
 pub type Address = [u8; 20];
@@ -20,10 +25,18 @@ impl TryFrom<String> for PeerId {
     type Error = Box<dyn std::error::Error>;
 
     fn try_from(string: String) -> Result<Self, Self::Error> {
-        // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#string-representation
-        let decoded = Base::Base58Btc.decode(string)?;
+        Self::try_from(string.as_str())
+    }
+}
 
-        let multihash = MultihashGeneric::from_bytes(&decoded)?;
+impl TryFrom<&str> for PeerId {
+    type Error = Box<dyn std::error::Error>;
+
+    fn try_from(str: &str) -> Result<Self, Self::Error> {
+        // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#string-representation
+        let decoded = Base::Base58Btc.decode(str)?;
+
+        let multihash = Multihash::from_bytes(&decoded)?;
 
         let cid = Cid::new_v1(0x70, multihash);
 
@@ -129,8 +142,6 @@ impl From<Cid> for IPLDLink {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use cid::Cid;
 
     #[test]
     fn ipns_to_topic() {

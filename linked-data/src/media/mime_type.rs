@@ -4,8 +4,6 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use cid::Cid;
-
 use either::Either;
 
 #[derive(Serialize, Deserialize)]
@@ -17,10 +15,10 @@ pub struct MimeTyped {
 }
 
 impl MimeTyped {
-    pub fn new_linked_data(mime_type: impl Into<Cow<'static, str>>, cid: Cid) -> Self {
+    pub fn new_linked_data(mime_type: impl Into<Cow<'static, str>>, link: IPLDLink) -> Self {
         Self {
             mime_type: mime_type.into().into_owned(),
-            data: Either::Left(cid.into()),
+            data: Either::Left(link),
         }
     }
 

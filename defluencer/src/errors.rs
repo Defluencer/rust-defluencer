@@ -15,12 +15,6 @@ pub enum Error {
     #[error("HAMT: {0}")]
     HAMT(#[from] hamt::HAMTError),
 
-    #[error("BIP-39: {0}")]
-    BIP29(#[from] anyhow::Error),
-
-    #[error("PKCS8: {0}")]
-    PKCS8(#[from] pkcs8::Error),
-
     #[error("Elliptic Curve: {0}")]
     EllipticCurve(#[from] k256::elliptic_curve::Error),
 
@@ -45,6 +39,9 @@ pub enum Error {
 
     #[error("Multibase: {0}")]
     Multibase(#[from] multibase::Error),
+
+    #[error("Multihash: {0}")]
+    Multihash(#[from] multihash::Error),
 
     #[error("Ipfs: {0}")]
     IpfsApi(#[from] ipfs_api::errors::Error),

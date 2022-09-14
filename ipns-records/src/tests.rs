@@ -1,49 +1,43 @@
 #![cfg(test)]
 
+use super::*;
+
 use chrono::Duration;
 
-use cid::Cid;
-
-use multihash::Multihash;
+use ed25519_dalek::{Keypair, PublicKey, SecretKey};
 
 use prost::Message;
 
 use sha2::{Digest, Sha256};
 
-use signature::Signer;
+use signature::{DigestSigner, Signer};
 
-use rand_core::OsRng;
+use crate::{CryptoKey, IPNSRecord, KeyType, RecordSigner};
 
-use crate::{CryptoKey, IPNSRecord, KeyType};
+pub struct Ed25519IPNSRecordSigner {
+    pub keypair: Keypair,
+}
+
+impl Signer<ed25519::Signature> for Ed25519IPNSRecordSigner {
+    fn sign(&self, msg: &[u8]) -> ed25519::Signature {
+        self.try_sign(msg).expect("signature operation failed")
+    }
+
+    fn try_sign(&self, msg: &[u8]) -> Result<ed25519::Signature, signature::Error> {
+        Ok(self.keypair.sign(msg))
+    }
+}
+
+impl RecordSigner<ed25519::Signature> for Ed25519IPNSRecordSigner {
+    fn crypto_key(&self) -> CryptoKey {
+        let key_type = KeyType::Ed25519 as i32;
+        let data = self.keypair.public.to_bytes().to_vec();
+        CryptoKey { key_type, data }
+    }
+}
 
 #[test]
 fn ed25519_roundtrip() {
-    // Need rand_core v0.5
-
-    use ed25519_dalek::Keypair;
-
-    use signatory::ed25519::{Ed25519Signer, Signature, VerifyingKey};
-
-    pub struct TestSigner {
-        pub keypair: Keypair,
-    }
-
-    impl Signer<Signature> for TestSigner {
-        fn sign(&self, msg: &[u8]) -> Signature {
-            self.try_sign(msg).expect("signature operation failed")
-        }
-
-        fn try_sign(&self, msg: &[u8]) -> Result<Signature, signature::Error> {
-            Ok(self.keypair.sign(msg))
-        }
-    }
-
-    impl Ed25519Signer for TestSigner {
-        fn verifying_key(&self) -> VerifyingKey {
-            self.keypair.verifying_key()
-        }
-    }
-
     let value =
         Cid::try_from("bafyreih223c6mqauz5ouolokqrofaekpuu45eblm33fm3g2rlwdkqfabo4").unwrap();
 
@@ -51,8 +45,18 @@ fn ed25519_roundtrip() {
 
     let sequence = 0;
 
+    // Need rand_core v0.5
+    /* use rand_core::OsRng;
     let mut csprng = OsRng {};
-    let keypair: Keypair = Keypair::generate(&mut csprng);
+    let keypair: Keypair = Keypair::generate(&mut csprng); */
+
+    let secret = SecretKey::from_bytes(&[
+        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
+        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
+    ])
+    .unwrap();
+    let public = PublicKey::from(&secret);
+    let keypair = Keypair { secret, public };
 
     let addr = {
         let public_key = CryptoKey {
@@ -74,9 +78,9 @@ fn ed25519_roundtrip() {
 
     println!("Addr: {}", addr);
 
-    let signer = TestSigner { keypair };
+    let signer = Ed25519IPNSRecordSigner { keypair };
 
-    let record = IPNSRecord::new_with_ed25519(value, duration, sequence, signer).unwrap();
+    let record = IPNSRecord::new(value, duration, sequence, signer).unwrap();
 
     let raw = record.encode_to_vec();
 
@@ -91,32 +95,30 @@ fn ed25519_roundtrip() {
     assert!(result.is_ok())
 }
 
-/* #[test]
+#[derive(Debug, Signer)]
+pub struct Secp256k1Signer {
+    signing_key: k256::ecdsa::SigningKey,
+}
+
+impl DigestSigner<Sha256, k256::ecdsa::DerSignature> for Secp256k1Signer {
+    fn try_sign_digest(&self, digest: Sha256) -> Result<k256::ecdsa::DerSignature, ecdsa::Error> {
+        let sig: k256::ecdsa::Signature = self.signing_key.try_sign_digest(digest)?;
+        let sig = sig.to_der();
+
+        Ok(sig)
+    }
+}
+
+impl RecordSigner<k256::ecdsa::DerSignature> for Secp256k1Signer {
+    fn crypto_key(&self) -> CryptoKey {
+        let key_type = KeyType::Secp256k1 as i32;
+        let data = self.signing_key.verifying_key().to_bytes().to_vec();
+        CryptoKey { key_type, data }
+    }
+}
+
+#[test]
 fn secp256k1_roundtrip() {
-    // Need rand_core v0.6
-
-    use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
-
-    pub struct TestSigner {
-        pub signing_key: SigningKey,
-    }
-
-    impl Signer<Signature> for TestSigner {
-        fn sign(&self, msg: &[u8]) -> Signature {
-            self.try_sign(msg).expect("signature operation failed")
-        }
-
-        fn try_sign(&self, msg: &[u8]) -> Result<Signature, signature::Error> {
-            self.signing_key.try_sign(msg)
-        }
-    }
-
-    impl Secp256k1Signer for TestSigner {
-        fn verifying_key(&self) -> VerifyingKey {
-            self.signing_key.verifying_key()
-        }
-    }
-
     let value =
         Cid::try_from("bafyreih223c6mqauz5ouolokqrofaekpuu45eblm33fm3g2rlwdkqfabo4").unwrap();
 
@@ -124,10 +126,19 @@ fn secp256k1_roundtrip() {
 
     let sequence = 0;
 
+    // Need rand_core v0.6
+    /* use rand_core::OsRng;
     let mut csprng = OsRng {};
-    let signing_key = k256::ecdsa::SigningKey::random(&mut csprng);
+    let signing_key = k256::ecdsa::SigningKey::random(&mut csprng); */
+
+    let signing_key = k256::ecdsa::SigningKey::from_bytes(&[
+        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
+        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
+    ])
+    .unwrap();
+
     let verif_key = signing_key.verifying_key();
-    let signer = TestSigner { signing_key };
+    let signer = Secp256k1Signer { signing_key };
 
     let addr = {
         let public_key = CryptoKey {
@@ -149,7 +160,7 @@ fn secp256k1_roundtrip() {
 
     println!("Addr: {}", addr);
 
-    let record = IPNSRecord::new_with_secp256k1(value, duration, sequence, signer).unwrap();
+    let record = IPNSRecord::new(value, duration, sequence, signer).unwrap();
 
     assert_eq!(record.get_address(), addr);
 
@@ -162,4 +173,4 @@ fn secp256k1_roundtrip() {
     let result = record.verify(addr);
 
     assert!(result.is_ok())
-} */
+}

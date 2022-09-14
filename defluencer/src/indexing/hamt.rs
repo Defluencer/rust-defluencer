@@ -1,10 +1,6 @@
 use std::collections::BTreeSet;
 
-use arrayvec::ArrayVec;
-
 use async_recursion::async_recursion;
-
-use cid::Cid;
 
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 
@@ -18,15 +14,17 @@ use linked_data::{
     types::IPLDLink,
 };
 
+use multihash::MultihashGeneric;
+type Multihash = MultihashGeneric<64>;
+
+use cid::Cid;
+
 use crate::errors::Error;
 
 #[derive(thiserror::Error, Debug)]
 pub enum HAMTError {
     #[error("Max depth reached")]
     MaxDepth,
-
-    #[error("Wrong hash algorithm")]
-    HashAlgo,
 }
 
 pub(crate) async fn get(
@@ -34,12 +32,8 @@ pub(crate) async fn get(
     root: IPLDLink,
     key: Cid,
 ) -> Result<Option<Cid>, Error> {
-    if key.hash().code() != HASH_ALGORITHM as u64 {
-        return Err(HAMTError::HashAlgo.into());
-    }
-
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key.hash().digest().iter().copied().collect();
-    let key = key.into_inner().unwrap();
+    let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
+    let (_, digest, _) = hash.into_inner();
 
     let root = ipfs.dag_get::<&str, HAMTRoot>(root.link, None).await?;
 
@@ -47,7 +41,7 @@ pub(crate) async fn get(
     let mut node = root.hamt;
 
     loop {
-        let index = key[depth] as usize;
+        let index = digest[depth] as usize;
         let map = BitField::from(node.map);
         let data_index = map[0..index].count_ones();
 
@@ -70,7 +64,7 @@ pub(crate) async fn get(
             }
             Element::Bucket(btree) => {
                 let entry = BucketEntry {
-                    key,
+                    key: digest,
                     value: Default::default(),
                 };
 
@@ -89,16 +83,12 @@ pub(crate) async fn insert(
     key: Cid,
     value: Cid,
 ) -> Result<(), Error> {
-    if key.hash().code() != HASH_ALGORITHM as u64 {
-        return Err(HAMTError::HashAlgo.into());
-    }
-
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = key.hash().digest().iter().copied().collect();
-    let key = key.into_inner().unwrap();
+    let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
+    let (_, digest, _) = hash.into_inner();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
 
-    set(ipfs, key, value.into(), 0, &mut root.hamt).await?;
+    set(ipfs, digest, value.into(), 0, &mut root.hamt).await?;
 
     let cid = ipfs.dag_put(&root, Codec::default()).await?;
 
@@ -184,22 +174,18 @@ async fn set(
 pub(crate) async fn remove(
     ipfs: &IpfsService,
     index: &mut IPLDLink,
-    cid: Cid,
+    key: Cid,
 ) -> Result<Option<Cid>, Error> {
-    if cid.hash().code() != HASH_ALGORITHM as u64 {
-        return Err(HAMTError::HashAlgo.into());
-    }
-
-    let key: ArrayVec<u8, DIGEST_LENGTH_BYTES> = cid.hash().digest().iter().copied().collect();
-    let key = key.into_inner().unwrap();
+    let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
+    let (_, digest, _) = hash.into_inner();
 
     let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
 
-    if let Some(_) = delete(ipfs, key, 0, &mut root.hamt).await? {
+    if let Some(_) = delete(ipfs, digest, 0, &mut root.hamt).await? {
         let new_idx = ipfs.dag_put(&root, Codec::default()).await?;
         *index = new_idx.into();
 
-        return Ok(Some(cid));
+        return Ok(Some(key));
     }
 
     Ok(None)
@@ -324,7 +310,7 @@ async fn delete(
 pub(crate) fn values(
     ipfs: &IpfsService,
     root: IPLDLink,
-) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+) -> impl Stream<Item = Result<(Cid, Cid), Error>> + '_ {
     stream::try_unfold(Some(root), move |mut root| async move {
         let ipld = match root.take() {
             Some(ipld) => ipld,
@@ -340,7 +326,10 @@ pub(crate) fn values(
     .try_flatten()
 }
 
-fn stream_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Result<Cid, Error>> + '_ {
+fn stream_data(
+    ipfs: &IpfsService,
+    node: HAMTNode,
+) -> impl Stream<Item = Result<(Cid, Cid), Error>> + '_ {
     stream::try_unfold(node.data.into_iter(), move |mut iter| async move {
         let element = match iter.next() {
             Some(element) => element,
@@ -356,8 +345,16 @@ fn stream_data(ipfs: &IpfsService, node: HAMTNode) -> impl Stream<Item = Result<
                 Ok(Some((stream, iter)))
             }
             Element::Bucket(vec) => {
-                let stream =
-                    stream::iter(vec.into_iter().map(|entry| Ok(entry.value.link))).boxed_local();
+                let stream = stream::iter(vec.into_iter().map(|entry| {
+                    let hash = Multihash::wrap(HASH_ALGORITHM as u64, &entry.key)
+                        .expect("Valid Multihash");
+                    let key = Cid::new_v1(/* DAG-CBOR */ 0x71, hash);
+
+                    let value = entry.value.link;
+
+                    Ok((key, value))
+                }))
+                .boxed_local();
 
                 Ok(Some((stream, iter)))
             }
@@ -371,12 +368,11 @@ mod tests {
     #![cfg(not(target_arch = "wasm32"))]
 
     use super::*;
-    use cid::Cid;
 
     use ipfs_api::IpfsService;
 
-    use multihash::Multihash;
     use rand::Rng;
+
     use rand_core::RngCore;
 
     use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
@@ -387,7 +383,7 @@ mod tests {
 
         let multihash = Multihash::wrap(0x12, &hash).unwrap();
 
-        Cid::new_v1(0x71, multihash)
+        Cid::new_v1(/* DAG-CBOR */ 0x71, multihash)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -441,7 +437,7 @@ mod tests {
         let result = option.unwrap();
 
         assert!(result.is_ok());
-        let cid = result.unwrap();
+        let (_, cid) = result.unwrap();
 
         assert_eq!(cid, value);
 

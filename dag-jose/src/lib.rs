@@ -1,5 +1,6 @@
 mod errors;
 mod tests;
+mod traits;
 
 pub use errors::Error;
 
@@ -7,9 +8,9 @@ use cid::Cid;
 
 use multibase::Base;
 
-use signatory::{ecdsa::Secp256k1Signer, ed25519::Ed25519Signer};
-
 use serde::{Deserialize, Serialize};
+
+use traits::BlockSigner;
 
 // https://ipld.io/specs/codecs/dag-jose/fixtures/
 // https://ipld.io/specs/codecs/dag-jose/spec/
@@ -17,6 +18,8 @@ use serde::{Deserialize, Serialize};
 // https://www.rfc-editor.org/rfc/rfc7517
 // https://www.rfc-editor.org/rfc/rfc7518
 // https://www.iana.org/assignments/jose/jose.xhtml
+
+// https://www.rfc-editor.org/rfc/rfc8037.html
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AlgorithmType {
@@ -178,22 +181,21 @@ impl JsonWebSignature {
                     .expect("Base 64 Decoding");
                 let public_key = [vec![0x04], public_key_x, public_key_y].concat();
 
-                let verif_key =
-                    signatory::ecdsa::secp256k1::VerifyingKey::from_sec1_bytes(&public_key)
-                        .expect("Valid Public Key");
+                let verif_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&public_key)
+                    .expect("Valid Public Key");
 
                 let signature =
-                    signatory::ecdsa::Signature::from_bytes(&signature).expect("Valid Signature");
+                    k256::ecdsa::Signature::from_bytes(&signature).expect("Valid Signature");
 
                 verif_key.verify(signing_input.as_bytes(), &signature)?;
             }
             (AlgorithmType::EdDSA, KeyType::OctetString, CurveType::Ed25519) => {
                 let public_key = Base::Base64Url.decode(&jwk.x).expect("Base 64 Decoding");
-                let public_key = signatory::ed25519::VerifyingKey::from_bytes(&public_key)
-                    .expect("Valid Public Key");
+                let public_key =
+                    ed25519_dalek::PublicKey::from_bytes(&public_key).expect("Valid Public Key");
 
                 let signature =
-                    signatory::ed25519::Signature::from_bytes(&signature).expect("Valid Signature");
+                    ed25519::Signature::from_bytes(&signature).expect("Valid Signature");
 
                 public_key.verify(signing_input.as_bytes(), &signature)?;
             }
@@ -203,13 +205,16 @@ impl JsonWebSignature {
         Ok(())
     }
 
-    /// Return a new block with signed using ed25519
-    pub fn new_with_ed25519(cid: Cid, signer: impl Ed25519Signer) -> Result<Self, Error> {
+    pub fn new<S, U>(cid: Cid, signer: S) -> Result<Self, Error>
+    where
+        S: BlockSigner<U>,
+        U: signature::Signature,
+    {
         let payload = cid.to_bytes();
         let payload = Base::Base64Url.encode(payload);
 
         let protected = Header {
-            algorithm: Some(AlgorithmType::EdDSA),
+            algorithm: Some(signer.algorithm()),
             json_web_key: None,
         };
 
@@ -220,67 +225,7 @@ impl JsonWebSignature {
 
         let signature = signer.try_sign(message.as_bytes())?;
 
-        let public_key = signer.verifying_key();
-
-        // https://www.rfc-editor.org/rfc/rfc8037.html
-        let jwk = JsonWebKey {
-            key_type: KeyType::OctetString,
-            curve: CurveType::Ed25519,
-            x: Base::Base64Url.encode(public_key.to_bytes()),
-            y: None,
-        };
-
-        let header = Some(Header {
-            algorithm: None,
-            json_web_key: Some(jwk),
-        });
-
-        let signature = Base::Base64Url.encode(signature);
-
-        let jws = Self {
-            payload,
-            signatures: vec![Signature {
-                header,
-                protected,
-                signature,
-            }],
-        };
-
-        Ok(jws)
-    }
-
-    /// Return a new block with signed using secp256k1
-    pub fn new_with_secp256k1(cid: Cid, signer: impl Secp256k1Signer) -> Result<Self, Error> {
-        use signatory::ecdsa::elliptic_curve::sec1::ToEncodedPoint;
-
-        let payload = cid.to_bytes();
-        let payload = Base::Base64Url.encode(payload);
-
-        let protected = Header {
-            algorithm: Some(AlgorithmType::ES256K),
-            json_web_key: None,
-        };
-
-        let protected = serde_json::to_vec(&protected).expect("Serialization");
-        let protected = Base::Base64Url.encode(protected);
-
-        let message = format!("{}.{}", payload, protected);
-
-        let signature = signer.try_sign(message.as_bytes())?;
-
-        let public_key = {
-            let verif_key = signer.verifying_key();
-            let mut temp = verif_key.to_encoded_point(false).to_bytes().into_vec();
-            temp.remove(0); //remove SEC1 tag
-            temp
-        };
-
-        let jwk = JsonWebKey {
-            key_type: KeyType::EllipticCurve,
-            curve: CurveType::Secp256k1,
-            x: Base::Base64Url.encode(&public_key[0..32]),
-            y: Some(Base::Base64Url.encode(&public_key[32..64])),
-        };
+        let jwk = signer.web_key();
 
         let header = Some(Header {
             algorithm: None,

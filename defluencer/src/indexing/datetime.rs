@@ -191,13 +191,12 @@ mod tests {
 
     use chrono::{Duration, TimeZone};
 
-    use cid::Cid;
-
     use futures::StreamExt;
 
     use ipfs_api::IpfsService;
 
-    use multihash::Multihash;
+    use multihash::MultihashGeneric;
+    type Multihash = MultihashGeneric<64>;
 
     use rand_core::RngCore;
 

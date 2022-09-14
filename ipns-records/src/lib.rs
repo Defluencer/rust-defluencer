@@ -1,13 +1,14 @@
 mod errors;
 mod tests;
+mod traits;
 
 pub use errors::Error;
 
-use multihash::Multihash;
-
 use sha2::{Digest, Sha256};
 
-use signatory::{ecdsa::Secp256k1Signer, ed25519::Ed25519Signer};
+use signature::Signature;
+
+use traits::RecordSigner;
 
 use std::ops::Add;
 
@@ -15,14 +16,19 @@ use chrono::{Duration, SecondsFormat, Utc};
 
 use cid::Cid;
 
+use multihash::MultihashGeneric;
+type Multihash = MultihashGeneric<64>;
+
 use prost::{self, Enumeration, Message};
 
 use strum::Display;
 
-// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#key-types
+/// Type of a record keys
+///
+/// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#key-types
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
 #[repr(i32)]
-enum KeyType {
+pub enum KeyType {
     RSA = 0,
     Ed25519 = 1,
     Secp256k1 = 2,
@@ -31,7 +37,7 @@ enum KeyType {
 
 // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#keys
 #[derive(Clone, PartialEq, Message)]
-struct CryptoKey {
+pub struct CryptoKey {
     #[prost(enumeration = "KeyType")]
     pub key_type: i32,
 
@@ -143,8 +149,7 @@ impl IPNSRecord {
             },
             2/* Secp256k1 */ => {
                 use k256::ecdsa::VerifyingKey;
-                use ecdsa::Signature as Sig;
-                //use signature::Signature;
+                use k256::ecdsa::Signature as Sig;
 
                 let public_key = VerifyingKey::from_sec1_bytes(&data).expect("Valid Key");
                 let signature = Sig::from_der(&self.signature).expect("Valid Signature");
@@ -158,8 +163,48 @@ impl IPNSRecord {
         Ok(())
     }
 
-    //TODO find a way to limit Signer to some hash algo used when signing so that it fits the IPNS parameters
+    pub fn new<S, U>(cid: Cid, valid_for: Duration, sequence: u64, signer: S) -> Result<Self, Error>
+    where
+        S: RecordSigner<U>,
+        U: Signature,
+    {
+        let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
 
+        let validity = Utc::now()
+            .add(valid_for)
+            .to_rfc3339_opts(SecondsFormat::Nanos, false)
+            .into_bytes();
+
+        let validity_type = ValidityType::EOL;
+
+        let signing_input = {
+            let mut data = Vec::with_capacity(
+                value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
+            );
+
+            data.extend(value.iter());
+            data.extend(validity.iter());
+            data.extend(validity_type.to_string().as_bytes());
+
+            data
+        };
+
+        let signature = signer.try_sign(&signing_input)?;
+        let signature = signature.as_bytes().to_vec();
+
+        let public_key = signer.crypto_key().encode_to_vec(); // Protobuf encoding
+
+        Ok(Self {
+            value,
+            signature,
+            validity_type: validity_type as i32,
+            validity,
+            sequence,
+            ttl: 0, //TODO figure this out!
+            public_key,
+        })
+    }
+    /*
     /// Create a new record using the EcDSA with the curve secp256k1.
     pub fn new_with_secp256k1(
         cid: Cid,
@@ -208,9 +253,9 @@ impl IPNSRecord {
             ttl: 0, //TODO figure this out!
             public_key,
         })
-    }
+    } */
 
-    /// Create a new record using the EdDSA with the curve ed25519.
+    /* /// Create a new record using the EdDSA with the curve ed25519.
     pub fn new_with_ed25519(
         cid: Cid,
         valid_for: Duration,
@@ -258,5 +303,5 @@ impl IPNSRecord {
             ttl: 0, //TODO figure this out!
             public_key,
         })
-    }
+    } */
 }

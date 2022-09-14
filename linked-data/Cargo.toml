@@ -9,7 +9,9 @@ description = "Defluencer linked data."
 bitvec = { version = "1", default-features = false, features = ["std", "serde"] }
 either = { version = "1", default-features = false, features = ["serde"] }
 cid = { version = "0.8", default-features = false, features = ["std"] }
-prost = { version = "0.10", default-features = false, features = ["prost-derive"] }
+multibase = { version = "0.9", default-features = false, features = [] }
+multihash = { version = "0.16", default-features = false, features = [] }
+prost = { version = "0.11", default-features = false, features = ["prost-derive"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 serde_with = { version = "2", default-features = false, features = ["macros"] }

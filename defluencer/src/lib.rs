@@ -2,7 +2,6 @@ pub mod channel;
 pub mod crypto;
 pub mod errors;
 pub mod indexing;
-pub mod moderation_cache;
 pub mod user;
 pub mod utils;
 
@@ -477,7 +476,7 @@ impl Defluencer {
     }
 
     /// Stream all the comments for some content on the channel.
-    pub fn stream_comments(
+    pub fn stream_content_comments(
         &self,
         comment_index: IPLDLink,
         content_cid: Cid,
@@ -494,5 +493,18 @@ impl Defluencer {
             }
         })
         .try_flatten()
+        .map_ok(|(_, cid)| cid)
+    }
+
+    /// Stream all the comments on a channel.
+    ///
+    /// Returns (Content CID, Comment CID)
+    pub fn stream_all_comments(
+        &self,
+        comment_index: IPLDLink,
+    ) -> impl Stream<Item = Result<(Cid, Cid), Error>> + '_ {
+        hamt::values(&self.ipfs, comment_index)
+            .map_ok(|(_, cid)| hamt::values(&self.ipfs, cid.into()))
+            .try_flatten()
     }
 }
