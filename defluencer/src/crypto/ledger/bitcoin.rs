@@ -15,7 +15,7 @@ use rs_merkle::{Hasher, MerkleTree};
 
 use sha2::Digest;
 
-use bitcoin::consensus::encode::{Decodable, Encodable, VarInt};
+use crate::utils::VarInt;
 
 use crate::errors::Error;
 
@@ -179,13 +179,7 @@ impl BitcoinLedgerApp {
         data.extend(0x00000000_u32.to_be_bytes()); // Change 4 bytes
         data.extend(index.to_be_bytes()); // Index 4 bytes
 
-        let msg_length = {
-            let mut temp = Vec::with_capacity(9); // Bicoin style Varint
-            VarInt(message.len() as u64)
-                .consensus_encode(&mut temp)
-                .expect("VarInt encoded message length");
-            temp
-        };
+        let msg_length = VarInt(message.len() as u64).consensus_encode();
 
         data.extend(msg_length); // Message length
 
@@ -272,10 +266,7 @@ impl BitcoinLedgerApp {
 
                     let index = hashes.iter().position(|item| item == hash).expect("Hash");
 
-                    let mut varint = Vec::with_capacity(9);
-                    VarInt(datums[index].len() as u64)
-                        .consensus_encode(&mut varint)
-                        .expect("VarInt encoded datum length");
+                    let varint = VarInt(datums[index].len() as u64).consensus_encode();
 
                     data.extend(varint.iter());
                     data.push(datums[index].len() as u8);
@@ -301,17 +292,10 @@ impl BitcoinLedgerApp {
                         temp
                     }; */
 
-                    let offset = {
-                        let mut slice = &response.data()[33..];
-                        let varint = VarInt::consensus_decode(&mut slice).expect("Varint");
-                        varint.len()
-                    };
+                    let offset = VarInt::consensus_decode(&response.data()[33..]).len();
 
-                    let leaf_index = {
-                        let mut slice = &response.data()[33 + offset..];
-                        let varint = VarInt::consensus_decode(&mut slice).expect("Varint");
-                        varint.0 as usize
-                    };
+                    let leaf_index =
+                        VarInt::consensus_decode(&response.data()[33 + offset..]).0 as usize;
 
                     /* #[cfg(debug_assertions)]
                     println!(
@@ -366,13 +350,7 @@ impl BitcoinLedgerApp {
 
                     match hashes.iter().position(|item| item == leaf_hash) {
                         Some(idx) => {
-                            let index = {
-                                let mut msg_len = Vec::with_capacity(9); // Bicoin style Varint
-                                VarInt(idx as u64)
-                                    .consensus_encode(&mut msg_len)
-                                    .expect("VarInt encoded message length");
-                                msg_len
-                            };
+                            let index = VarInt(idx as u64).consensus_encode();
 
                             data.push(1);
                             data.extend(index);

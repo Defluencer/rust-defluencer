@@ -2,13 +2,12 @@
 
 use async_trait::async_trait;
 
-use bitcoin::{consensus::Encodable, VarInt};
-
 use sha2::{Digest, Sha256};
 
 use crate::{
     crypto::{ledger::BitcoinLedgerApp, signed_link::HashAlgorithm},
     errors::Error,
+    utils::VarInt,
 };
 
 use super::Signer;
@@ -49,10 +48,7 @@ impl Signer for BitcoinSigner {
         let btc_message = {
             let mut temp = Vec::from("\x18Bitcoin Signed Message:\n");
 
-            let mut msg_len = Vec::with_capacity(9); // Bicoin style Varint
-            VarInt(signing_input.len() as u64)
-                .consensus_encode(&mut msg_len)
-                .expect("VarInt encoded message length");
+            let msg_len = VarInt(signing_input.len() as u64).consensus_encode();
 
             temp.extend(&msg_len);
             temp.extend(signing_input);
@@ -72,8 +68,6 @@ impl Signer for BitcoinSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use bitcoin::VarInt;
 
     use k256::ecdsa::VerifyingKey;
 
@@ -108,13 +102,7 @@ mod tests {
             .sign_message(signing_input, account_index)
             .expect("Msg signature");
 
-        let msg_length = {
-            let mut temp = Vec::with_capacity(9); // Bicoin style Varint
-            VarInt(signing_input.len() as u64)
-                .consensus_encode(&mut temp)
-                .expect("VarInt encoded message length");
-            temp
-        };
+        let msg_length = VarInt(signing_input.len() as u64).consensus_encode();
 
         let btc_message = {
             let mut temp = Vec::from("\x18Bitcoin Signed Message:\n");

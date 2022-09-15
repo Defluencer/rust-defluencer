@@ -8,6 +8,8 @@ use sha3::Keccak256;
 
 use k256::ecdsa::signature::DigestVerifier;
 
+use crate::utils::VarInt;
+
 /// Verification is done by applying the hash algo to the CID's hash then verifiying with ECDSA.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SignedLink {
@@ -68,7 +70,6 @@ impl SignedLink {
     }
 
     fn verify_btc(&self) -> bool {
-        use bitcoin::{consensus::Encodable, VarInt};
         use sha2::Sha256;
 
         let signing_input = self.link.link.hash().digest();
@@ -83,13 +84,7 @@ impl SignedLink {
             Err(_) => return false,
         };
 
-        let msg_length = {
-            let mut temp = Vec::with_capacity(9); // Bicoin style Varint
-            VarInt(signing_input.len() as u64)
-                .consensus_encode(&mut temp)
-                .expect("VarInt encoded message length");
-            temp
-        };
+        let msg_length = VarInt(signing_input.len() as u64).consensus_encode();
 
         let btc_message = {
             let mut temp = Vec::from("\x18Bitcoin Signed Message:\n");

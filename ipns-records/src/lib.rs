@@ -23,7 +23,7 @@ use prost::{self, Enumeration, Message};
 
 use strum::Display;
 
-/// Type of a record keys
+/// Type of a record keys.
 ///
 /// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#key-types
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
@@ -35,7 +35,9 @@ pub enum KeyType {
     ECDSA = 3,
 }
 
-// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#keys
+/// Protobuf encoded crypto keys.
+///
+/// https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#keys
 #[derive(Clone, PartialEq, Message)]
 pub struct CryptoKey {
     #[prost(enumeration = "KeyType")]
@@ -45,13 +47,16 @@ pub struct CryptoKey {
     pub data: Vec<u8>,
 }
 
+/// Validity type only valid if EOL.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration, Display)]
 #[repr(i32)]
 pub enum ValidityType {
     EOL = 0,
 }
 
-// https://github.com/ipfs/specs/blob/master/IPNS.md#ipns-record
+/// Protobuf encoded record.
+///
+/// https://github.com/ipfs/specs/blob/master/IPNS.md#ipns-record
 #[derive(Clone, PartialEq, Message)]
 pub struct IPNSRecord {
     #[prost(bytes)]
@@ -93,6 +98,7 @@ impl IPNSRecord {
         self.sequence
     }
 
+    /// Return the IPNS address of this record.
     pub fn get_address(&self) -> Cid {
         let multihash = if self.public_key.len() <= 42 {
             Multihash::wrap(/* Identity */ 0x00, &self.public_key).expect("Valid Multihash")
@@ -157,13 +163,19 @@ impl IPNSRecord {
                 public_key.verify(&signing_input, &signature)?;
             },
             3/* KeyType::ECDSA */ => unimplemented!(),
-            _ => panic!("Enum has only 4 possible values")
+            _ => panic!("Only 4 possible values")
         }
 
         Ok(())
     }
 
-    pub fn new<S, U>(cid: Cid, valid_for: Duration, sequence: u64, signer: S) -> Result<Self, Error>
+    pub fn new<S, U>(
+        cid: Cid,
+        valid_for: Duration,
+        sequence: u64,
+        ttl: u64,
+        signer: S,
+    ) -> Result<Self, Error>
     where
         S: RecordSigner<U>,
         U: Signature,
@@ -200,108 +212,8 @@ impl IPNSRecord {
             validity_type: validity_type as i32,
             validity,
             sequence,
-            ttl: 0, //TODO figure this out!
+            ttl,
             public_key,
         })
     }
-    /*
-    /// Create a new record using the EcDSA with the curve secp256k1.
-    pub fn new_with_secp256k1(
-        cid: Cid,
-        valid_for: Duration,
-        sequence: u64,
-        signer: impl Secp256k1Signer,
-    ) -> Result<Self, Error> {
-        let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
-
-        let validity = Utc::now()
-            .add(valid_for)
-            .to_rfc3339_opts(SecondsFormat::Nanos, false)
-            .into_bytes();
-
-        let validity_type = ValidityType::EOL;
-
-        let signing_input = {
-            let mut data = Vec::with_capacity(
-                value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
-            );
-
-            data.extend(value.iter());
-            data.extend(validity.iter());
-            data.extend(validity_type.to_string().as_bytes());
-
-            data
-        };
-
-        let signature = signer.try_sign(&signing_input)?;
-        let verif_key = signer.verifying_key();
-
-        let signature = signature.to_der().to_bytes().into_vec();
-
-        let public_key = CryptoKey {
-            key_type: KeyType::Secp256k1 as i32,
-            data: verif_key.to_bytes().to_vec(),
-        }
-        .encode_to_vec(); // Protobuf encoding
-
-        Ok(Self {
-            value,
-            signature,
-            validity_type: validity_type as i32,
-            validity,
-            sequence,
-            ttl: 0, //TODO figure this out!
-            public_key,
-        })
-    } */
-
-    /* /// Create a new record using the EdDSA with the curve ed25519.
-    pub fn new_with_ed25519(
-        cid: Cid,
-        valid_for: Duration,
-        sequence: u64,
-        signer: impl Ed25519Signer,
-    ) -> Result<Self, Error> {
-        let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
-
-        let validity = Utc::now()
-            .add(valid_for)
-            .to_rfc3339_opts(SecondsFormat::Nanos, false)
-            .into_bytes();
-
-        let validity_type = ValidityType::EOL;
-
-        let signing_input = {
-            let mut data = Vec::with_capacity(
-                value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
-            );
-
-            data.extend(value.iter());
-            data.extend(validity.iter());
-            data.extend(validity_type.to_string().as_bytes());
-
-            data
-        };
-
-        let signature = signer.try_sign(&signing_input)?;
-        let verif_key = signer.verifying_key();
-
-        let signature = signature.to_bytes().to_vec();
-
-        let public_key = CryptoKey {
-            key_type: KeyType::Ed25519 as i32,
-            data: verif_key.to_bytes().to_vec(),
-        }
-        .encode_to_vec(); // Protobuf encoding
-
-        Ok(Self {
-            value,
-            signature,
-            validity_type: validity_type as i32,
-            validity,
-            sequence,
-            ttl: 0, //TODO figure this out!
-            public_key,
-        })
-    } */
 }

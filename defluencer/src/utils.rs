@@ -182,20 +182,58 @@ pub fn get_path(date_time: DateTime<Utc>) -> String {
     )
 }
 
-/* pub fn pubkey_to_ipns(public_key: k256::PublicKey) -> IPNSAddress {
-    let verifying_key = VerifyingKey::from(public_key);
+/// A variable-length unsigned integer
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+pub struct VarInt(pub u64);
 
-    let public_key = CryptoKey {
-        key_type: KeyType::Secp256k1 as i32,
-        data: verifying_key.to_bytes().to_vec(),
+impl VarInt {
+    pub fn len(&self) -> usize {
+        match self.0 {
+            0..=0xFC => 1,
+            0xFD..=0xFFFF => 3,
+            0x10000..=0xFFFFFFFF => 5,
+            _ => 9,
+        }
     }
-    .encode_to_vec(); // Protobuf encoding
 
-    let ipns = {
-        let multihash = Multihash::wrap(0x00, &public_key).unwrap();
+    pub fn consensus_encode(&self) -> Vec<u8> {
+        match self.0 {
+            0..=0xFC => vec![self.0 as u8],
+            0xFD..=0xFFFF => {
+                let bytes = (self.0 as u16).to_ne_bytes();
+                vec![0xFD, bytes[0], bytes[1]]
+            }
+            0x10000..=0xFFFFFFFF => {
+                let bytes = (self.0 as u32).to_ne_bytes();
+                vec![0xFE, bytes[0], bytes[1], bytes[2], bytes[3]]
+            }
+            _ => {
+                let bytes = (self.0 as u64).to_ne_bytes();
+                vec![
+                    0xFF, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
+                    bytes[7],
+                ]
+            }
+        }
+    }
 
-        Cid::new_v1(0x72, multihash)
-    };
-
-    ipns.into()
-} */
+    pub fn consensus_decode(data: &[u8]) -> Self {
+        match data[0] {
+            0xFF => {
+                let x = u64::from_ne_bytes([
+                    data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+                ]);
+                VarInt(x)
+            }
+            0xFE => {
+                let x = u32::from_ne_bytes([data[1], data[2], data[3], data[4]]);
+                VarInt(x as u64)
+            }
+            0xFD => {
+                let x = u16::from_ne_bytes([data[1], data[2]]);
+                VarInt(x as u64)
+            }
+            n => VarInt(n as u64),
+        }
+    }
+}

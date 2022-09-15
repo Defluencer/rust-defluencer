@@ -18,6 +18,9 @@ signature = { version = "1", default-features = false, features = ["std", "diges
 strum = { version = "0.24", default-features = false, features = ["derive"] }
 thiserror = { version = "1", default-features = false, features = [] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
+
 [dev-dependencies]
 #rand_core = { version = "0.6", features = ["getrandom"] }
 rand_core = { version = "0.5", features = ["getrandom"] }

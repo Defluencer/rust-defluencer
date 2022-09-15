@@ -6,20 +6,12 @@ pub use errors::Error;
 
 use cid::Cid;
 
+use linked_data::types::IPLDLink;
 use multibase::Base;
 
 use serde::{Deserialize, Serialize};
 
 use traits::BlockSigner;
-
-// https://ipld.io/specs/codecs/dag-jose/fixtures/
-// https://ipld.io/specs/codecs/dag-jose/spec/
-// https://www.rfc-editor.org/rfc/rfc7515
-// https://www.rfc-editor.org/rfc/rfc7517
-// https://www.rfc-editor.org/rfc/rfc7518
-// https://www.iana.org/assignments/jose/jose.xhtml
-
-// https://www.rfc-editor.org/rfc/rfc8037.html
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AlgorithmType {
@@ -104,22 +96,23 @@ pub struct Signature {
 ///
 /// Don't forget to specify --input-codec="dag-json" and --output-codec="dag-jose"
 /// when adding to IPFS.
+///
+/// Assume only the first signature is used.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct JsonWebSignature {
     payload: String,
 
     signatures: Vec<Signature>,
+
+    #[serde(skip_serializing)]
+    link: IPLDLink,
 }
 
 impl JsonWebSignature {
-    pub fn get_link(&self) -> Cid {
-        let data = Base::Base64Url
-            .decode(&self.payload)
-            .expect("Base 64 Decoding");
-
-        let cid = Cid::read_bytes(&*data).expect("Valid Cid");
-
-        cid
+    pub fn get_link(&self) -> Result<Cid, Error> {
+        let data = Base::Base64Url.decode(&self.payload)?;
+        let cid = Cid::read_bytes(&*data)?;
+        Ok(cid)
     }
 
     /// Returns the input data used when signing.
@@ -127,17 +120,15 @@ impl JsonWebSignature {
         format!("{}.{}", self.payload, self.signatures[0].protected)
     }
 
-    pub fn get_header(&self) -> Header {
+    pub fn get_header(&self) -> Result<Header, Error> {
         let mut header = Header {
             algorithm: None,
             json_web_key: None,
         };
 
         if !self.signatures[0].protected.is_empty() {
-            let data = Base::Base64Url
-                .decode(&self.signatures[0].protected)
-                .expect("Base 64 Decoding");
-            let protected: Header = serde_json::from_slice(&data).expect("Deserialization");
+            let data = Base::Base64Url.decode(&self.signatures[0].protected)?;
+            let protected: Header = serde_json::from_slice(&data)?;
 
             header.algorithm = protected.algorithm;
             header.json_web_key = protected.json_web_key;
@@ -153,14 +144,14 @@ impl JsonWebSignature {
             }
         }
 
-        header
+        Ok(header)
     }
 
     /// Verify a dag-jose block.
     pub fn verify(&self) -> Result<(), Error> {
         use signature::{Signature, Verifier};
 
-        let header = self.get_header();
+        let header = self.get_header()?;
 
         let (algo, jwk) = match (header.algorithm, header.json_web_key) {
             (Some(algo), Some(jwk)) => (algo, jwk),
@@ -169,37 +160,31 @@ impl JsonWebSignature {
 
         let signing_input = self.get_signature_inputs();
 
-        let signature = Base::Base64Url
-            .decode(&self.signatures[0].signature)
-            .expect("Base 64 Decoding");
+        let signature = Base::Base64Url.decode(&self.signatures[0].signature)?;
 
         match (algo, &jwk.key_type, &jwk.curve) {
             (AlgorithmType::ES256K, KeyType::EllipticCurve, CurveType::Secp256k1) => {
-                let public_key_x = Base::Base64Url.decode(&jwk.x).expect("Base 64 Decoding");
-                let public_key_y = Base::Base64Url
-                    .decode(&jwk.y.expect("Uncompressed Public Key"))
-                    .expect("Base 64 Decoding");
-                let public_key = [vec![0x04], public_key_x, public_key_y].concat();
+                let mut public_key = vec![0x04]; // Uncompressed key
 
-                let verif_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&public_key)
-                    .expect("Valid Public Key");
+                public_key.extend(Base::Base64Url.decode(&jwk.x)?);
+                public_key
+                    .extend(Base::Base64Url.decode(&jwk.y.expect("Uncompressed Public Key"))?);
 
-                let signature =
-                    k256::ecdsa::Signature::from_bytes(&signature).expect("Valid Signature");
+                let verif_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&public_key)?;
+
+                let signature = k256::ecdsa::Signature::from_bytes(&signature)?;
 
                 verif_key.verify(signing_input.as_bytes(), &signature)?;
             }
             (AlgorithmType::EdDSA, KeyType::OctetString, CurveType::Ed25519) => {
-                let public_key = Base::Base64Url.decode(&jwk.x).expect("Base 64 Decoding");
-                let public_key =
-                    ed25519_dalek::PublicKey::from_bytes(&public_key).expect("Valid Public Key");
+                let public_key = Base::Base64Url.decode(&jwk.x)?;
+                let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key)?;
 
-                let signature =
-                    ed25519::Signature::from_bytes(&signature).expect("Valid Signature");
+                let signature = ed25519::Signature::from_bytes(&signature)?;
 
                 public_key.verify(signing_input.as_bytes(), &signature)?;
             }
-            _ => return Err(Error::Crypto),
+            _ => unimplemented!(),
         }
 
         Ok(())
@@ -218,7 +203,7 @@ impl JsonWebSignature {
             json_web_key: None,
         };
 
-        let protected = serde_json::to_vec(&protected).expect("Serialization");
+        let protected = serde_json::to_vec(&protected)?;
         let protected = Base::Base64Url.encode(protected);
 
         let message = format!("{}.{}", payload, protected);
@@ -241,6 +226,7 @@ impl JsonWebSignature {
                 protected,
                 signature,
             }],
+            link: IPLDLink::default(), // Skipped when serializing anyway
         };
 
         Ok(jws)

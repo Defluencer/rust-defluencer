@@ -43,6 +43,7 @@ fn ed25519_roundtrip() {
 
     let duration = Duration::days(30);
 
+    let ttl = 0;
     let sequence = 0;
 
     // Need rand_core v0.5
@@ -80,7 +81,7 @@ fn ed25519_roundtrip() {
 
     let signer = Ed25519IPNSRecordSigner { keypair };
 
-    let record = IPNSRecord::new(value, duration, sequence, signer).unwrap();
+    let record = IPNSRecord::new(value, duration, sequence, ttl, signer).unwrap();
 
     let raw = record.encode_to_vec();
 
@@ -124,6 +125,7 @@ fn secp256k1_roundtrip() {
 
     let duration = Duration::days(30);
 
+    let ttl = 0;
     let sequence = 0;
 
     // Need rand_core v0.6
@@ -160,7 +162,7 @@ fn secp256k1_roundtrip() {
 
     println!("Addr: {}", addr);
 
-    let record = IPNSRecord::new(value, duration, sequence, signer).unwrap();
+    let record = IPNSRecord::new(value, duration, sequence, ttl, signer).unwrap();
 
     assert_eq!(record.get_address(), addr);
 
