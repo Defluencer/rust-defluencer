@@ -31,6 +31,8 @@ use linked_data::{
 
 use ipfs_api::{responses::PubSubMessage, IpfsService};
 
+//TODO From & Into IPFS for defluencer
+
 #[derive(Default, Clone)]
 pub struct Defluencer {
     ipfs: IpfsService,
@@ -153,61 +155,63 @@ impl Defluencer {
     ) -> impl Stream<Item = Result<(Cid, ChannelMetadata), Error>> + '_ {
         let set = HashSet::new();
 
-        let resolve_pool = FuturesUnordered::<_>::new();
-        let metadata_pool = FuturesUnordered::<_>::new();
-        let follows_pool = FuturesUnordered::<_>::new();
+        let resolve_pool: FuturesUnordered<_> = addresses
+            .into_iter()
+            .map(|addr| self.ipfs.name_resolve(addr.into()))
+            .collect();
 
-        for addr in addresses {
-            resolve_pool.push(self.ipfs.name_resolve(addr.into()));
-        }
+        let metadata_pool = FuturesUnordered::<_>::new();
+
+        let follows_pool = FuturesUnordered::<_>::new();
 
         stream::try_unfold(
             (set, resolve_pool, metadata_pool, follows_pool),
             move |(mut set, mut resolve_pool, mut metadata_pool, mut follows_pool)| async move {
-                futures::select! {
-                    result = resolve_pool.try_next() => {
-                        let cid = match result? {
-                            Some(cid) => cid,
-                            None => return Result::<_, Error>::Ok(None),
-                        };
+                loop {
+                    futures::select! {
+                        result = resolve_pool.try_next() => {
+                            let cid = match result? {
+                                Some(cid) => cid,
+                                None => continue,
+                            };
 
-                        if !set.insert(cid) {
-                            return Ok(None);
-                        }
+                            if !set.insert(cid) {
+                                continue;
+                            }
 
-                        metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await) });
-                    },
-                    option = metadata_pool.next() => {
-                         let (cid, metadata) = match option {
-                            Some(mt) => mt,
-                            None => return Ok(None),
-                        };
+                            metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await) });
+                        },
+                        option = metadata_pool.next() => {
+                             let (cid, metadata) = match option {
+                                Some(mt) => mt,
+                                None => continue,
+                            };
 
-                        let metadata = metadata?;
+                            let metadata = metadata?;
 
-                        if let Some(ipld) = metadata.follows {
-                            follows_pool.push(self.ipfs.dag_get::<&str, Follows>(ipld.link, None));
-                        }
+                            if let Some(ipld) = metadata.follows {
+                                follows_pool.push(self.ipfs.dag_get::<&str, Follows>(ipld.link, None));
+                            }
 
-                        let next_item = (cid, metadata.clone());
+                            let next_item = (cid, metadata.clone());
 
-                        return Ok(Some((next_item,
-                            (set, resolve_pool, metadata_pool, follows_pool),
-                        )));
-                    },
-                    result = follows_pool.try_next() => {
-                         let follows = match result? {
-                            Some(fl) => fl,
-                            None => return Ok(None),
-                        };
+                            return Ok(Some((next_item,
+                                (set, resolve_pool, metadata_pool, follows_pool),
+                            )));
+                        },
+                        result = follows_pool.try_next() => {
+                             let follows = match result? {
+                                Some(fl) => fl,
+                                None => continue,
+                            };
 
-                        for addr in follows.followees {
-                            resolve_pool.push(self.ipfs.name_resolve(addr.into()));
-                        }
-                    },
+                            for addr in follows.followees {
+                                resolve_pool.push(self.ipfs.name_resolve(addr.into()));
+                            }
+                        },
+                        complete => return Ok(None),
+                    }
                 }
-
-                Ok(None)
             },
         )
 
