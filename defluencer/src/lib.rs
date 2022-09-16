@@ -110,38 +110,40 @@ impl Defluencer {
         stream::try_unfold(
             (sequence, latest_channel_cid, stream),
             move |(mut sequence, mut latest_channel_cid, mut stream)| async move {
-                let msg = match stream.try_next().await? {
-                    Some(msg) => msg,
-                    None => return Result::<_, Error>::Ok(None),
-                };
+                loop {
+                    let msg = match stream.try_next().await? {
+                        Some(msg) => msg,
+                        None => return Result::<_, Error>::Ok(None),
+                    };
 
-                let PubSubMessage { from: _, data } = msg;
+                    let PubSubMessage { from: _, data } = msg;
 
-                let record = IPNSRecord::from_bytes(&data)?;
+                    let record = IPNSRecord::from_bytes(&data)?;
 
-                let seq = record.get_sequence();
+                    let seq = record.get_sequence();
 
-                if sequence >= seq {
-                    return Ok(None);
+                    if sequence >= seq {
+                        continue;
+                    }
+
+                    let cid = record.get_value();
+
+                    if latest_channel_cid == cid {
+                        continue;
+                    }
+
+                    if record.verify(channel_addr.into()).is_err() {
+                        continue;
+                    }
+
+                    sequence = seq;
+                    latest_channel_cid = cid;
+
+                    return Ok(Some((
+                        latest_channel_cid,
+                        (sequence, latest_channel_cid, stream),
+                    )));
                 }
-
-                let cid = record.get_value();
-
-                if latest_channel_cid == cid {
-                    return Ok(None);
-                }
-
-                if record.verify(channel_addr.into()).is_err() {
-                    return Ok(None);
-                }
-
-                sequence = seq;
-                latest_channel_cid = cid;
-
-                Ok(Some((
-                    latest_channel_cid,
-                    (sequence, latest_channel_cid, stream),
-                )))
             },
         )
     }
