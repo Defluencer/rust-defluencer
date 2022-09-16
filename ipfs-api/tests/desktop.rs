@@ -4,7 +4,7 @@
 mod tests {
     use bytes::Bytes;
     use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
-    use futures_util::{future::AbortHandle, future::FutureExt, stream, StreamExt};
+    use futures_util::{future::FutureExt, stream, StreamExt};
     use ipfs_api::{
         responses::{Codec, PinMode},
         IpfsService,
@@ -42,10 +42,8 @@ mod tests {
         let subscribe = async {
             let ipfs = IpfsService::default();
 
-            let (_, regis) = AbortHandle::new_pair();
-
             let mut stream = ipfs
-                .pubsub_sub(TOPIC.as_bytes().to_owned(), regis)
+                .pubsub_sub(TOPIC.as_bytes().to_owned())
                 .take(1)
                 .boxed_local();
 

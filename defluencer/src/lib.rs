@@ -12,7 +12,6 @@ use cid::Cid;
 use errors::Error;
 
 use futures::{
-    future::AbortRegistration,
     stream::{self, FuturesUnordered},
     Stream, StreamExt, TryStreamExt,
 };
@@ -73,10 +72,9 @@ impl Defluencer {
     pub fn subscribe_agregation_updates(
         &self,
         channel: String,
-        regis: AbortRegistration,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
         self.ipfs
-            .pubsub_sub(channel.into_bytes(), regis)
+            .pubsub_sub(channel.into_bytes())
             .err_into()
             .try_filter_map(move |msg| async move {
                 let PubSubMessage { from: _, data } = msg;
@@ -95,17 +93,13 @@ impl Defluencer {
     pub fn subscribe_channel_updates(
         &self,
         channel_addr: IPNSAddress,
-        regis: AbortRegistration,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
         let topic = channel_addr.to_pubsub_topic();
 
-        let stream = self
-            .ipfs
-            .pubsub_sub(topic.into_bytes(), regis)
-            .boxed_local();
-
         let latest_channel_cid = Cid::default();
         let sequence = 0;
+
+        let stream = self.ipfs.pubsub_sub(topic.into_bytes()).boxed_local();
 
         stream::try_unfold(
             (sequence, latest_channel_cid, stream),

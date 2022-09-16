@@ -4,10 +4,7 @@ pub mod responses;
 use std::{borrow::Cow, sync::Arc};
 
 use errors::{Error, IPFSError};
-use futures_util::{
-    future::{AbortRegistration, Abortable},
-    stream, AsyncBufReadExt, Stream, StreamExt, TryStreamExt,
-};
+use futures_util::{stream, AsyncBufReadExt, Stream, StreamExt, TryStreamExt};
 
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -574,7 +571,6 @@ impl IpfsService {
     pub fn pubsub_sub(
         &self,
         topic: Vec<u8>,
-        regis: AbortRegistration,
     ) -> impl Stream<Item = Result<PubSubMessage, Error>> + '_ {
         stream::once(async move {
             let url = self.base_url.join("pubsub/sub")?;
@@ -590,9 +586,7 @@ impl IpfsService {
 
             let stream = response.bytes_stream();
 
-            let abortable_stream = Abortable::new(stream, regis);
-
-            let line_stream = abortable_stream
+            let line_stream = stream
                 //TODO .err_into() require implement from reqwest error for std::io::Error
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))
                 .into_async_read()
