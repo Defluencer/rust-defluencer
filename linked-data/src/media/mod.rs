@@ -5,7 +5,7 @@ pub mod video;
 
 use serde::Deserialize;
 
-use crate::comments::Comment;
+use crate::{comments::Comment, types::IPLDLink};
 
 use self::{
     blog::{FullPost, MicroPost},
@@ -28,6 +28,15 @@ impl Media {
             Media::Blog(metadata) => metadata.user_timestamp,
             Media::Video(metadata) => metadata.user_timestamp,
             Media::Comment(metadata) => metadata.user_timestamp,
+        }
+    }
+
+    pub fn identity(&self) -> IPLDLink {
+        match self {
+            Media::MicroBlog(metadata) => metadata.identity,
+            Media::Blog(metadata) => metadata.identity,
+            Media::Video(metadata) => metadata.identity,
+            Media::Comment(metadata) => metadata.identity,
         }
     }
 }
