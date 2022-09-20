@@ -150,14 +150,14 @@ where
     }
 
     /// Create a new micro blog post.
-    pub async fn create_micro_blog_post(&self, content: String) -> Result<Cid, Error> {
+    pub async fn create_micro_blog_post(&self, content: String, pin: bool) -> Result<Cid, Error> {
         let micro_post = MicroPost {
             identity: self.identity,
             content,
             user_timestamp: Utc::now().timestamp(),
         };
 
-        self.add_content(&micro_post, true).await
+        self.add_content(&micro_post, pin).await
     }
 
     /// Create a new blog post.
@@ -167,6 +167,7 @@ where
         title: String,
         image: &std::path::Path,
         markdown: &std::path::Path,
+        pin: bool,
     ) -> Result<Cid, Error> {
         let (image, markdown) = tokio::try_join!(
             add_image(&self.ipfs, image),
@@ -181,7 +182,7 @@ where
             title,
         };
 
-        self.add_content(&full_post, true).await
+        self.add_content(&full_post, pin).await
     }
 
     /// Create a new blog post.
@@ -191,6 +192,7 @@ where
         title: String,
         image: web_sys::File,
         markdown: web_sys::File,
+        pin: bool,
     ) -> Result<Cid, Error> {
         let (image, markdown) = futures::try_join!(
             add_image(&self.ipfs, image),
@@ -205,7 +207,7 @@ where
             title,
         };
 
-        self.add_content(&full_post, true).await
+        self.add_content(&full_post, pin).await
     }
 
     /// Create a new video post.
@@ -215,6 +217,7 @@ where
         title: String,
         video: Cid,
         thumbnail: &std::path::Path,
+        pin: bool,
     ) -> Result<Cid, Error> {
         let (image, duration) =
             tokio::try_join!(add_image(&self.ipfs, thumbnail), self.video_duration(video))?;
@@ -228,7 +231,7 @@ where
             video: video.into(),
         };
 
-        self.add_content(&video_post, true).await
+        self.add_content(&video_post, pin).await
     }
 
     /// Create a new video post.
@@ -238,6 +241,7 @@ where
         title: String,
         video: Cid,
         thumbnail: web_sys::File,
+        pin: bool,
     ) -> Result<Cid, Error> {
         let (image, duration) =
             futures::try_join!(add_image(&self.ipfs, thumbnail), self.video_duration(video))?;
@@ -251,11 +255,11 @@ where
             video: video.into(),
         };
 
-        self.add_content(&video_post, true).await
+        self.add_content(&video_post, pin).await
     }
 
     /// Create a new comment on the specified media.
-    pub async fn create_comment(&self, origin: Cid, text: String) -> Result<Cid, Error> {
+    pub async fn create_comment(&self, origin: Cid, text: String, pin: bool) -> Result<Cid, Error> {
         let comment = Comment {
             identity: self.identity,
             user_timestamp: Utc::now().timestamp(),
@@ -263,10 +267,10 @@ where
             text,
         };
 
-        self.add_content(&comment, true).await
+        self.add_content(&comment, pin).await
     }
 
-    /// Returns the CID of the dag-jose block linking to the content
+    /// Returns the CID of the signed block linking to the content
     async fn add_content<V>(&self, metadata: &V, pin: bool) -> Result<Cid, Error>
     where
         V: ?Sized + Serialize,
@@ -275,7 +279,9 @@ where
 
         let signed_cid = self.create_signed_link(content_cid).await?;
 
-        self.ipfs.pin_add(signed_cid, pin).await?;
+        if pin {
+            self.ipfs.pin_add(signed_cid, true).await?;
+        }
 
         Ok(signed_cid)
     }
