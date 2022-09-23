@@ -2,9 +2,7 @@ use crate::errors::Error;
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 
-use ipfs_api::{responses::Codec, IpfsService};
-
-use linked_data::media::mime_type::MimeTyped;
+use ipfs_api::IpfsService;
 
 use cid::Cid;
 
@@ -38,13 +36,6 @@ pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, E
 
     let cid = ipfs.add(bytes).await?;
 
-    let mime_typed = MimeTyped {
-        mime_type,
-        data: cid.into(),
-    };
-
-    let cid = ipfs.dag_put(&mime_typed, Codec::default()).await?;
-
     Ok(cid)
 }
 
@@ -66,13 +57,6 @@ pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid
     let stream = tokio_util::io::ReaderStream::new(file);
 
     let cid = ipfs.add(stream).await?;
-
-    let mime_typed = MimeTyped {
-        mime_type,
-        data: cid.into(),
-    };
-
-    let cid = ipfs.dag_put(&mime_typed, Codec::default()).await?;
 
     Ok(cid)
 }
