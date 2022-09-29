@@ -17,6 +17,7 @@ use linked_data::{
     identity::Identity,
     media::{
         blog::{FullPost, MicroPost},
+        chat::ChatInfo,
         video::{Day, Hour, Minute, Video},
     },
     types::{IPLDLink, IPNSAddress},
@@ -332,10 +333,10 @@ where
     /// Returns a DAG-JOSE block CID used to authenticate chat message.
     ///
     /// Message will only be valid when sent by this IPFS node.
-    pub async fn chat_signature(&self) -> Result<Cid, Error> {
-        let peer = self.ipfs.peer_id().await?;
+    pub async fn chat_signature(&self, chat_info: ChatInfo) -> Result<Cid, Error> {
+        let cid = self.ipfs.dag_put(&chat_info, Codec::default()).await?;
 
-        let cid = self.create_signed_link(peer).await?;
+        let cid = self.create_signed_link(cid).await?;
 
         Ok(cid)
     }
