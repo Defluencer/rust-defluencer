@@ -38,7 +38,7 @@ impl TryFrom<&str> for PeerId {
 
         let multihash = Multihash::from_bytes(&decoded)?;
 
-        let cid = Cid::new_v1(0x70, multihash);
+        let cid = Cid::new_v1(/* Libp2p key */ 0x72, multihash);
 
         Ok(Self(cid))
     }
@@ -58,7 +58,17 @@ impl Into<Cid> for PeerId {
 
 impl Display for PeerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        write!(f, "{}", self.to_legacy_string())
+    }
+}
+
+impl PeerId {
+    pub fn to_legacy_string(&self) -> String {
+        Base::Base58Btc.encode(self.0.hash().to_bytes())
+    }
+
+    pub fn to_cid_string(&self) -> String {
+        self.0.to_string()
     }
 }
 
@@ -101,7 +111,7 @@ impl IPNSAddress {
         // "/ipns/".len() == 6
         let cid = Cid::try_from(&decoded[6..])?;
 
-        let cid_v1 = Cid::new_v1(0x72, *cid.hash());
+        let cid_v1 = Cid::new_v1(/* Libp2p key */ 0x72, *cid.hash());
 
         Ok(Self(cid_v1))
     }
