@@ -7,24 +7,26 @@ use serde::{Deserialize, Serialize};
 /// Metadata for video thumbnail and playback.
 ///
 /// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
+#[derive(Deserialize, Serialize, PartialEq, Clone, Debug, Default)]
 pub struct Video {
     pub identity: IPLDLink,
 
     /// Timestamp at the time of publication in Unix time.
     pub user_timestamp: i64,
 
-    /// Duration in seconds.
-    pub duration: f64,
-
-    /// Link to Raw node of thumbnail image.
-    pub image: IPLDLink,
-
-    /// Link to TimecodeNode.
+    /// Link to video.
     pub video: IPLDLink,
 
     /// Title of this video.
     pub title: String,
+
+    /// Duration in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+
+    /// Link to thumbnail image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<IPLDLink>,
 }
 
 /// Timecode structure root CID.

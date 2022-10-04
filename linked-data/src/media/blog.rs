@@ -2,25 +2,11 @@ use crate::types::IPLDLink;
 
 use serde::{Deserialize, Serialize};
 
-/// A micro blog post (Twitter-sytle).
+/// Metadata for a blog post, article or essay.
 ///
 /// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
-pub struct MicroPost {
-    pub identity: IPLDLink,
-
-    /// Timestamp at the time of publication in Unix time.
-    pub user_timestamp: i64,
-
-    /// Text as content of the blog post.
-    pub content: String,
-}
-
-/// Metadata for a long blog post.
-///
-/// Recursive pin.
-#[derive(Deserialize, Serialize, PartialEq, Clone, Debug)]
-pub struct FullPost {
+#[derive(Deserialize, Serialize, PartialEq, Clone, Debug, Default)]
+pub struct BlogPost {
     pub identity: IPLDLink,
 
     /// Timestamp at the time of publication in Unix time.
@@ -29,9 +15,14 @@ pub struct FullPost {
     /// Link to markdown file
     pub content: IPLDLink,
 
-    /// Link to thumbnail image.
-    pub image: IPLDLink,
-
     /// The title of this blog post
     pub title: String,
+
+    /// Link to thumbnail image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<IPLDLink>,
+
+    /// Number of words in the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_count: Option<u64>,
 }

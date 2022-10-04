@@ -210,88 +210,7 @@ impl Defluencer {
                 }
             },
         )
-
-        /* stream::once(async move {
-            let channel_cid = self.ipfs.name_resolve(addr.into()).await?;
-
-            let id = self
-                .ipfs
-                .dag_get::<&str, Identity>(channel_cid, Some("/link/identity"))
-                .await?;
-
-            Result::<_, Error>::Ok(id)
-        })
-        .map_ok(|identity| self.web_crawl_step(identity))
-        .try_flatten() */
     }
-
-    /* fn web_crawl_step(
-        &self,
-        channels: HashMap<Cid, ChannelMetadata>,
-    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
-        stream::try_unfold(
-            (channels.clone(), channels),
-            move |(mut visited, mut unvisited)| async move {
-                let map = if unvisited.len() > 0 {
-                    let identities = self.followees_identity(unvisited.values()).await;
-
-                    self.channels_metadata(identities.values()).await
-                } else {
-                    return Result::<_, Error>::Ok(None);
-                };
-
-                let diff = map
-                    .into_iter()
-                    .filter_map(|(key, channel)| match visited.contains_key(&key) {
-                        true => None,
-                        false => {
-                            visited.insert(key, channel.clone());
-
-                            Some((key, channel))
-                        }
-                    })
-                    .collect::<HashMap<Cid, ChannelMetadata>>();
-
-                unvisited = diff.clone();
-
-                Ok(Some((diff, (visited, unvisited))))
-            },
-        )
-    } */
-
-    /* fn web_crawl_step(
-        &self,
-        identity: Identity,
-    ) -> impl Stream<Item = Result<HashMap<Cid, ChannelMetadata>, Error>> + '_ {
-        stream::try_unfold(
-            (Some(identity), HashMap::new(), HashMap::new()),
-            move |(mut identity, mut visited, mut unvisited)| async move {
-                let map = match (identity.take(), unvisited.len()) {
-                    (Some(id), _) => self.channels_metadata(std::iter::once(&id)).await,
-                    (None, x) if x != 0 => {
-                        let identities = self.followees_identity(unvisited.values()).await;
-
-                        self.channels_metadata(identities.values()).await
-                    }
-                    (_, _) => return Result::<_, Error>::Ok(None),
-                };
-
-                let diff = map
-                    .into_iter()
-                    .filter_map(
-                        |(key, channel)| match visited.insert(key, channel.clone()) {
-                            Some(_) => None,
-                            None => Some((key, channel)),
-                        },
-                    )
-                    .collect::<HashMap<Cid, ChannelMetadata>>();
-
-                unvisited = diff.clone();
-
-                Ok(Some((diff, (identity, visited, unvisited))))
-            },
-        )
-    } */
 
     /// Return all the cids and channels of all the identities provided.
     pub async fn channels_metadata(
@@ -301,7 +220,7 @@ impl Defluencer {
         let stream: FuturesUnordered<_> = identities
             .filter_map(|identity| {
                 identity
-                    .channel_ipns
+                    .ipns_addr
                     .map(|ipns| self.ipfs.name_resolve(ipns.into()))
             })
             .collect();

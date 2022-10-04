@@ -16,7 +16,7 @@ use linked_data::{
     comments::Comment,
     identity::Identity,
     media::{
-        blog::{FullPost, MicroPost},
+        blog::BlogPost,
         chat::ChatInfo,
         video::{Day, Hour, Minute, Video},
     },
@@ -66,13 +66,12 @@ where
         user_name: impl Into<Cow<'static, str>>,
         ipfs: IpfsService,
         signer: T,
-        channel_ipns: Option<IPNSAddress>,
+        ipns_addr: Option<IPNSAddress>,
     ) -> Result<Self, Error> {
         let identity = Identity {
-            display_name: user_name.into().into_owned(),
-            avatar: None,
-            channel_ipns,
-            addr: None,
+            name: user_name.into().into_owned(),
+            ipns_addr,
+            ..Default::default()
         };
 
         let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
@@ -90,25 +89,25 @@ where
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn update_identity(
         mut self,
-        display_name: Option<String>,
+        name: Option<String>,
         avatar: Option<std::path::PathBuf>,
-        channel_ipns: Option<IPNSAddress>,
+        ipns_addr: Option<IPNSAddress>,
     ) -> Result<Cid, Error> {
         let mut identity = self
             .ipfs
             .dag_get::<&str, Identity>(self.identity.link, None)
             .await?;
 
-        if let Some(name) = display_name {
-            identity.display_name = name;
+        if let Some(name) = name {
+            identity.name = name;
         }
 
         if let Some(avatar) = avatar {
             identity.avatar = Some(add_image(&self.ipfs, &avatar).await?.into());
         }
 
-        if let Some(ipns) = channel_ipns {
-            identity.channel_ipns = Some(ipns);
+        if let Some(ipns) = ipns_addr {
+            identity.ipns_addr = Some(ipns);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -122,25 +121,25 @@ where
     #[cfg(target_arch = "wasm32")]
     pub async fn update_identity(
         &mut self,
-        display_name: Option<String>,
+        name: Option<String>,
         avatar: Option<web_sys::File>,
-        channel_ipns: Option<IPNSAddress>,
+        ipns_addr: Option<IPNSAddress>,
     ) -> Result<Cid, Error> {
         let mut identity = self
             .ipfs
             .dag_get::<&str, Identity>(self.identity.link, None)
             .await?;
 
-        if let Some(name) = display_name {
-            identity.display_name = name;
+        if let Some(name) = name {
+            identity.name = name;
         }
 
         if let Some(avatar) = avatar {
             identity.avatar = Some(add_image(&self.ipfs, avatar).await?.into());
         }
 
-        if let Some(ipns) = channel_ipns {
-            identity.channel_ipns = Some(ipns);
+        if let Some(ipns) = ipns_addr {
+            identity.ipns_addr = Some(ipns);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -153,13 +152,14 @@ where
     /// Create a new micro blog post.
     pub async fn create_micro_blog_post(
         &self,
-        content: String,
+        text: String,
         pin: bool,
-    ) -> Result<(Cid, MicroPost), Error> {
-        let micro_post = MicroPost {
+    ) -> Result<(Cid, Comment), Error> {
+        let micro_post = Comment {
             identity: self.identity,
-            content,
+            text,
             user_timestamp: Utc::now().timestamp(),
+            origin: None,
         };
 
         let cid = self.add_content(&micro_post, pin).await?;
@@ -172,26 +172,39 @@ where
     pub async fn create_blog_post(
         &self,
         title: String,
-        image: &std::path::Path,
+        image: Option<&std::path::Path>,
         markdown: &std::path::Path,
+        word_count: Option<u64>,
         pin: bool,
-    ) -> Result<(Cid, FullPost), Error> {
-        let (image, markdown) = tokio::try_join!(
-            add_image(&self.ipfs, image),
-            add_markdown(&self.ipfs, markdown)
-        )?;
+    ) -> Result<(Cid, BlogPost), Error> {
+        let (image, content) = match image {
+            Some(image) => {
+                let (image, markdown) = tokio::try_join!(
+                    add_image(&self.ipfs, image),
+                    add_markdown(&self.ipfs, markdown)
+                )?;
 
-        let full_post = FullPost {
-            identity: self.identity,
-            user_timestamp: Utc::now().timestamp(),
-            content: markdown.into(),
-            image: image.into(),
-            title,
+                (Some(image.into()), markdown.into())
+            }
+            None => {
+                let markdown = add_markdown(&self.ipfs, markdown).await?;
+
+                (None, markdown.into())
+            }
         };
 
-        let cid = self.add_content(&full_post, pin).await?;
+        let post = BlogPost {
+            identity: self.identity,
+            user_timestamp: Utc::now().timestamp(),
+            content,
+            image,
+            title,
+            word_count,
+        };
 
-        Ok((cid, full_post))
+        let cid = self.add_content(&post, pin).await?;
+
+        Ok((cid, post))
     }
 
     /// Create a new blog post.
@@ -199,26 +212,39 @@ where
     pub async fn create_blog_post(
         &self,
         title: String,
-        image: web_sys::File,
+        image: Option<web_sys::File>,
         markdown: web_sys::File,
+        word_count: Option<u64>,
         pin: bool,
-    ) -> Result<(Cid, FullPost), Error> {
-        let (image, markdown) = futures::try_join!(
-            add_image(&self.ipfs, image),
-            add_markdown(&self.ipfs, markdown)
-        )?;
+    ) -> Result<(Cid, BlogPost), Error> {
+        let (image, content) = match image {
+            Some(image) => {
+                let (image, markdown) = futures::try_join!(
+                    add_image(&self.ipfs, image),
+                    add_markdown(&self.ipfs, markdown)
+                )?;
 
-        let full_post = FullPost {
-            identity: self.identity,
-            user_timestamp: Utc::now().timestamp(),
-            content: markdown.into(),
-            image: image.into(),
-            title,
+                (Some(image.into()), markdown.into())
+            }
+            None => {
+                let markdown = add_markdown(&self.ipfs, markdown).await?;
+
+                (None, markdown.into())
+            }
         };
 
-        let cid = self.add_content(&full_post, pin).await?;
+        let post = BlogPost {
+            identity: self.identity,
+            user_timestamp: Utc::now().timestamp(),
+            content,
+            image,
+            title,
+            word_count,
+        };
 
-        Ok((cid, full_post))
+        let cid = self.add_content(&post, pin).await?;
+
+        Ok((cid, post))
     }
 
     /// Create a new video post.
@@ -236,9 +262,9 @@ where
         let video_post = Video {
             identity: self.identity,
             user_timestamp: Utc::now().timestamp(),
-            image: image.into(),
+            image: Some(image.into()),
             title,
-            duration,
+            duration: Some(duration),
             video: video.into(),
         };
 
@@ -262,9 +288,9 @@ where
         let video_post = Video {
             identity: self.identity,
             user_timestamp: Utc::now().timestamp(),
-            image: image.into(),
+            image: Some(image.into()),
             title,
-            duration,
+            duration: Some(duration),
             video: video.into(),
         };
 
@@ -283,7 +309,7 @@ where
         let comment = Comment {
             identity: self.identity,
             user_timestamp: Utc::now().timestamp(),
-            origin,
+            origin: Some(origin),
             text,
         };
 

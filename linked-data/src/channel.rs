@@ -5,11 +5,8 @@ use serde::{Deserialize, Serialize};
 /// Non exhaustive list of links to various social media features.
 ///
 /// The Cid of this object should be publicly available and trusted to be the latest version.
-#[derive(Deserialize, Serialize, Default, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Default)]
 pub struct ChannelMetadata {
-    // Growth only counter.
-    // Increment every update.
-    //pub seq: u64,
     pub identity: IPLDLink,
 
     #[serde(skip_serializing_if = "Option::is_none")]

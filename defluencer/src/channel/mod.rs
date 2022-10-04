@@ -61,12 +61,12 @@ impl Channel<LocalUpdater> {
         let mut identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
 
         use heck::ToSnakeCase;
-        let key = identity.display_name.to_snake_case();
+        let key = identity.name.to_snake_case();
 
         let key_pair = ipfs.key_gen(key.clone()).await?;
         let addr = Cid::try_from(key_pair.id)?;
 
-        identity.channel_ipns = Some(addr.into());
+        identity.ipns_addr = Some(addr.into());
 
         let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
 
@@ -105,9 +105,9 @@ where
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn update_identity(
         &self,
-        display_name: Option<String>,
+        name: Option<String>,
         avatar: Option<std::path::PathBuf>,
-        channel_ipns: Option<Cid>,
+        ipns_addr: Option<Cid>,
     ) -> Result<Cid, Error> {
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -116,16 +116,16 @@ where
             .dag_get::<&str, Identity>(channel.identity.link, None)
             .await?;
 
-        if let Some(name) = display_name {
-            identity.display_name = name;
+        if let Some(name) = name {
+            identity.name = name;
         }
 
         if let Some(avatar) = avatar {
             identity.avatar = Some(add_image(&self.ipfs, &avatar).await?.into());
         }
 
-        if let Some(ipns) = channel_ipns {
-            identity.channel_ipns = Some(ipns.into());
+        if let Some(ipns) = ipns_addr {
+            identity.ipns_addr = Some(ipns.into());
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -141,9 +141,9 @@ where
     #[cfg(target_arch = "wasm32")]
     pub async fn update_identity(
         &self,
-        display_name: Option<String>,
+        name: Option<String>,
         avatar: Option<web_sys::File>,
-        channel_ipns: Option<Cid>,
+        ipns_addr: Option<Cid>,
     ) -> Result<Cid, Error> {
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -152,16 +152,16 @@ where
             .dag_get::<&str, Identity>(channel.identity.link, None)
             .await?;
 
-        if let Some(name) = display_name {
-            identity.display_name = name;
+        if let Some(name) = name {
+            identity.name = name;
         }
 
         if let Some(avatar) = avatar {
             identity.avatar = Some(add_image(&self.ipfs, avatar).await?.into());
         }
 
-        if let Some(ipns) = channel_ipns {
-            identity.channel_ipns = Some(ipns.into());
+        if let Some(ipns) = ipns_addr {
+            identity.ipns_addr = Some(ipns.into());
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -529,7 +529,7 @@ where
     /// Add a new comment on the specified media.
     pub async fn add_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
         let comment: Comment = self.ipfs.dag_get(comment_cid, Some("/link")).await?;
-        let media_cid = comment.origin;
+        let media_cid = comment.origin.expect("Comment Origin");
 
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -565,7 +565,7 @@ where
     /// Remove a specific comment.
     pub async fn remove_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
         let comment: Comment = self.ipfs.dag_get(comment_cid, Some("/link")).await?;
-        let media_cid = comment.origin;
+        let media_cid = comment.origin.expect("Comment Origin");
 
         let (root_cid, mut channel) = self.get_metadata().await?;
 

@@ -8,20 +8,32 @@ use serde::{Deserialize, Serialize};
 ///
 /// Current system use multiple keys but one key in a HW could sign IPNS records AND DAG-JOSE blocks.
 /// Just need to build the app for that.
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, Default)]
 pub struct Identity {
-    /// Public choosen name.
-    pub display_name: String,
+    /// Choosen name.
+    pub name: String,
 
-    /// Mime-typed image link.
+    /// User short biography.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+
+    /// Link to background image
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<IPLDLink>,
+
+    /// Avatar image link.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<IPLDLink>,
 
     /// IPNS address.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel_ipns: Option<IPNSAddress>,
+    pub ipns_addr: Option<IPNSAddress>,
 
-    /// Blockchain address
+    /// Bitcoin address
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub addr: Option<String>,
+    pub btc_addr: Option<String>,
+
+    /// Ethereum address
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eth_addr: Option<String>,
 }
