@@ -90,9 +90,13 @@ where
     pub async fn update_identity(
         mut self,
         name: Option<String>,
+        bio: Option<String>,
+        banner: Option<std::path::PathBuf>,
         avatar: Option<std::path::PathBuf>,
         ipns_addr: Option<IPNSAddress>,
-    ) -> Result<Cid, Error> {
+        btc_addr: Option<String>,
+        eth_addr: Option<String>,
+    ) -> Result<(Cid, Identity), Error> {
         let mut identity = self
             .ipfs
             .dag_get::<&str, Identity>(self.identity.link, None)
@@ -100,6 +104,14 @@ where
 
         if let Some(name) = name {
             identity.name = name;
+        }
+
+        if let Some(bio) = bio {
+            identity.bio = Some(bio);
+        }
+
+        if let Some(banner) = banner {
+            identity.banner = Some(add_image(&self.ipfs, &banner).await?.into());
         }
 
         if let Some(avatar) = avatar {
@@ -110,11 +122,19 @@ where
             identity.ipns_addr = Some(ipns);
         }
 
+        if let Some(btc_addr) = btc_addr {
+            identity.btc_addr = Some(btc_addr);
+        }
+
+        if let Some(eth_addr) = eth_addr {
+            identity.eth_addr = Some(eth_addr);
+        }
+
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
 
         self.identity = cid.into();
 
-        Ok(cid)
+        Ok((cid, identity))
     }
 
     /// Update your identity data.
@@ -122,9 +142,13 @@ where
     pub async fn update_identity(
         &mut self,
         name: Option<String>,
+        bio: Option<String>,
+        banner: Option<web_sys::File>,
         avatar: Option<web_sys::File>,
         ipns_addr: Option<IPNSAddress>,
-    ) -> Result<Cid, Error> {
+        btc_addr: Option<String>,
+        eth_addr: Option<String>,
+    ) -> Result<(Cid, Identity), Error> {
         let mut identity = self
             .ipfs
             .dag_get::<&str, Identity>(self.identity.link, None)
@@ -132,6 +156,14 @@ where
 
         if let Some(name) = name {
             identity.name = name;
+        }
+
+        if let Some(bio) = bio {
+            identity.bio = Some(bio);
+        }
+
+        if let Some(banner) = banner {
+            identity.banner = Some(add_image(&self.ipfs, banner).await?.into());
         }
 
         if let Some(avatar) = avatar {
@@ -142,11 +174,19 @@ where
             identity.ipns_addr = Some(ipns);
         }
 
+        if let Some(btc_addr) = btc_addr {
+            identity.btc_addr = Some(btc_addr);
+        }
+
+        if let Some(eth_addr) = eth_addr {
+            identity.eth_addr = Some(eth_addr);
+        }
+
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
 
         self.identity = cid.into();
 
-        Ok(cid)
+        Ok((cid, identity))
     }
 
     /// Create a new micro blog post.
@@ -253,18 +293,29 @@ where
         &self,
         title: String,
         video: Cid,
-        thumbnail: &std::path::Path,
+        thumbnail: Option<&std::path::Path>,
         pin: bool,
     ) -> Result<(Cid, Video), Error> {
-        let (image, duration) =
-            tokio::try_join!(add_image(&self.ipfs, thumbnail), self.video_duration(video))?;
+        let (image, duration) = match thumbnail {
+            Some(img) => {
+                let (img, dur) =
+                    tokio::try_join!(add_image(&self.ipfs, img), self.video_duration(video))?;
+
+                (Some(img.into()), Some(dur))
+            }
+            None => {
+                let duration = self.video_duration(video).await?;
+
+                (None, Some(duration))
+            }
+        };
 
         let video_post = Video {
             identity: self.identity,
             user_timestamp: Utc::now().timestamp(),
-            image: Some(image.into()),
+            image,
             title,
-            duration: Some(duration),
+            duration,
             video: video.into(),
         };
 
@@ -279,18 +330,29 @@ where
         &self,
         title: String,
         video: Cid,
-        thumbnail: web_sys::File,
+        thumbnail: Option<web_sys::File>,
         pin: bool,
     ) -> Result<(Cid, Video), Error> {
-        let (image, duration) =
-            futures::try_join!(add_image(&self.ipfs, thumbnail), self.video_duration(video))?;
+        let (image, duration) = match thumbnail {
+            Some(img) => {
+                let (img, dur) =
+                    futures::try_join!(add_image(&self.ipfs, img), self.video_duration(video))?;
+
+                (Some(img.into()), Some(dur))
+            }
+            None => {
+                let duration = self.video_duration(video).await?;
+
+                (None, Some(duration))
+            }
+        };
 
         let video_post = Video {
             identity: self.identity,
             user_timestamp: Utc::now().timestamp(),
-            image: Some(image.into()),
+            image,
             title,
-            duration: Some(duration),
+            duration,
             video: video.into(),
         };
 
