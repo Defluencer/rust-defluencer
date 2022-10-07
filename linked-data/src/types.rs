@@ -21,6 +21,14 @@ pub type Address = [u8; 20];
 )]
 pub struct PeerId(#[serde_as(as = "DisplayFromStr")] Cid);
 
+impl core::str::FromStr for PeerId {
+    type Err = Box<dyn std::error::Error>;
+
+    fn from_str(cid_str: &str) -> Result<Self, Self::Err> {
+        Self::try_from(cid_str)
+    }
+}
+
 impl TryFrom<String> for PeerId {
     type Error = Box<dyn std::error::Error>;
 
@@ -84,6 +92,14 @@ impl PeerId {
     Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord,
 )]
 pub struct IPNSAddress(#[serde_as(as = "DisplayFromStr")] Cid);
+
+impl core::str::FromStr for IPNSAddress {
+    type Err = cid::Error;
+
+    fn from_str(cid_str: &str) -> Result<Self, Self::Err> {
+        Self::try_from(cid_str)
+    }
+}
 
 impl TryFrom<String> for IPNSAddress {
     type Error = cid::Error;
