@@ -22,7 +22,7 @@ pub type Address = [u8; 20];
 pub struct PeerId(#[serde_as(as = "DisplayFromStr")] Cid);
 
 impl core::str::FromStr for PeerId {
-    type Err = Box<dyn std::error::Error>;
+    type Err = cid::Error;
 
     fn from_str(cid_str: &str) -> Result<Self, Self::Err> {
         Self::try_from(cid_str)
@@ -30,7 +30,7 @@ impl core::str::FromStr for PeerId {
 }
 
 impl TryFrom<String> for PeerId {
-    type Error = Box<dyn std::error::Error>;
+    type Error = cid::Error;
 
     fn try_from(string: String) -> Result<Self, Self::Error> {
         Self::try_from(string.as_str())
@@ -38,14 +38,13 @@ impl TryFrom<String> for PeerId {
 }
 
 impl TryFrom<&str> for PeerId {
-    type Error = Box<dyn std::error::Error>;
+    type Error = cid::Error;
 
     fn try_from(str: &str) -> Result<Self, Self::Error> {
         // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#string-representation
+
         let decoded = Base::Base58Btc.decode(str)?;
-
         let multihash = Multihash::from_bytes(&decoded)?;
-
         let cid = Cid::new_v1(/* Libp2p key */ 0x72, multihash);
 
         Ok(Self(cid))
@@ -142,7 +141,7 @@ impl Into<Cid> for IPNSAddress {
 }
 
 impl IPNSAddress {
-    pub fn from_pubsub_topic(topic: String) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_pubsub_topic(topic: String) -> Result<Self, cid::Error> {
         // https://github.com/ipfs/specs/blob/master/IPNS.md#integration-with-ipfs
 
         // "/record/".len() == 8

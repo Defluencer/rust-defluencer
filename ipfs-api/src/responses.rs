@@ -147,7 +147,7 @@ impl TryFrom<IdResponse> for Cid {
     fn try_from(response: IdResponse) -> Result<Self, Self::Error> {
         let decoded = Base::Base58Btc.decode(response.id)?;
         let multihash = MultihashGeneric::from_bytes(&decoded)?;
-        let cid = Cid::new_v1(0x70, multihash);
+        let cid = Cid::new_v1(/* libp2p-key */ 0x72, multihash);
 
         Ok(cid)
     }
