@@ -44,9 +44,15 @@ impl TryFrom<&str> for PeerId {
     }
 }
 
-impl From<Cid> for PeerId {
-    fn from(cid: Cid) -> Self {
-        Self(cid)
+impl TryFrom<Cid> for PeerId {
+    type Error = cid::Error;
+
+    fn try_from(cid: Cid) -> std::result::Result<Self, Self::Error> {
+        if cid.codec() != /* libp2p-key */0x72 {
+            return Err(cid::Error::ParsingError);
+        }
+
+        Ok(PeerId(cid))
     }
 }
 
@@ -79,19 +85,37 @@ impl PeerId {
 )]
 pub struct IPNSAddress(#[serde_as(as = "DisplayFromStr")] Cid);
 
+impl TryFrom<String> for IPNSAddress {
+    type Error = cid::Error;
+
+    fn try_from(string: String) -> Result<Self, Self::Error> {
+        Self::try_from(string.as_str())
+    }
+}
+
 impl TryFrom<&str> for IPNSAddress {
     type Error = cid::Error;
 
     fn try_from(str: &str) -> std::result::Result<Self, Self::Error> {
         let cid = Cid::try_from(str)?;
 
+        if cid.codec() != /* libp2p-key */0x72 {
+            return Err(cid::Error::ParsingError);
+        }
+
         Ok(IPNSAddress(cid))
     }
 }
 
-impl From<Cid> for IPNSAddress {
-    fn from(cid: Cid) -> Self {
-        Self(cid)
+impl TryFrom<Cid> for IPNSAddress {
+    type Error = cid::Error;
+
+    fn try_from(cid: Cid) -> std::result::Result<Self, Self::Error> {
+        if cid.codec() != /* libp2p-key */0x72 {
+            return Err(cid::Error::ParsingError);
+        }
+
+        Ok(IPNSAddress(cid))
     }
 }
 

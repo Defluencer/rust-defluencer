@@ -21,7 +21,7 @@ use linked_data::{
     live::LiveSettings,
     media::Media,
     moderation::{Bans, Moderators},
-    types::{Address, IPLDLink, IPNSAddress},
+    types::{Address, IPLDLink, IPNSAddress, PeerId},
 };
 
 use async_trait::async_trait;
@@ -40,7 +40,7 @@ where
     T: IpnsUpdater + Clone,
 {
     ipfs: IpfsService,
-    addr: Cid,
+    addr: IPNSAddress,
     updater: T,
 }
 
@@ -64,9 +64,9 @@ impl Channel<LocalUpdater> {
         let key = identity.name.to_snake_case();
 
         let key_pair = ipfs.key_gen(key.clone()).await?;
-        let addr = Cid::try_from(key_pair.id)?;
+        let addr = IPNSAddress::try_from(key_pair.id)?;
 
-        identity.ipns_addr = Some(addr.into());
+        identity.ipns_addr = Some(addr);
 
         let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
 
@@ -107,7 +107,7 @@ where
         &self,
         name: Option<String>,
         avatar: Option<std::path::PathBuf>,
-        ipns_addr: Option<Cid>,
+        ipns_addr: Option<IPNSAddress>,
     ) -> Result<Cid, Error> {
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -125,7 +125,7 @@ where
         }
 
         if let Some(ipns) = ipns_addr {
-            identity.ipns_addr = Some(ipns.into());
+            identity.ipns_addr = Some(ipns);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -143,7 +143,7 @@ where
         &self,
         name: Option<String>,
         avatar: Option<web_sys::File>,
-        ipns_addr: Option<Cid>,
+        ipns_addr: Option<IPNSAddress>,
     ) -> Result<Cid, Error> {
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -161,7 +161,7 @@ where
         }
 
         if let Some(ipns) = ipns_addr {
-            identity.ipns_addr = Some(ipns.into());
+            identity.ipns_addr = Some(ipns);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
@@ -242,7 +242,7 @@ where
     /// Update live chat & streaming settings.
     pub async fn update_live_settings(
         &self,
-        peer_id: Option<Cid>,
+        peer_id: Option<PeerId>,
         video_topic: Option<String>,
         chat_topic: Option<String>,
         archiving: Option<bool>,
@@ -259,7 +259,7 @@ where
         };
 
         if let Some(peer_id) = peer_id {
-            live.peer_id = peer_id.into();
+            live.peer_id = peer_id;
         }
 
         if let Some(video_topic) = video_topic {
@@ -591,7 +591,7 @@ where
     }
 
     pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
-        let cid = self.ipfs.name_resolve(self.addr).await?;
+        let cid = self.ipfs.name_resolve(self.addr.into()).await?;
 
         let meta = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
 
@@ -609,6 +609,6 @@ where
     }
 
     pub fn get_address(&self) -> IPNSAddress {
-        self.addr.into()
+        self.addr
     }
 }
