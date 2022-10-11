@@ -13,6 +13,8 @@ type Multihash = MultihashGeneric<64>;
 /// Ethereum address
 pub type Address = [u8; 20];
 
+const LIB_P2P_KEY: u64 = 0x72;
+
 /// Peer IDs as CIDs v1
 // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#peer-ids
 #[serde_as]
@@ -45,7 +47,7 @@ impl TryFrom<&str> for PeerId {
 
         let decoded = Base::Base58Btc.decode(str)?;
         let multihash = Multihash::from_bytes(&decoded)?;
-        let cid = Cid::new_v1(/* Libp2p key */ 0x72, multihash);
+        let cid = Cid::new_v1(LIB_P2P_KEY, multihash);
 
         Ok(Self(cid))
     }
@@ -55,7 +57,7 @@ impl TryFrom<Cid> for PeerId {
     type Error = cid::Error;
 
     fn try_from(cid: Cid) -> std::result::Result<Self, Self::Error> {
-        if cid.codec() != /* libp2p-key */0x72 {
+        if cid.codec() != LIB_P2P_KEY {
             return Err(cid::Error::ParsingError);
         }
 
@@ -114,7 +116,7 @@ impl TryFrom<&str> for IPNSAddress {
     fn try_from(str: &str) -> std::result::Result<Self, Self::Error> {
         let cid = Cid::try_from(str)?;
 
-        if cid.codec() != /* libp2p-key */0x72 {
+        if cid.codec() != LIB_P2P_KEY {
             return Err(cid::Error::ParsingError);
         }
 
@@ -126,7 +128,7 @@ impl TryFrom<Cid> for IPNSAddress {
     type Error = cid::Error;
 
     fn try_from(cid: Cid) -> std::result::Result<Self, Self::Error> {
-        if cid.codec() != /* libp2p-key */0x72 {
+        if cid.codec() != LIB_P2P_KEY {
             return Err(cid::Error::ParsingError);
         }
 
@@ -150,7 +152,7 @@ impl IPNSAddress {
         // "/ipns/".len() == 6
         let cid = Cid::try_from(&decoded[6..])?;
 
-        let cid_v1 = Cid::new_v1(/* Libp2p key */ 0x72, *cid.hash());
+        let cid_v1 = Cid::new_v1(LIB_P2P_KEY, *cid.hash());
 
         Ok(Self(cid_v1))
     }
@@ -185,6 +187,11 @@ pub struct IPLDLink {
 impl From<Cid> for IPLDLink {
     fn from(cid: Cid) -> Self {
         Self { link: cid }
+    }
+}
+impl Into<Cid> for IPLDLink {
+    fn into(self) -> Cid {
+        self.link
     }
 }
 
