@@ -2,10 +2,12 @@
 Rust implementation.
 
 ## Crates
+- [defluencer](https://github.com/Defluencer/rust-defluencer/tree/develop/defluencer)
 - [linked-data](https://github.com/Defluencer/rust-defluencer/tree/develop/linked-data)
 - [ipfs-api](https://github.com/Defluencer/rust-defluencer/tree/develop/ipfs-api)
 - [cli](https://github.com/Defluencer/rust-defluencer/tree/develop/cli)
-- [core](https://github.com/Defluencer/rust-defluencer/tree/develop/core)
+- [ipns-records](https://github.com/Defluencer/rust-defluencer/tree/develop/ipns-records)
+- [dag-jose](https://github.com/Defluencer/rust-defluencer/tree/develop/dag-jose)
 
 # How does it works?
 
@@ -29,4 +31,4 @@ IPNS is used for this purpose. An IPNS address is the hash of a public key, does
 
 Having permanent identifier for channels is good but who want to remember a number? Channels should have names like websites.
 
-Ethereum Name Service (ENS) can be use to associate a name to an IPNS address. Although, you can use what you want, the protocol is agnostic to this.
+Ethereum Name Service (ENS) can be use to associate a name to an IPNS address, but the protocol is agnostic to this.

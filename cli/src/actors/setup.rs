@@ -16,9 +16,9 @@ use linked_data::{
 
 use cid::Cid;
 
-use m3u8_rs::playlist::MasterPlaylist;
+use m3u8_rs::MasterPlaylist;
 
-type TrackData = (Option<String>, Option<usize>, Option<IPLDLink>);
+type TrackData = (Option<String>, Option<u64>, Option<IPLDLink>);
 
 #[derive(Debug)]
 pub enum SetupData {
@@ -118,7 +118,7 @@ impl Setter {
                 None => None,
             };
 
-            let v_bandwidth = variant.bandwidth.parse::<usize>().ok();
+            let v_bandwidth = Some(variant.bandwidth);
 
             if let Some((codec, bandwidth, _)) = self.map.get_mut(v_name) {
                 *codec = v_codec;

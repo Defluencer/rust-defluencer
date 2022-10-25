@@ -6,6 +6,7 @@ use std::{borrow::Cow, sync::Arc};
 use errors::{Error, IPFSError};
 use futures_util::{stream, AsyncBufReadExt, Stream, StreamExt, TryStreamExt};
 
+use linked_data::types::{IPNSAddress, PeerId};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::responses::*;
@@ -64,7 +65,7 @@ impl IpfsService {
             .post(url)
             .query(&[("pin", "false")])
             .query(&[("cid-version", "1")])
-            .query(&[("chunker", "size-1048576")])
+            .query(&[("chunker", "size-2097152")])
             .multipart(form)
             .send()
             .await?
@@ -101,7 +102,7 @@ impl IpfsService {
             .post(url)
             .query(&[("pin", "false")])
             .query(&[("cid-version", "1")])
-            .query(&[("chunker", "size-1048576")])
+            .query(&[("chunker", "size-2097152")])
             .multipart(form)
             .send()
             .await?
@@ -447,13 +448,13 @@ impl IpfsService {
     }
 
     /// Resolve IPNS name. Returns CID.
-    pub async fn name_resolve(&self, ipns: Cid) -> Result<Cid, Error> {
+    pub async fn name_resolve(&self, addr: IPNSAddress) -> Result<Cid, Error> {
         let url = self.base_url.join("name/resolve")?;
 
         let bytes = self
             .client
             .post(url)
-            .query(&[("arg", ipns.to_string())])
+            .query(&[("arg", addr.to_string())])
             .send()
             .await?
             .bytes()
@@ -479,12 +480,12 @@ impl IpfsService {
 
         let key_list = self.key_list().await?;
 
-        let cid = match key_list.get(key) {
+        let addr = match key_list.get(key) {
             Some(keypair) => *keypair,
             None => return Err(Error::Ipns),
         };
 
-        let cid = self.name_resolve(cid).await?;
+        let cid = self.name_resolve(addr).await?;
 
         let node = self.dag_get(cid, Option::<&str>::None).await?;
 
@@ -530,7 +531,7 @@ impl IpfsService {
     }
 
     ///Return peer id as cid v1.
-    pub async fn peer_id(&self) -> Result<Cid, Error> {
+    pub async fn peer_id(&self) -> Result<PeerId, Error> {
         let url = self.base_url.join("id")?;
 
         let bytes = self.client.post(url).send().await?.bytes().await?;
@@ -633,7 +634,7 @@ impl IpfsService {
             .bytes()
             .await?;
 
-        println!("{}", std::str::from_utf8(&bytes).unwrap());
+        //println!("{}", std::str::from_utf8(&bytes).unwrap());
 
         if let Ok(res) = serde_json::from_slice::<DHTPutResponse>(&bytes) {
             return Ok(res);

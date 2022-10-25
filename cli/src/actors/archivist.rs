@@ -7,7 +7,7 @@ use linked_data::media::video::{Day, Hour, Minute, Second, Timecode};
 use cid::Cid;
 
 pub enum Archive {
-    Chat(Cid),
+    //Chat(Cid),
     Video(Cid),
 }
 
@@ -51,7 +51,7 @@ impl Archivist {
 
         while let Some(event) = self.archive_rx.recv().await {
             match event {
-                Archive::Chat(cid) => self.archive_chat_message(cid),
+                //Archive::Chat(cid) => self.archive_chat_message(cid),
                 Archive::Video(cid) => self.archive_video_segment(cid).await,
             }
         }
@@ -61,7 +61,7 @@ impl Archivist {
         println!("❌ Archive System Offline");
     }
 
-    /// Link chat message to Seconds.
+    /* /// Link chat message to Seconds.
     fn archive_chat_message(&mut self, msg_cid: Cid) {
         let node = match self.video_chat_buffer.as_mut() {
             Some(node) => node,
@@ -69,7 +69,7 @@ impl Archivist {
         };
 
         node.links_to_chat.push(msg_cid.into());
-    }
+    } */
 
     /// Buffers Seconds, waiting for chat messages to be linked.
     async fn archive_video_segment(&mut self, cid: Cid) {

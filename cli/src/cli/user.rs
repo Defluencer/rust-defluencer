@@ -6,49 +6,41 @@ use clap::Parser;
 
 use defluencer::{
     crypto::{
-        bitcoin::BitcoinSigner,
-        ethereum::EthereumSigner,
         ledger::{BitcoinLedgerApp, EthereumLedgerApp},
-        Signer,
+        signers::BitcoinSigner,
+        signers::EthereumSigner,
+        signers::Signer,
     },
     errors::Error,
     user::User,
-    utils::add_image,
 };
 
-use ipfs_api::{responses::Codec, IpfsService};
+use ipfs_api::IpfsService;
 
-use linked_data::{identity::Identity, types::IPNSAddress};
+use linked_data::identity::Identity;
 
-use heck::ToSnakeCase;
-
-#[derive(Debug, Parser)]
-pub struct UserCLI {
-    /// Bitcoin or Ethereum based signatures.
-    #[clap(arg_enum, default_value = "bitcoin")]
-    blockchain: Blockchain,
-
-    /// Account index (BIP-44).
-    #[clap(long, default_value = "0")]
-    account: u32,
-
-    #[clap(subcommand)]
-    cmd: Command,
-}
-
-#[derive(clap::ArgEnum, Clone, Debug)]
+#[derive(clap::ValueEnum, Clone, Debug)]
 enum Blockchain {
     Bitcoin,
     Ethereum,
 }
 
 #[derive(Debug, Parser)]
-enum Command {
-    /// Create a new user identity.
-    Create(Create),
+pub struct UserCLI {
+    /// Bitcoin or Ethereum based signatures.
+    #[clap(value_enum, default_value = "bitcoin")]
+    blockchain: Blockchain,
 
-    /// Create new content.
-    Content(Content),
+    /// Account index (BIP-44).
+    #[clap(long, default_value = "0")]
+    account: u32,
+
+    /// Creators identity CID
+    #[clap(short, long)]
+    creator: Cid,
+
+    #[clap(subcommand)]
+    cmd: Media,
 }
 
 pub async fn user_cli(cli: UserCLI) {
@@ -67,13 +59,9 @@ pub async fn user_cli(cli: UserCLI) {
             };
 
             match cli.cmd {
-                Command::Create(args) => create_user(args, addr).await,
-                Command::Content(content) => match content.cmd {
-                    Media::Microblog(args) => micro_blog(content.creator, args, signer).await,
-                    Media::Blog(args) => blog(content.creator, args, signer).await,
-                    Media::Video(args) => video(content.creator, args, signer).await,
-                    Media::Comment(args) => comment(content.creator, args, signer).await,
-                },
+                Media::Microblog(args) => micro_blog(args, cli.creator, addr, signer).await,
+                Media::Blog(args) => blog(args, cli.creator, addr, signer).await,
+                Media::Video(args) => video(args, cli.creator, addr, signer).await,
             }
         }
         Blockchain::Ethereum => {
@@ -90,13 +78,9 @@ pub async fn user_cli(cli: UserCLI) {
             };
 
             match cli.cmd {
-                Command::Create(args) => create_user(args, addr).await,
-                Command::Content(content) => match content.cmd {
-                    Media::Microblog(args) => micro_blog(content.creator, args, signer).await,
-                    Media::Blog(args) => blog(content.creator, args, signer).await,
-                    Media::Video(args) => video(content.creator, args, signer).await,
-                    Media::Comment(args) => comment(content.creator, args, signer).await,
-                },
+                Media::Microblog(args) => micro_blog(args, cli.creator, addr, signer).await,
+                Media::Blog(args) => blog(args, cli.creator, addr, signer).await,
+                Media::Video(args) => video(args, cli.creator, addr, signer).await,
             }
         }
     };
@@ -104,65 +88,6 @@ pub async fn user_cli(cli: UserCLI) {
     if let Err(e) = res {
         eprintln!("❗ IPFS: {:#?}", e);
     }
-}
-
-#[derive(Debug, Parser)]
-pub struct Create {
-    /// Display name.
-    #[clap(short, long)]
-    display_name: String,
-
-    /// Path to avatar image file.
-    #[clap(short, long)]
-    path: Option<PathBuf>,
-
-    /// Create Channel Too?
-    #[clap(short, long)]
-    channel: bool,
-}
-
-async fn create_user(args: Create, addr: String) -> Result<(), Error> {
-    let ipfs = IpfsService::default();
-
-    let channel_ipns = if args.channel {
-        let key = args.display_name.to_snake_case();
-        let key_pair = ipfs.key_gen(key.clone()).await?;
-
-        let ipns = IPNSAddress::try_from(key_pair.id.as_str())?;
-
-        Some(ipns)
-    } else {
-        None
-    };
-
-    let avatar = if let Some(path) = args.path {
-        Some(add_image(&ipfs, &path).await?.into())
-    } else {
-        None
-    };
-
-    let identity = Identity {
-        display_name: args.display_name,
-        avatar,
-        channel_ipns,
-        addr: Some(addr),
-    };
-
-    let cid = ipfs.dag_put(&identity, Codec::default()).await?;
-
-    println!("✅ User Identity Created\nCID: {}", cid);
-
-    Ok(())
-}
-
-#[derive(Debug, Parser)]
-pub struct Content {
-    /// Creators identity CID
-    #[clap(short, long)]
-    creator: Cid,
-
-    #[clap(subcommand)]
-    cmd: Media,
 }
 
 #[derive(Debug, Parser)]
@@ -175,9 +100,6 @@ enum Media {
 
     /// Create new video post.
     Video(Video),
-
-    /// Create new comment.
-    Comment(Comment),
 }
 
 #[derive(Debug, Parser)]
@@ -185,20 +107,35 @@ pub struct MicroBlog {
     /// The micro post text content.
     #[clap(short, long)]
     content: String,
+
+    /// Cid of the media being commented on.
+    #[clap(short, long)]
+    origin: Option<Cid>,
 }
 
 async fn micro_blog(
-    identity: Cid,
     args: MicroBlog,
+    identity: Cid,
+    addr: String,
     signer: impl Signer + Clone,
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
+    let id = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+
+    let addr = Some(addr);
+    if id.eth_addr != addr && id.btc_addr != addr {
+        eprintln!("❗ Wallet address mismatch.");
+        return Ok(());
+    }
+
     let user = User::new(ipfs, signer, identity);
 
-    println!("Confirm Signature On Your Hardware Wallet...");
+    println!("Confirm Signature...");
 
-    let cid = user.create_micro_blog_post(args.content).await?;
+    let (cid, _) = user
+        .create_micro_blog_post(args.content, args.origin, false)
+        .await?;
 
     println!("✅ Created Micro Blog Post\nCID: {}", cid);
 
@@ -211,29 +148,49 @@ pub struct Blog {
     #[clap(long)]
     title: String,
 
-    /// Path to the thumbnail image.
-    #[clap(long, parse(from_os_str))]
-    image: PathBuf,
-
     /// Path to the markdown file.
-    #[clap(long, parse(from_os_str))]
+    #[clap(short, long)]
     content: PathBuf,
+
+    /// Path to the thumbnail image.
+    #[clap(short, long)]
+    image: Option<PathBuf>,
+
+    /// Total word count.
+    #[clap(short, long)]
+    word_count: Option<u64>,
 }
 
-async fn blog(identity: Cid, args: Blog, signer: impl Signer + Clone) -> Result<(), Error> {
+async fn blog(
+    args: Blog,
+    identity: Cid,
+    addr: String,
+    signer: impl Signer + Clone,
+) -> Result<(), Error> {
     let ipfs = IpfsService::default();
+
+    let id = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+
+    let addr = Some(addr);
+    if id.eth_addr != addr && id.btc_addr != addr {
+        eprintln!("❗ Wallet address mismatch.");
+        return Ok(());
+    }
 
     let Blog {
         title,
         image,
         content,
+        word_count,
     } = args;
 
     let user = User::new(ipfs, signer, identity);
 
-    println!("Confirm Signature On Your Hardware Wallet...");
+    println!("Confirm Signature...");
 
-    let cid = user.create_blog_post(title, &image, &content).await?;
+    let (cid, _) = user
+        .create_blog_post(title, image, content, word_count, false)
+        .await?;
 
     println!("✅ Created Blog Post\nCID: {}", cid);
 
@@ -247,16 +204,29 @@ pub struct Video {
     title: String,
 
     /// Path to the video thumbnail image.
-    #[clap(long, parse(from_os_str))]
-    image: PathBuf,
+    #[clap(short, long)]
+    image: Option<PathBuf>,
 
     /// Processed video timecode CID.
-    #[clap(long)]
+    #[clap(short, long)]
     video: Cid,
 }
 
-async fn video(identity: Cid, args: Video, signer: impl Signer + Clone) -> Result<(), Error> {
+async fn video(
+    args: Video,
+    identity: Cid,
+    addr: String,
+    signer: impl Signer + Clone,
+) -> Result<(), Error> {
     let ipfs = IpfsService::default();
+
+    let id = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+
+    let addr = Some(addr);
+    if id.eth_addr != addr && id.btc_addr != addr {
+        eprintln!("❗ Wallet address mismatch.");
+        return Ok(());
+    }
 
     let Video {
         title,
@@ -268,34 +238,9 @@ async fn video(identity: Cid, args: Video, signer: impl Signer + Clone) -> Resul
 
     println!("Confirm Signature On Your Hardware Wallet...");
 
-    let cid = user.create_video_post(title, video, &image).await?;
+    let (cid, _) = user.create_video_post(title, video, image, false).await?;
 
     println!("✅ Created Video\nCID: {}", cid);
-
-    Ok(())
-}
-
-#[derive(Debug, Parser)]
-pub struct Comment {
-    /// Origin CID AKA the media being commented on.
-    #[clap(long)]
-    origin: Cid,
-
-    /// The comment text.
-    #[clap(short, long)]
-    content: String,
-}
-
-async fn comment(identity: Cid, args: Comment, signer: impl Signer + Clone) -> Result<(), Error> {
-    let ipfs = IpfsService::default();
-
-    let user = User::new(ipfs, signer, identity);
-
-    println!("Confirm Signature On Your Hardware Wallet...");
-
-    let cid = user.create_comment(args.origin, args.content).await?;
-
-    println!("✅ Created Comment\nCID: {}", cid);
 
     Ok(())
 }

@@ -1,12 +1,12 @@
-use cid::Cid;
+use std::path::PathBuf;
 
 use clap::Parser;
 
-use defluencer::{errors::Error, Defluencer};
+use defluencer::{errors::Error, utils::add_image, Defluencer};
 
-use futures_util::{future::AbortHandle, pin_mut, FutureExt, StreamExt};
+use futures_util::{future::AbortHandle, pin_mut, stream::Abortable, FutureExt, StreamExt};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{channel::ChannelMetadata, types::IPNSAddress};
 
@@ -18,32 +18,36 @@ pub struct NodeCLI {
 
 #[derive(Debug, Parser)]
 enum Command {
+    /// Create a new identity. Must already have an IPNS address if creating a channel.
+    Identity(Identity),
+
     /* /// Compute channel address from a BTC or ETH account.
     Address(Address), */
     /// Recursively pin all channel data on this node.
     /// CAUTION: The amount of data to download could be MASSIVE.
-    Pin(Pinning),
+    Pin(Address),
 
     /// Recursively unpin all channel data from this node.
     /// CAUTION: The data can now be deleted by the garbage collector at any time.
-    Unpin(Pinning),
+    Unpin(Address),
 
     /// Receive channel updates in real time.
     /// The first update received is the most up to date channel state.
-    Subscribe(Subscribe),
+    Subscribe(Address),
 
     /// Receive requests for content agregation.
-    Agregate(Agregate),
+    Agregate(Address),
 
     /// Stream all content & comments from a channel.
     Stream(Stream),
 
     /// Crawl the social web, one degree of separation at a time.
-    Webcrawl(WebCrawl),
+    Webcrawl(Address),
 }
 
 pub async fn node_cli(cli: NodeCLI) {
     let res = match cli.cmd {
+        Command::Identity(args) => create_id(args).await,
         //Command::Address(args) => address(args).await,
         Command::Pin(args) => pin(args).await,
         Command::Unpin(args) => unpin(args).await,
@@ -51,7 +55,7 @@ pub async fn node_cli(cli: NodeCLI) {
         Command::Agregate(args) => agregate(args).await,
         Command::Stream(stream_cli) => match stream_cli.cmd {
             SubCommand::Content => stream_content(stream_cli.address).await,
-            SubCommand::Comments(args) => stream_comments(stream_cli.address, args).await,
+            SubCommand::Comments => stream_comments(stream_cli.address).await,
         },
         Command::Webcrawl(args) => web_crawl(args).await,
     };
@@ -59,6 +63,79 @@ pub async fn node_cli(cli: NodeCLI) {
     if let Err(e) = res {
         eprintln!("❗ IPFS: {:#?}", e);
     }
+}
+
+#[derive(Debug, Parser)]
+pub struct Identity {
+    /// Choosen name.
+    #[clap(short, long)]
+    name: String,
+
+    /// User short biography.
+    #[clap(short, long)]
+    bio: Option<String>,
+
+    /// Path to banner image file.
+    #[clap(short, long)]
+    banner: Option<PathBuf>,
+
+    /// Path to avatar image file.
+    #[clap(short, long)]
+    avatar: Option<PathBuf>,
+
+    /// IPNS address.
+    #[clap(short, long)]
+    ipns_addr: Option<IPNSAddress>,
+
+    /// Bitcoin address.
+    #[clap(short, long)]
+    btc_addr: Option<String>,
+
+    /// Ethereum address.
+    #[clap(short, long)]
+    eth_addr: Option<String>,
+}
+
+async fn create_id(args: Identity) -> Result<(), Error> {
+    let ipfs = IpfsService::default();
+
+    let Identity {
+        name,
+        bio,
+        banner,
+        avatar,
+        ipns_addr,
+        btc_addr,
+        eth_addr,
+    } = args;
+
+    let banner = if let Some(path) = banner {
+        Some(add_image(&ipfs, path).await?.into())
+    } else {
+        None
+    };
+
+    let avatar = if let Some(path) = avatar {
+        Some(add_image(&ipfs, path).await?.into())
+    } else {
+        None
+    };
+
+    let identity = linked_data::identity::Identity {
+        name,
+        bio,
+        banner,
+        avatar,
+        ipns_addr,
+        btc_addr,
+        eth_addr,
+    };
+
+    let cid = ipfs.dag_put(&identity, Codec::default()).await?;
+
+    println!("✅ User Identity Created\nCID: {}", cid);
+
+    Ok(())
 }
 
 /* #[derive(Debug, Parser)]
@@ -104,46 +181,40 @@ enum Blockchain {
 } */
 
 #[derive(Debug, Parser)]
-pub struct Pinning {
+pub struct Address {
     /// Channel IPNS address.
     #[clap(short, long)]
-    address: Cid,
+    address: IPNSAddress,
 }
 
-async fn pin(args: Pinning) -> Result<(), Error> {
+async fn pin(args: Address) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
-    defluencer.pin_channel(args.address.into()).await?;
+    defluencer.pin_channel(args.address).await?;
 
     println!("✅ Channel's Content Pinned");
 
     Ok(())
 }
 
-async fn unpin(args: Pinning) -> Result<(), Error> {
+async fn unpin(args: Address) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
-    defluencer.unpin_channel(args.address.into()).await?;
+    defluencer.unpin_channel(args.address).await?;
 
     println!("✅ Channel's Content Unpinned");
 
     Ok(())
 }
 
-#[derive(Debug, Parser)]
-pub struct Subscribe {
-    /// Channel IPNS address.
-    #[clap(short, long)]
-    address: Cid,
-}
-
-async fn subscribe(args: Subscribe) -> Result<(), Error> {
+async fn subscribe(args: Address) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let defluencer = Defluencer::default();
 
     let (handle, regis) = AbortHandle::new_pair();
-    let stream = defluencer.subscribe_channel_updates(args.address.into(), regis);
+    let stream = defluencer.subscribe_channel_updates(args.address);
+    let stream = Abortable::new(stream, regis);
     pin_mut!(stream);
 
     let control = tokio::signal::ctrl_c();
@@ -171,20 +242,27 @@ async fn subscribe(args: Subscribe) -> Result<(), Error> {
     }
 }
 
-#[derive(Debug, Parser)]
-pub struct Agregate {
-    /// Channel IPNS address.
-    #[clap(short, long)]
-    address: Cid,
-}
-
-async fn agregate(args: Agregate) -> Result<(), Error> {
+async fn agregate(args: Address) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
-    let defluencer = Defluencer::default();
+    let ipfs = IpfsService::default();
+    let defluencer = Defluencer::new(ipfs.clone());
+
+    let cid = ipfs.name_resolve(args.address.into()).await?;
+
+    let meta = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+
+    let topic = match meta.agregation_channel {
+        Some(tp) => tp,
+        None => {
+            eprintln!("❗ This channel has no aggregation channel");
+            return Ok(());
+        }
+    };
 
     let (handle, regis) = AbortHandle::new_pair();
-    let stream = defluencer.subscribe_agregation_updates(args.address.into(), regis);
+    let stream = defluencer.subscribe_agregation_updates(topic);
+    let stream = Abortable::new(stream, regis);
     pin_mut!(stream);
 
     let control = tokio::signal::ctrl_c();
@@ -216,7 +294,7 @@ async fn agregate(args: Agregate) -> Result<(), Error> {
 pub struct Stream {
     /// Channel IPNS address.
     #[clap(short, long)]
-    address: Cid,
+    address: IPNSAddress,
 
     #[clap(subcommand)]
     cmd: SubCommand,
@@ -227,24 +305,17 @@ pub enum SubCommand {
     /// Stream chronologicaly all the content on a channel.
     Content,
 
-    /// Stream all the comments for some content on a channel.
-    Comments(Comments),
+    /// Stream all the comments on a channel.
+    Comments,
 }
 
-#[derive(Debug, Parser)]
-pub struct Comments {
-    /// Content CID.
-    #[clap(short, long)]
-    content: Cid,
-}
-
-async fn stream_comments(addr: Cid, args: Comments) -> Result<(), Error> {
+async fn stream_comments(addr: IPNSAddress) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let ipfs = IpfsService::default();
     let defluencer = Defluencer::new(ipfs.clone());
 
-    let cid = ipfs.name_resolve(addr).await?;
+    let cid = ipfs.name_resolve(addr.into()).await?;
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
 
     let index = match metadata.comment_index {
@@ -255,14 +326,12 @@ async fn stream_comments(addr: Cid, args: Comments) -> Result<(), Error> {
         }
     };
 
-    let mut stream = defluencer
-        .stream_comments(index, args.content)
-        .boxed_local();
+    let mut stream = defluencer.stream_all_comments(index).boxed_local();
 
     println!("Streaming Comments CIDs...");
 
-    while let Some(cid) = stream.try_next().await? {
-        println!("{}", cid);
+    while let Some((media, comment)) = stream.try_next().await? {
+        println!("Media: {} Comment: {}", media, comment);
     }
 
     println!("✅ Comments Stream Ended");
@@ -270,13 +339,13 @@ async fn stream_comments(addr: Cid, args: Comments) -> Result<(), Error> {
     Ok(())
 }
 
-async fn stream_content(addr: Cid) -> Result<(), Error> {
+async fn stream_content(addr: IPNSAddress) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let ipfs = IpfsService::default();
     let defluencer = Defluencer::new(ipfs.clone());
 
-    let cid = ipfs.name_resolve(addr).await?;
+    let cid = ipfs.name_resolve(addr.into()).await?;
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
 
     let index = match metadata.content_index {
@@ -287,9 +356,7 @@ async fn stream_content(addr: Cid) -> Result<(), Error> {
         }
     };
 
-    let mut stream = defluencer
-        .stream_content_chronologically(index)
-        .boxed_local();
+    let mut stream = defluencer.stream_content_rev_chrono(index).boxed_local();
 
     println!("Streaming Content CIDs...");
 
@@ -302,20 +369,11 @@ async fn stream_content(addr: Cid) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Parser)]
-pub struct WebCrawl {
-    /// Channel IPNS address.
-    #[clap(short, long)]
-    address: Cid,
-}
-
-async fn web_crawl(args: WebCrawl) -> Result<(), Error> {
+async fn web_crawl(args: Address) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
-    let ipns: IPNSAddress = args.address.into();
-
     let mut stream = defluencer
-        .streaming_web_crawl(std::iter::once(ipns))
+        .streaming_web_crawl(std::iter::once(args.address))
         .boxed_local();
 
     let mut control = tokio::signal::ctrl_c().boxed_local();
@@ -339,7 +397,7 @@ async fn web_crawl(args: WebCrawl) -> Result<(), Error> {
                     Err(_) => continue,
 
                 },
-                None => continue,
+                None => return Ok(()),
             }
         }
     }

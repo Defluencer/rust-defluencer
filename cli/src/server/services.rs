@@ -11,7 +11,7 @@ use hyper::{
 
 use ipfs_api::IpfsService;
 
-use m3u8_rs::playlist::Playlist;
+use m3u8_rs::Playlist;
 
 const M3U8: &str = "m3u8";
 pub const MP4: &str = "mp4";

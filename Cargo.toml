@@ -5,5 +5,6 @@ members = [
     "defluencer",
     "ipfs-api",
     "dag-jose",
-    "ipns-records"
+    "ipns-records",
+    "cli"
 ]

@@ -71,10 +71,10 @@ impl Defluencer {
     /// Each update is the CID of some content.
     pub fn subscribe_agregation_updates(
         &self,
-        channel: String,
+        topic: String,
     ) -> impl Stream<Item = Result<Cid, Error>> + '_ {
         self.ipfs
-            .pubsub_sub(channel.into_bytes())
+            .pubsub_sub(topic.into_bytes())
             .err_into()
             .try_filter_map(move |msg| async move {
                 let PubSubMessage { from: _, data } = msg;
@@ -417,7 +417,7 @@ impl Defluencer {
 
     /// Stream all the comments on a channel.
     ///
-    /// Returns (Content CID, Comment CID)
+    /// Returns (Media CID, Comment CID)
     pub fn stream_all_comments(
         &self,
         comment_index: IPLDLink,

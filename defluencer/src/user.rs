@@ -25,6 +25,8 @@ use linked_data::{
 
 use serde::Serialize;
 
+use std::path::PathBuf;
+
 #[derive(Clone)]
 pub struct User<T>
 where
@@ -111,11 +113,11 @@ where
         }
 
         if let Some(banner) = banner {
-            identity.banner = Some(add_image(&self.ipfs, &banner).await?.into());
+            identity.banner = Some(add_image(&self.ipfs, banner).await?.into());
         }
 
         if let Some(avatar) = avatar {
-            identity.avatar = Some(add_image(&self.ipfs, &avatar).await?.into());
+            identity.avatar = Some(add_image(&self.ipfs, avatar).await?.into());
         }
 
         if let Some(ipns) = ipns_addr {
@@ -193,13 +195,14 @@ where
     pub async fn create_micro_blog_post(
         &self,
         text: String,
+        origin: Option<Cid>,
         pin: bool,
     ) -> Result<(Cid, Comment), Error> {
         let micro_post = Comment {
             identity: self.identity,
             text,
             user_timestamp: Utc::now().timestamp(),
-            origin: None,
+            origin,
         };
 
         let cid = self.add_content(&micro_post, pin).await?;
@@ -212,8 +215,8 @@ where
     pub async fn create_blog_post(
         &self,
         title: String,
-        image: Option<&std::path::Path>,
-        markdown: &std::path::Path,
+        image: Option<PathBuf>,
+        markdown: PathBuf,
         word_count: Option<u64>,
         pin: bool,
     ) -> Result<(Cid, BlogPost), Error> {
@@ -293,7 +296,7 @@ where
         &self,
         title: String,
         video: Cid,
-        thumbnail: Option<&std::path::Path>,
+        thumbnail: Option<PathBuf>,
         pin: bool,
     ) -> Result<(Cid, Video), Error> {
         let (image, duration) = match thumbnail {

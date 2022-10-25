@@ -25,9 +25,9 @@ type ChannelMetadata struct {
 
 ## Signed Links
 
-W.I.P. (EcDSA only)
+Temporary! (EcDSA only)
 
-Links to media content is usualy signed by the creator.
+Links to media content is signed by the creator.
 
 Plan to replace the current system with DAG-JOSE blocks when the cryptography is figured out.
 

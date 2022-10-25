@@ -6,11 +6,15 @@ use defluencer::{
 };
 
 use heck::ToSnakeCase;
+
 use ipfs_api::IpfsService;
 
 use clap::Parser;
 
-use linked_data::{identity::Identity, types::PeerId};
+use linked_data::{
+    identity::Identity,
+    types::{IPNSAddress, PeerId},
+};
 
 //TODO add --no-signature option then make having a signature the default.
 // Require Ldeger Nano App for IPNS record creation
@@ -191,8 +195,8 @@ async fn local_setup(identity: Cid) -> Result<Channel<LocalUpdater>, Error> {
     let ipfs = IpfsService::default();
 
     let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
-    let addr = identity.channel_ipns.unwrap();
-    let key = identity.display_name.to_snake_case();
+    let addr = identity.ipns_addr.expect("IPNS Address");
+    let key = identity.name.to_snake_case();
 
     let updater = LocalUpdater::new(ipfs.clone(), key);
     let channel = Channel::new(ipfs, addr, updater);
@@ -267,7 +271,7 @@ enum FollowCommand {
 pub struct Followee {
     /// Followee's channel address.
     #[clap(short, long)]
-    address: Cid,
+    address: IPNSAddress,
 }
 
 async fn add_followee(identity: Cid, args: Followee) -> Result<(), Error> {
@@ -275,7 +279,7 @@ async fn add_followee(identity: Cid, args: Followee) -> Result<(), Error> {
 
     println!("Wait For Your Channel To Add Followee...");
 
-    channel.follow(args.address.into()).await?;
+    channel.follow(args.address).await?;
 
     println!("✅ Added Followee {}", args.address);
 
@@ -287,7 +291,7 @@ async fn remove_followee(identity: Cid, args: Followee) -> Result<(), Error> {
 
     println!("Wait For Your Channel To Remove Followee...");
 
-    channel.unfollow(args.address.into()).await?;
+    channel.unfollow(args.address).await?;
 
     println!("✅ Removed Followee {}", args.address);
 
@@ -298,7 +302,7 @@ async fn remove_followee(identity: Cid, args: Followee) -> Result<(), Error> {
 pub struct Live {
     /// Peer Id of the node live streaming.
     #[clap(short, long)]
-    peer_id: Option<String>,
+    peer_id: Option<PeerId>,
 
     /// PubSub Topic for live video.
     #[clap(short, long)]
@@ -323,7 +327,7 @@ async fn update_live(identity: Cid, args: Live) -> Result<(), Error> {
 
     let channel = local_setup(identity).await?;
 
-    let peer_id = if let Some(peer) = peer_id {
+    /* let peer_id = if let Some(peer) = peer_id {
         match PeerId::try_from(peer) {
             Ok(peer) => Some(peer.into()),
             Err(e) => {
@@ -334,7 +338,7 @@ async fn update_live(identity: Cid, args: Live) -> Result<(), Error> {
         }
     } else {
         None
-    };
+    }; */
 
     println!("Wait For Your Channel To Update Live Settings...");
 

@@ -8,8 +8,10 @@ For more info on the commands available to you.
 
 ## How To
 
+### Identity Creation
+- Create a new identity. Command: ```defluencer node identity --help```
+
 ### Channel Creation
-- Create a new user identity. Command: ```defluencer user create --help```
 - Create a new channel. Command: ```defluencer channel create --help```
 
 ### Video Live Streaming

@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
+    use cid::Cid;
     use futures_util::{future::FutureExt, stream, StreamExt};
     use ipfs_api::{
         responses::{Codec, PinMode},
@@ -14,14 +14,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn id() {
-        let decoded = Base::Base58Btc.decode(PEER_ID).unwrap();
-        let multihash = MultihashGeneric::from_bytes(&decoded).unwrap();
-        let cid = Cid::new_v1(0x70, multihash);
+        let peer_id = PeerId::try_from(PEER_ID).unwrap();
 
         let ipfs = IpfsService::default();
 
         match ipfs.peer_id().await {
-            Ok(res) => assert_eq!(res, cid),
+            Ok(res) => assert_eq!(res, peer_id),
             Err(e) => panic!("{}", e),
         }
     }
@@ -31,9 +29,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn pubsub_roundtrip() {
-        let decoded = Base::Base58Btc.decode(PEER_ID).unwrap();
-        let multihash = MultihashGeneric::from_bytes(&decoded).unwrap();
-        let peer_id = Cid::new_v1(0x70, multihash);
+        let peer_id = PeerId::try_from(PEER_ID).unwrap();
 
         let ipfs = IpfsService::default();
 
@@ -58,6 +54,7 @@ mod tests {
         assert_eq!(MSG, String::from_utf8(msg.data).unwrap());
     }
 
+    use linked_data::types::{IPNSAddress, PeerId};
     use serde::{Deserialize, Serialize};
 
     #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -84,9 +81,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn key_listing() {
-        let ipfs = IpfsService::default();
+        let self_cid = IPNSAddress::try_from(SELF_KEY).unwrap();
 
-        let self_cid = Cid::try_from(SELF_KEY).unwrap();
+        let ipfs = IpfsService::default();
 
         let list = ipfs.key_list().await.unwrap();
 
@@ -98,9 +95,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore]
     async fn name_publish() {
-        let ipfs = IpfsService::default();
-
         let cid = Cid::try_from(TEST_CID).unwrap();
+
+        let ipfs = IpfsService::default();
 
         match ipfs.name_publish(cid, "self").await {
             Ok(res) => assert_eq!(res.value, format!("/ipfs/{}", TEST_CID)),
@@ -110,9 +107,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn pin_roundtrip() {
-        let ipfs = IpfsService::default();
-
         let cid = Cid::try_from(TEST_CID).unwrap();
+
+        let ipfs = IpfsService::default();
 
         match ipfs.pin_add(cid, false).await {
             Ok(res) => assert_eq!(res.pins[0], TEST_CID),

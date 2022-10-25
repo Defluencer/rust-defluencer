@@ -107,5 +107,5 @@ pub struct Track {
     #[serde(rename = "initseg")]
     pub initialization_segment: IPLDLink, // ../time/hour/0/minute/36/second/12/video/setup/track/1/initseg
 
-    pub bandwidth: usize, // ../time/hour/0/minute/36/second/12/video/setup/track/4/bandwidth
+    pub bandwidth: u64, // ../time/hour/0/minute/36/second/12/video/setup/track/4/bandwidth
 }

@@ -40,10 +40,10 @@ pub async fn add_image(ipfs: &IpfsService, file: web_sys::File) -> Result<Cid, E
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid, Error> {
+pub async fn add_image(ipfs: &IpfsService, path: std::path::PathBuf) -> Result<Cid, Error> {
     use tokio::fs::File;
 
-    let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
+    let mime_type = match mime_guess::MimeGuess::from_path(&path).first_raw() {
         Some(mime) => mime.to_owned(),
         None => return Err(Error::Image),
     };
@@ -52,7 +52,7 @@ pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid
         return Err(Error::Image);
     };
 
-    let file = File::open(path).await?;
+    let file = File::open(&path).await?;
 
     let stream = tokio_util::io::ReaderStream::new(file);
 
@@ -63,8 +63,8 @@ pub async fn add_image(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid
 
 /// Add a markdown file to IPFS and return the CID
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn add_markdown(ipfs: &IpfsService, path: &std::path::Path) -> Result<Cid, Error> {
-    let mime_type = match mime_guess::MimeGuess::from_path(path).first_raw() {
+pub async fn add_markdown(ipfs: &IpfsService, path: std::path::PathBuf) -> Result<Cid, Error> {
+    let mime_type = match mime_guess::MimeGuess::from_path(&path).first_raw() {
         Some(mime) => mime.to_owned(),
         None => return Err(Error::Markdown),
     };
@@ -73,7 +73,7 @@ pub async fn add_markdown(ipfs: &IpfsService, path: &std::path::Path) -> Result<
         return Err(Error::Markdown);
     };
 
-    let file = tokio::fs::File::open(path).await?;
+    let file = tokio::fs::File::open(&path).await?;
     let stream = tokio_util::io::ReaderStream::new(file);
 
     let cid = ipfs.add(stream).await?;

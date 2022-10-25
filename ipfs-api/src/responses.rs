@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 
-use cid::{
-    multibase::{decode, Base},
-    multihash::MultihashGeneric,
-    Cid,
-};
+use cid::{multibase::decode, Cid};
+
+use linked_data::types::{IPNSAddress, PeerId};
 
 use strum::{self, Display, EnumString};
 
@@ -31,8 +29,7 @@ pub struct PubsubSubResponse {
 }
 
 pub struct PubSubMessage {
-    /// Peer Id as Cid v1
-    pub from: Cid,
+    pub from: PeerId,
     pub data: Vec<u8>,
 }
 
@@ -42,15 +39,10 @@ impl TryFrom<PubsubSubResponse> for PubSubMessage {
     fn try_from(response: PubsubSubResponse) -> Result<Self, Self::Error> {
         let PubsubSubResponse { from, data } = response;
 
-        //Use Peer ID as CID v1 instead of multihash btc58 encoded
-        // https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md#string-representation
-        let decoded = Base::Base58Btc.decode(from)?;
-        let multihash = MultihashGeneric::from_bytes(&decoded)?;
-        let cid = Cid::new_v1(0x70, multihash);
-
+        let from = PeerId::try_from(from)?;
         let (_, data) = decode(data)?;
 
-        Ok(Self { from: cid, data })
+        Ok(Self { from, data })
     }
 }
 
@@ -116,7 +108,7 @@ pub struct KeyPair {
     pub name: String,
 }
 
-pub type KeyList = HashMap<String, Cid>;
+pub type KeyList = HashMap<String, IPNSAddress>;
 
 impl From<KeyListResponse> for KeyList {
     fn from(response: KeyListResponse) -> Self {
@@ -126,7 +118,7 @@ impl From<KeyListResponse> for KeyList {
             .filter_map(|keypair| {
                 let KeyPair { id, name } = keypair;
 
-                match Cid::try_from(id) {
+                match IPNSAddress::try_from(id) {
                     Ok(cid) => Some((name, cid)),
                     Err(_) => None,
                 }
@@ -141,15 +133,11 @@ pub struct IdResponse {
     pub id: String,
 }
 
-impl TryFrom<IdResponse> for Cid {
+impl TryFrom<IdResponse> for PeerId {
     type Error = cid::Error;
 
     fn try_from(response: IdResponse) -> Result<Self, Self::Error> {
-        let decoded = Base::Base58Btc.decode(response.id)?;
-        let multihash = MultihashGeneric::from_bytes(&decoded)?;
-        let cid = Cid::new_v1(/* libp2p-key */ 0x72, multihash);
-
-        Ok(cid)
+        PeerId::try_from(response.id)
     }
 }
 

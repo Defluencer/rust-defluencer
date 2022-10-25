@@ -1,18 +1,16 @@
 use std::net::SocketAddr;
 
 use crate::{
-    actors::{Archivist, Chatter, Setter, Videograph},
+    actors::{Archivist, Setter, Videograph},
     server::start_server,
 };
-
-use cid::Cid;
 
 use defluencer::errors::Error;
 
 use linked_data::{
     channel::ChannelMetadata,
     live::LiveSettings,
-    moderation::{Bans, Moderators},
+    types::{IPNSAddress, PeerId},
 };
 
 use tokio::{
@@ -34,7 +32,7 @@ pub struct Stream {
 
     /// Channel IPNS Address.
     #[clap(long)]
-    address: Cid,
+    address: IPNSAddress,
 }
 
 pub async fn stream_cli(args: Stream) {
@@ -51,7 +49,7 @@ async fn stream(args: Stream) -> Result<(), Error> {
     println!("Initialization...");
 
     let peer_id = match ipfs.peer_id().await {
-        Ok(peer_id) => peer_id,
+        Ok(peer_id) => PeerId::try_from(peer_id).expect("Valid Peer Id"),
         Err(_) => {
             eprintln!("❗ IPFS must be started beforehand. Aborting...");
             return Ok(());
@@ -74,7 +72,7 @@ async fn stream(args: Stream) -> Result<(), Error> {
         }
     };
 
-    if settings.peer_id != peer_id.into() {
+    if settings.peer_id != peer_id {
         eprintln!("❗ This peer is not allowed to stream on this channel. Aborting...");
         return Ok(());
     }
@@ -102,7 +100,7 @@ async fn stream(args: Stream) -> Result<(), Error> {
         if settings.archiving {
             let (archive_tx, archive_rx) = unbounded_channel();
 
-            if let Some(chat_topic) = settings.chat_topic {
+            /* if let Some(chat_topic) = settings.chat_topic {
                 let bans = match settings.bans {
                     Some(ipld) => ipfs.dag_get::<&str, Bans>(ipld.link, None).await?,
                     None => Default::default(),
@@ -123,7 +121,7 @@ async fn stream(args: Stream) -> Result<(), Error> {
                 );
                 let handle = tokio::spawn(chat.start());
                 handles.push(handle);
-            }
+            } */
 
             let archivist = Archivist::new(ipfs.clone(), archive_rx);
             let handle = tokio::spawn(archivist.start());

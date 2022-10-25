@@ -57,21 +57,28 @@ impl Channel<LocalUpdater> {
     /// Create a new channel with your IPFS node local keys.
     ///
     /// Returns channel and new identity with channel address included.
-    pub async fn create_local(ipfs: IpfsService, identity: Cid) -> Result<(Self, Cid), Error> {
-        let mut identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    pub async fn create_local(ipfs: IpfsService, mut id_cid: Cid) -> Result<(Self, Cid), Error> {
+        let mut identity = ipfs.dag_get::<String, Identity>(id_cid, None).await?;
 
         use heck::ToSnakeCase;
         let key = identity.name.to_snake_case();
 
-        let key_pair = ipfs.key_gen(key.clone()).await?;
-        let addr = IPNSAddress::try_from(key_pair.id)?;
+        let ipns_addr = match identity.ipns_addr {
+            Some(addr) => addr,
+            None => {
+                let key_pair = ipfs.key_gen(key.clone()).await?;
+                let addr = IPNSAddress::try_from(key_pair.id)?;
 
-        identity.ipns_addr = Some(addr);
+                identity.ipns_addr = Some(addr);
 
-        let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
+                id_cid = ipfs.dag_put(&identity, Codec::default()).await?.into();
+
+                addr
+            }
+        };
 
         let metadata = ChannelMetadata {
-            identity,
+            identity: id_cid.into(),
             ..Default::default()
         };
 
@@ -83,9 +90,9 @@ impl Channel<LocalUpdater> {
 
         updater.update(root).await?;
 
-        let channel = Channel::new(ipfs.clone(), addr.into(), updater);
+        let channel = Channel::new(ipfs.clone(), ipns_addr, updater);
 
-        Ok((channel, identity.link))
+        Ok((channel, id_cid))
     }
 }
 
@@ -106,8 +113,12 @@ where
     pub async fn update_identity(
         &self,
         name: Option<String>,
+        bio: Option<String>,
+        banner: Option<std::path::PathBuf>,
         avatar: Option<std::path::PathBuf>,
         ipns_addr: Option<IPNSAddress>,
+        eth_addr: Option<String>,
+        btc_addr: Option<String>,
     ) -> Result<Cid, Error> {
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -120,12 +131,28 @@ where
             identity.name = name;
         }
 
+        if let Some(bio) = bio {
+            identity.bio = Some(bio);
+        }
+
+        if let Some(banner) = banner {
+            identity.banner = Some(add_image(&self.ipfs, banner).await?.into());
+        }
+
         if let Some(avatar) = avatar {
-            identity.avatar = Some(add_image(&self.ipfs, &avatar).await?.into());
+            identity.avatar = Some(add_image(&self.ipfs, avatar).await?.into());
         }
 
         if let Some(ipns) = ipns_addr {
             identity.ipns_addr = Some(ipns);
+        }
+
+        if let Some(eth_addr) = eth_addr {
+            identity.eth_addr = Some(eth_addr);
+        }
+
+        if let Some(btc_addr) = btc_addr {
+            identity.btc_addr = Some(btc_addr);
         }
 
         let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
