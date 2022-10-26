@@ -19,9 +19,7 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 pub struct File {
     /// Socket Address used to ingress video.
-    ///
-    /// egg. 127.0.0.1:2526
-    #[clap(long)]
+    #[arg(long, default_value = "127.0.0.1:2526")]
     socket_addr: SocketAddr,
 }
 
@@ -39,7 +37,7 @@ async fn file(args: File) -> Result<(), Error> {
     println!("Initialization...");
 
     if let Err(_) = ipfs.peer_id().await {
-        eprintln!("❗ IPFS must be started beforehand. Aborting...");
+        eprintln!("❗ IPFS must be started beforehand.\nAborting...");
         return Ok(());
     }
 

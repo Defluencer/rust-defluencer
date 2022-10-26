@@ -1,24 +1,18 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use defluencer::{errors::Error, utils::add_image, Defluencer};
 
-use futures_util::{future::AbortHandle, pin_mut, stream::Abortable, FutureExt, StreamExt};
+use futures_util::{future::AbortHandle, pin_mut, stream::Abortable, StreamExt};
 
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{channel::ChannelMetadata, types::IPNSAddress};
 
-#[derive(Debug, Parser)]
-pub struct NodeCLI {
-    #[clap(subcommand)]
-    cmd: Command,
-}
-
-#[derive(Debug, Parser)]
-enum Command {
-    /// Create a new identity. Must already have an IPNS address if creating a channel.
+#[derive(Debug, Subcommand)]
+pub enum NodeCLI {
+    /// Create a new identity. Must have an IPNS address if creating a channel.
     Identity(Identity),
 
     /* /// Compute channel address from a BTC or ETH account.
@@ -32,32 +26,32 @@ enum Command {
     Unpin(Address),
 
     /// Receive channel updates in real time.
-    /// The first update received is the most up to date channel state.
+    /// The first CID received is the most up to date channel metadata not a live update.
     Subscribe(Address),
 
-    /// Receive requests for content agregation.
-    Agregate(Address),
+    /// Receive requests for content aggregation.
+    Aggregate(Address),
 
     /// Stream all content & comments from a channel.
     Stream(Stream),
 
-    /// Crawl the social web, one degree of separation at a time.
+    /// Crawl the social web, returns channel metadata CIDs without duplicates.
     Webcrawl(Address),
 }
 
 pub async fn node_cli(cli: NodeCLI) {
-    let res = match cli.cmd {
-        Command::Identity(args) => create_id(args).await,
+    let res = match cli {
+        NodeCLI::Identity(args) => create_id(args).await,
         //Command::Address(args) => address(args).await,
-        Command::Pin(args) => pin(args).await,
-        Command::Unpin(args) => unpin(args).await,
-        Command::Subscribe(args) => subscribe(args).await,
-        Command::Agregate(args) => agregate(args).await,
-        Command::Stream(stream_cli) => match stream_cli.cmd {
+        NodeCLI::Pin(args) => pin(args).await,
+        NodeCLI::Unpin(args) => unpin(args).await,
+        NodeCLI::Subscribe(args) => subscribe(args).await,
+        NodeCLI::Aggregate(args) => agregate(args).await,
+        NodeCLI::Stream(stream_cli) => match stream_cli.cmd {
             SubCommand::Content => stream_content(stream_cli.address).await,
             SubCommand::Comments => stream_comments(stream_cli.address).await,
         },
-        Command::Webcrawl(args) => web_crawl(args).await,
+        NodeCLI::Webcrawl(args) => web_crawl(args).await,
     };
 
     if let Err(e) = res {
@@ -68,31 +62,31 @@ pub async fn node_cli(cli: NodeCLI) {
 #[derive(Debug, Parser)]
 pub struct Identity {
     /// Choosen name.
-    #[clap(short, long)]
+    #[arg(long)]
     name: String,
 
-    /// User short biography.
-    #[clap(short, long)]
+    /// User short biography. (Optional)
+    #[arg(long)]
     bio: Option<String>,
 
-    /// Path to banner image file.
-    #[clap(short, long)]
+    /// Path to banner image file. (Optional)
+    #[arg(long)]
     banner: Option<PathBuf>,
 
-    /// Path to avatar image file.
-    #[clap(short, long)]
+    /// Path to avatar image file. (Optional)
+    #[arg(long)]
     avatar: Option<PathBuf>,
 
-    /// IPNS address.
-    #[clap(short, long)]
+    /// IPNS address. (Optional)
+    #[arg(long)]
     ipns_addr: Option<IPNSAddress>,
 
-    /// Bitcoin address.
-    #[clap(short, long)]
+    /// Bitcoin address. (Optional)
+    #[arg(long)]
     btc_addr: Option<String>,
 
-    /// Ethereum address.
-    #[clap(short, long)]
+    /// Ethereum address. (Optional)
+    #[arg(long)]
     eth_addr: Option<String>,
 }
 
@@ -141,15 +135,15 @@ async fn create_id(args: Identity) -> Result<(), Error> {
 /* #[derive(Debug, Parser)]
 pub struct Address {
     /// Bitcoin or Ethereum based signatures.
-    #[clap(arg_enum, default_value = "bitcoin")]
+    #[arg(arg_enum, default_value = "bitcoin")]
     blockchain: Blockchain,
 
     /// Account index (BIP-44).
-    #[clap(long, default_value = "0")]
+    #[arg(long, default_value = "0")]
     account: u32,
 } */
 
-/* #[derive(clap::ArgEnum, Clone, Debug)]
+/* #[derive(arg::ArgEnum, Clone, Debug)]
 enum Blockchain {
     Bitcoin,
     Ethereum,
@@ -183,7 +177,7 @@ enum Blockchain {
 #[derive(Debug, Parser)]
 pub struct Address {
     /// Channel IPNS address.
-    #[clap(short, long)]
+    #[arg(long)]
     address: IPNSAddress,
 }
 
@@ -220,7 +214,7 @@ async fn subscribe(args: Address) -> Result<(), Error> {
     let control = tokio::signal::ctrl_c();
     pin_mut!(control);
 
-    println!("Receiver Ready!\nPress CRTL-C to exit...");
+    println!("✅ Receiver Ready!\nPress CRTL-C to exit...");
 
     loop {
         tokio::select! {
@@ -228,6 +222,7 @@ async fn subscribe(args: Address) -> Result<(), Error> {
 
             _ = &mut control => {
                 handle.abort();
+                println!("✅ Subscription Stopped");
                 return Ok(());
             }
 
@@ -255,7 +250,7 @@ async fn agregate(args: Address) -> Result<(), Error> {
     let topic = match meta.agregation_channel {
         Some(tp) => tp,
         None => {
-            eprintln!("❗ This channel has no aggregation channel");
+            eprintln!("❗ This channel has no aggregation topic");
             return Ok(());
         }
     };
@@ -268,7 +263,7 @@ async fn agregate(args: Address) -> Result<(), Error> {
     let control = tokio::signal::ctrl_c();
     pin_mut!(control);
 
-    println!("Receiver Ready!\nPress CRTL-C to exit...");
+    println!("✅ Receiver Ready!\nPress CRTL-C to exit...");
 
     loop {
         tokio::select! {
@@ -276,6 +271,7 @@ async fn agregate(args: Address) -> Result<(), Error> {
 
             _ = &mut control => {
                 handle.abort();
+                println!("✅ Aggregation Stopped");
                 return Ok(());
             }
 
@@ -293,14 +289,14 @@ async fn agregate(args: Address) -> Result<(), Error> {
 #[derive(Debug, Parser)]
 pub struct Stream {
     /// Channel IPNS address.
-    #[clap(short, long)]
+    #[arg(long)]
     address: IPNSAddress,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: SubCommand,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Subcommand)]
 pub enum SubCommand {
     /// Stream chronologicaly all the content on a channel.
     Content,
@@ -321,20 +317,22 @@ async fn stream_comments(addr: IPNSAddress) -> Result<(), Error> {
     let index = match metadata.comment_index {
         Some(ipns) => ipns,
         None => {
-            eprintln!("❗ This channel's content has no comments.");
+            eprintln!("❗ This channel has no comments.");
             return Ok(());
         }
     };
 
-    let mut stream = defluencer.stream_all_comments(index).boxed_local();
+    let stream = defluencer.stream_all_comments(index);
 
-    println!("Streaming Comments CIDs...");
+    pin_mut!(stream);
+
+    println!("✅ Streaming Comments CIDs...");
 
     while let Some((media, comment)) = stream.try_next().await? {
         println!("Media: {} Comment: {}", media, comment);
     }
 
-    println!("✅ Comments Stream Ended");
+    println!("✅ Comments Stream Finished");
 
     Ok(())
 }
@@ -356,15 +354,17 @@ async fn stream_content(addr: IPNSAddress) -> Result<(), Error> {
         }
     };
 
-    let mut stream = defluencer.stream_content_rev_chrono(index).boxed_local();
+    let stream = defluencer.stream_content_rev_chrono(index);
 
-    println!("Streaming Content CIDs...");
+    pin_mut!(stream);
+
+    println!("✅ Streaming Content CIDs...");
 
     while let Some(cid) = stream.try_next().await? {
         println!("{}", cid);
     }
 
-    println!("✅ Content Stream Ended");
+    println!("✅ Content Stream Finished");
 
     Ok(())
 }
@@ -372,20 +372,20 @@ async fn stream_content(addr: IPNSAddress) -> Result<(), Error> {
 async fn web_crawl(args: Address) -> Result<(), Error> {
     let defluencer = Defluencer::default();
 
-    let mut stream = defluencer
-        .streaming_web_crawl(std::iter::once(args.address))
-        .boxed_local();
+    let stream = defluencer.streaming_web_crawl(std::iter::once(args.address));
+    let control = tokio::signal::ctrl_c();
 
-    let mut control = tokio::signal::ctrl_c().boxed_local();
+    pin_mut!(stream);
+    pin_mut!(control);
 
-    println!("Crawling Start\nPress CRTL-C to exit...");
+    println!("✅ Crawling Start\nPress CRTL-C to exit...");
 
     loop {
         tokio::select! {
             biased;
 
             _ = &mut control => {
-                println!("✅ Web Crawl Ended");
+                println!("✅ Web Crawl Stopped");
                 return Ok(());
             }
 
@@ -397,7 +397,9 @@ async fn web_crawl(args: Address) -> Result<(), Error> {
                     Err(_) => continue,
 
                 },
-                None => return Ok(()),
+                None => {
+                    println!("✅ Web Crawl Finished");
+                    return Ok(())},
             }
         }
     }

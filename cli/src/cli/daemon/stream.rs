@@ -7,11 +7,7 @@ use crate::{
 
 use defluencer::errors::Error;
 
-use linked_data::{
-    channel::ChannelMetadata,
-    live::LiveSettings,
-    types::{IPNSAddress, PeerId},
-};
+use linked_data::{channel::ChannelMetadata, live::LiveSettings, types::IPNSAddress};
 
 use tokio::{
     signal::ctrl_c,
@@ -25,14 +21,12 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 pub struct Stream {
     /// Socket Address used to ingress video.
-    ///
-    /// egg. 127.0.0.1:2526
-    #[clap(long)]
+    #[arg(long, default_value = "127.0.0.1:2526")]
     socket_addr: SocketAddr,
 
     /// Channel IPNS Address.
-    #[clap(long)]
-    address: IPNSAddress,
+    #[arg(long)]
+    ipns_addr: IPNSAddress,
 }
 
 pub async fn stream_cli(args: Stream) {
@@ -49,31 +43,31 @@ async fn stream(args: Stream) -> Result<(), Error> {
     println!("Initialization...");
 
     let peer_id = match ipfs.peer_id().await {
-        Ok(peer_id) => PeerId::try_from(peer_id).expect("Valid Peer Id"),
+        Ok(peer_id) => peer_id,
         Err(_) => {
-            eprintln!("❗ IPFS must be started beforehand. Aborting...");
+            eprintln!("❗ IPFS must be started beforehand.\nAborting...");
             return Ok(());
         }
     };
 
     let Stream {
-        address,
+        ipns_addr,
         socket_addr,
     } = args;
 
-    let cid = ipfs.name_resolve(address).await?;
+    let cid = ipfs.name_resolve(ipns_addr).await?;
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
 
     let settings = match metadata.live {
         Some(ipld) => ipfs.dag_get::<&str, LiveSettings>(ipld.link, None).await?,
         None => {
-            eprintln!("❗ Stream settings not found. Aborting...");
+            eprintln!("❗ Channel live settings not found.\nAborting...");
             return Ok(());
         }
     };
 
     if settings.peer_id != peer_id {
-        eprintln!("❗ This peer is not allowed to stream on this channel. Aborting...");
+        eprintln!("❗ This peer is not allowed to stream on this channel. Update your channel live settings!\nAborting...");
         return Ok(());
     }
 

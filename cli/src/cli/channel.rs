@@ -9,7 +9,7 @@ use heck::ToSnakeCase;
 
 use ipfs_api::IpfsService;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use linked_data::{
     identity::Identity,
@@ -22,27 +22,27 @@ use linked_data::{
 #[derive(Debug, Parser)]
 pub struct ChannelCLI {
     /* /// Bitcoin or Ethereum based signatures.
-    #[clap(arg_enum, default_value = "bitcoin")]
+    #[arg(arg_enum, default_value = "bitcoin")]
     blockchain: Blockchain,
 
     /// Account index (BIP-44).
-    #[clap(long, default_value = "0")]
+    #[arg(long, default_value = "0")]
     account: u32, */
     /// Identity CID.
-    #[clap(short, long)]
+    #[arg(long)]
     identity: Cid,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: Command,
 }
 
-/* #[derive(clap::ArgEnum, Clone, Debug)]
+/* #[derive(arg::ArgEnum, Clone, Debug)]
 enum Blockchain {
     Bitcoin,
     Ethereum,
 } */
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Subcommand)]
 enum Command {
     /// Create a new channel.
     Create,
@@ -171,7 +171,7 @@ async fn create_channel(identity: Cid) -> Result<(), Error> {
 
 #[derive(Debug, Parser)]
 pub struct Manage {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: AddRemoveCommand,
 }
 
@@ -187,7 +187,7 @@ enum AddRemoveCommand {
 #[derive(Debug, Parser)]
 pub struct Content {
     /// The CID of the content/comment.
-    #[clap(short, long)]
+    #[arg(long)]
     cid: Cid,
 }
 
@@ -254,7 +254,7 @@ async fn remove_comment(identity: Cid, args: Content) -> Result<(), Error> {
 
 #[derive(Debug, Parser)]
 pub struct Friends {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: FollowCommand,
 }
 
@@ -270,7 +270,7 @@ enum FollowCommand {
 #[derive(Debug, Parser)]
 pub struct Followee {
     /// Followee's channel address.
-    #[clap(short, long)]
+    #[arg(long)]
     address: IPNSAddress,
 }
 
@@ -301,19 +301,19 @@ async fn remove_followee(identity: Cid, args: Followee) -> Result<(), Error> {
 #[derive(Debug, Parser)]
 pub struct Live {
     /// Peer Id of the node live streaming.
-    #[clap(short, long)]
+    #[arg(long)]
     peer_id: Option<PeerId>,
 
     /// PubSub Topic for live video.
-    #[clap(short, long)]
+    #[arg(long)]
     video_topic: Option<String>,
 
     /// PubSub Topic for live chat.
-    #[clap(short, long)]
+    #[arg(long)]
     chat_topic: Option<String>,
 
     /// Should live chat be archived.
-    #[clap(short, long)]
+    #[arg(long)]
     archiving: Option<bool>,
 }
 
@@ -326,19 +326,6 @@ async fn update_live(identity: Cid, args: Live) -> Result<(), Error> {
     } = args;
 
     let channel = local_setup(identity).await?;
-
-    /* let peer_id = if let Some(peer) = peer_id {
-        match PeerId::try_from(peer) {
-            Ok(peer) => Some(peer.into()),
-            Err(e) => {
-                eprintln!("{}", e);
-
-                None
-            }
-        }
-    } else {
-        None
-    }; */
 
     println!("Wait For Your Channel To Update Live Settings...");
 
@@ -353,7 +340,7 @@ async fn update_live(identity: Cid, args: Live) -> Result<(), Error> {
 
 #[derive(Debug, Parser)]
 struct Moderation {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: ModerationCommand,
 }
 
@@ -375,7 +362,7 @@ enum ModerationCommand {
 #[derive(Debug, Parser)]
 pub struct EthAddress {
     /// Ethereum address.
-    #[clap(long)]
+    #[arg(long)]
     address: String,
 }
 

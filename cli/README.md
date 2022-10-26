@@ -21,21 +21,21 @@ For more info on the commands available to you.
 - With your broadcast software output set to ffmpeg. Default: ```rtmp://localhost:2525```
 - Start Streaming!
 - When done streaming stop your broadcast software.
-- Press Ctrl-c in defluencer window to save.
-- Use the CLI to create metadata. Command: ```defluencer content --help``` for more info.
+- Press Ctrl-c to generate timecode CID.
+- Use the CLI to create video metadata. Command: ```defluencer user video --help``` for more info.
 
 ### Pre-recorded Video
 - Start IPFS. Command: ```ipfs daemon```
 - Start in file mode. Command: ```defluencer file```
 - Run ```ffmpeg_file.sh``` or custom ffmpeg script.
 - Wait until the video is processed.
-- Press Ctrl-c in defluencer window to save.
-- Use the CLI to create metadata. Command: ```defluencer content --help``` for more info.
+- Press Ctrl-c to generate timecode Cid.
+- Use the CLI to create video metadata. Command: ```defluencer user video --help``` for more info.
 
 ## Technical
 
 ### Requirements
-- [IPFS](https://docs.ipfs.io/install/command-line/#package-managers)
+- [IPFS](https://docs.ipfs.tech/install/command-line/#official-distributions)
 - [FFMPEG](https://ffmpeg.org/)
 - Broadcasting software
 

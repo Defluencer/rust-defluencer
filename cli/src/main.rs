@@ -2,7 +2,7 @@ mod actors;
 mod cli;
 mod server;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use crate::cli::{
     channel::{channel_cli, ChannelCLI},
@@ -14,9 +14,15 @@ use crate::cli::{
     user::{user_cli, UserCLI},
 };
 
-#[derive(Debug, Parser)]
-#[clap(name = "defluencer", author = "SionoiS <defluencer@protonmail.com>", version, about, long_about = None, rename_all = "kebab-case")]
-enum CommandLineInterface {
+#[derive(Parser)]
+#[command(name = "defluencer", bin_name= "defluencer", author = "SionoiS <defluencer@protonmail.com>", version, about, long_about = None, rename_all = "kebab-case")]
+struct Defluencer {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
     /// Start the video live streaming daemon.
     Stream(Stream),
 
@@ -30,16 +36,19 @@ enum CommandLineInterface {
     User(UserCLI),
 
     /// Manage your node and other utilities.
+    #[command(subcommand)]
     Node(NodeCLI),
 }
 
 #[tokio::main]
 async fn main() {
-    match CommandLineInterface::parse() {
-        CommandLineInterface::Stream(args) => stream_cli(args).await,
-        CommandLineInterface::File(args) => file_cli(args).await,
-        CommandLineInterface::Channel(args) => channel_cli(args).await,
-        CommandLineInterface::User(args) => user_cli(args).await,
-        CommandLineInterface::Node(args) => node_cli(args).await,
+    let cli = Defluencer::parse();
+
+    match cli.command {
+        Commands::Stream(args) => stream_cli(args).await,
+        Commands::File(args) => file_cli(args).await,
+        Commands::Channel(args) => channel_cli(args).await,
+        Commands::User(args) => user_cli(args).await,
+        Commands::Node(args) => node_cli(args).await,
     }
 }

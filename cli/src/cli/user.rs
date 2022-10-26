@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use cid::Cid;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use defluencer::{
     crypto::{
@@ -28,18 +28,18 @@ enum Blockchain {
 #[derive(Debug, Parser)]
 pub struct UserCLI {
     /// Bitcoin or Ethereum based signatures.
-    #[clap(value_enum, default_value = "bitcoin")]
+    #[arg(value_enum, default_value = "bitcoin")]
     blockchain: Blockchain,
 
     /// Account index (BIP-44).
-    #[clap(long, default_value = "0")]
+    #[arg(long, default_value = "0")]
     account: u32,
 
     /// Creators identity CID
-    #[clap(short, long)]
+    #[arg(long)]
     creator: Cid,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: Media,
 }
 
@@ -90,7 +90,7 @@ pub async fn user_cli(cli: UserCLI) {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Subcommand)]
 enum Media {
     /// Create new micro post.
     Microblog(MicroBlog),
@@ -105,11 +105,11 @@ enum Media {
 #[derive(Debug, Parser)]
 pub struct MicroBlog {
     /// The micro post text content.
-    #[clap(short, long)]
+    #[arg(long)]
     content: String,
 
-    /// Cid of the media being commented on.
-    #[clap(short, long)]
+    /// Cid of the media being commented on. (Optional)
+    #[arg(long)]
     origin: Option<Cid>,
 }
 
@@ -145,19 +145,19 @@ async fn micro_blog(
 #[derive(Debug, Parser)]
 pub struct Blog {
     /// The blog post title.
-    #[clap(long)]
+    #[arg(long)]
     title: String,
 
     /// Path to the markdown file.
-    #[clap(short, long)]
+    #[arg(long)]
     content: PathBuf,
 
-    /// Path to the thumbnail image.
-    #[clap(short, long)]
+    /// Path to the thumbnail image. (Optional)
+    #[arg(long)]
     image: Option<PathBuf>,
 
-    /// Total word count.
-    #[clap(short, long)]
+    /// Total word count. (Optional)
+    #[arg(long)]
     word_count: Option<u64>,
 }
 
@@ -200,15 +200,15 @@ async fn blog(
 #[derive(Debug, Parser)]
 pub struct Video {
     /// The new video title.
-    #[clap(long)]
+    #[arg(long)]
     title: String,
 
-    /// Path to the video thumbnail image.
-    #[clap(short, long)]
+    /// Path to the video thumbnail image. (Optional)
+    #[arg(long)]
     image: Option<PathBuf>,
 
     /// Processed video timecode CID.
-    #[clap(short, long)]
+    #[arg(long)]
     video: Cid,
 }
 
@@ -236,7 +236,7 @@ async fn video(
 
     let user = User::new(ipfs, signer, identity);
 
-    println!("Confirm Signature On Your Hardware Wallet...");
+    println!("Confirm Signature...");
 
     let (cid, _) = user.create_video_post(title, video, image, false).await?;
 
