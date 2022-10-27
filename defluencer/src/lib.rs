@@ -20,8 +20,7 @@ use indexing::hamt;
 
 use ipns_records::IPNSRecord;
 use linked_data::{
-    channel::ChannelMetadata,
-    follows::Follows,
+    channel::{follows::Follows, ChannelMetadata},
     identity::Identity,
     indexes::date_time::*,
     media::Media,
@@ -30,18 +29,24 @@ use linked_data::{
 
 use ipfs_api::{responses::PubSubMessage, IpfsService};
 
-//TODO From & Into IPFS for defluencer
-
 #[derive(Default, Clone)]
 pub struct Defluencer {
     ipfs: IpfsService,
 }
 
-impl Defluencer {
-    pub fn new(ipfs: IpfsService) -> Self {
+impl Into<IpfsService> for Defluencer {
+    fn into(self) -> IpfsService {
+        self.ipfs
+    }
+}
+
+impl From<IpfsService> for Defluencer {
+    fn from(ipfs: IpfsService) -> Self {
         Self { ipfs }
     }
+}
 
+impl Defluencer {
     /// Pin a channel to this local node.
     ///
     /// WARNING!
@@ -286,7 +291,7 @@ impl Defluencer {
             .await
     }
 
-    /// Lazily stream a channel's content.
+    /// Lazily stream a channel content CIDs.
     pub fn stream_content_rev_chrono(
         &self,
         content_index: IPLDLink,
@@ -394,7 +399,7 @@ impl Defluencer {
         .map_ok(|ipld| ipld.link)
     }
 
-    /// Stream all the comments for some content on the channel.
+    /// Stream all comment CIDs for some content on a channel.
     pub fn stream_content_comments(
         &self,
         comment_index: IPLDLink,

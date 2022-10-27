@@ -6,11 +6,13 @@ use prost::Message;
 
 use sha2::Digest;
 
+//TODO build a ledger nano app that can create IPNS records
+
 /// IPNS updater using Ledger nano app to create records.
 #[derive(Clone)]
 pub struct LedgerNanoUpdater {
     ipfs: IpfsService,
-    signer: IpfsNanoApp, //TODO build a ledger nano app that can create IPNS records
+    signer: IpfsNanoApp,
 }
 
 #[async_trait(?Send)]

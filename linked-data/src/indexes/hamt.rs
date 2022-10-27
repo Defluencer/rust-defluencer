@@ -17,6 +17,7 @@ pub const MAP_LENGTH_BITS: usize = 2usize.pow(BIT_WIDTH as u32);
 
 pub type BitField = BitArr!(for MAP_LENGTH_BITS, in u8);
 
+/// Root node of the hash array mapped tree.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct HAMTRoot {
     #[serde(rename = "hashAlg")]
@@ -93,9 +94,9 @@ impl Ord for BucketEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    //use super::*;
 
-    #[test]
+    /* #[test]
     fn serde_test() {
         let bitfield = BitField::ZERO;
 
@@ -107,5 +108,5 @@ mod tests {
         let json = serde_json::to_string_pretty(&node).unwrap();
 
         println!("{}", json);
-    }
+    } */
 }

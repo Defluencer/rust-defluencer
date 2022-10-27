@@ -241,7 +241,7 @@ async fn agregate(args: Address) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let ipfs = IpfsService::default();
-    let defluencer = Defluencer::new(ipfs.clone());
+    let defluencer = Defluencer::from(ipfs.clone());
 
     let cid = ipfs.name_resolve(args.address.into()).await?;
 
@@ -309,7 +309,7 @@ async fn stream_comments(addr: IPNSAddress) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let ipfs = IpfsService::default();
-    let defluencer = Defluencer::new(ipfs.clone());
+    let defluencer = Defluencer::from(ipfs.clone());
 
     let cid = ipfs.name_resolve(addr.into()).await?;
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
@@ -341,7 +341,7 @@ async fn stream_content(addr: IPNSAddress) -> Result<(), Error> {
     use futures_util::TryStreamExt;
 
     let ipfs = IpfsService::default();
-    let defluencer = Defluencer::new(ipfs.clone());
+    let defluencer = Defluencer::from(ipfs.clone());
 
     let cid = ipfs.name_resolve(addr.into()).await?;
     let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;

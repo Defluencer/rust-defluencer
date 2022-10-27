@@ -13,11 +13,11 @@ use cid::Cid;
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
-    comments::Comment,
     identity::Identity,
     media::{
         blog::BlogPost,
         chat::ChatInfo,
+        comments::Comment,
         video::{Day, Hour, Minute, Video},
     },
     types::{IPLDLink, IPNSAddress},

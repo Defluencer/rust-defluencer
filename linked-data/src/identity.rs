@@ -2,12 +2,9 @@ use crate::types::{IPLDLink, IPNSAddress};
 
 use serde::{Deserialize, Serialize};
 
-/// Minimum viable social media identity.
+/// Social media identity.
 ///
-/// A public key hash is all that is needed.
-///
-/// Current system use multiple keys but one key in a HW could sign IPNS records AND DAG-JOSE blocks.
-/// Just need to build the app for that.
+/// Can be a user identity or a channel identity.
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug, Default)]
 pub struct Identity {
     /// Choosen name.
@@ -37,3 +34,5 @@ pub struct Identity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eth_addr: Option<String>,
 }
+
+//TODO Key Rotation and Management system

@@ -1,17 +1,15 @@
-use crate::moderation::{Ban, Moderator};
+use crate::channel::moderation::{Ban, Moderator};
 
 use crate::types::{IPLDLink, PeerId};
 
 use serde::{Deserialize, Serialize};
 
-/// GossipSub Live Chat Message.
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct ChatMessage {
     /// Usualy text, ban user or add moderator.
     pub message: MessageType,
 
     /// Link to DAG-JOSE block for verification.
-    /// This block links to ChatInfo
     pub signature: IPLDLink,
 }
 

@@ -10,6 +10,7 @@ use serde_with::{serde_as, DisplayFromStr};
 #[serde_as]
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct Comment {
+    /// Creator identity link
     pub identity: IPLDLink,
 
     /// Timestamp at the time of publication in Unix time.
@@ -20,6 +21,6 @@ pub struct Comment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<Cid>,
 
-    /// Text as content of the comment.
+    /// Text content.
     pub text: String,
 }

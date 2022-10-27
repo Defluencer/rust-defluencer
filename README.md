@@ -1,6 +1,8 @@
 # Defluencer Protocol
 Rust implementation.
 
+See each crate documentation for details.
+
 ## Crates
 - [defluencer](https://github.com/Defluencer/rust-defluencer/tree/develop/defluencer)
 - [linked-data](https://github.com/Defluencer/rust-defluencer/tree/develop/linked-data)
@@ -9,7 +11,27 @@ Rust implementation.
 - [ipns-records](https://github.com/Defluencer/rust-defluencer/tree/develop/ipns-records)
 - [dag-jose](https://github.com/Defluencer/rust-defluencer/tree/develop/dag-jose)
 
-# How does it works?
+### IPFS API
+
+Communicate with an IPFS node from the browser AND desktop. Only a sub-set of the total IPFS API is implemented.
+
+### IPNS Records
+
+Small crate built for the creation and verification of records. Contains examples and trait for new implementation.
+
+### DAG-JOSE
+
+Create and verify DAG-JOSE blocks or use trait to implement new cryptography.
+
+### Linked Data
+
+Crate containing the many data structures used in other crates.
+
+### Defluencer
+
+The core crates contains fonctions to build and operate the protocol. Works for browser and desktop.
+
+<!--# How does it works?
 
 Users can create branded channels or rely on existing channels. If a channel only share user created content, they become de facto a content aggregator. Channels can be individuals or organisations. Organisation who choose to filter, aggregate and moderate content are "platforms". Everyone is free to build their own website or app.
 
@@ -31,4 +53,4 @@ IPNS is used for this purpose. An IPNS address is the hash of a public key, does
 
 Having permanent identifier for channels is good but who want to remember a number? Channels should have names like websites.
 
-Ethereum Name Service (ENS) can be use to associate a name to an IPNS address, but the protocol is agnostic to this.
+Ethereum Name Service (ENS) can be use to associate a name to an IPNS address, but the protocol is agnostic to this. -->

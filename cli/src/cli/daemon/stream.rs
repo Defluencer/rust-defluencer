@@ -7,7 +7,10 @@ use crate::{
 
 use defluencer::errors::Error;
 
-use linked_data::{channel::ChannelMetadata, live::LiveSettings, types::IPNSAddress};
+use linked_data::{
+    channel::{live::LiveSettings, ChannelMetadata},
+    types::IPNSAddress,
+};
 
 use tokio::{
     signal::ctrl_c,

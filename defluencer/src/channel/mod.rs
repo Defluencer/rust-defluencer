@@ -13,14 +13,15 @@ use cid::Cid;
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::{
-    channel::ChannelMetadata,
-    comments::Comment,
-    follows::Follows,
+    channel::{
+        follows::Follows,
+        live::LiveSettings,
+        moderation::{Bans, Moderators},
+        ChannelMetadata,
+    },
     identity::Identity,
     indexes::hamt::HAMTRoot,
-    live::LiveSettings,
-    media::Media,
-    moderation::{Bans, Moderators},
+    media::{comments::Comment, Media},
     types::{Address, IPLDLink, IPNSAddress, PeerId},
 };
 

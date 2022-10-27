@@ -78,10 +78,12 @@ impl Display for PeerId {
 }
 
 impl PeerId {
+    /// Returns a Base58BTC encoded string
     pub fn to_legacy_string(&self) -> String {
         Base::Base58Btc.encode(self.0.hash().to_bytes())
     }
 
+    /// Returns a Multibase encoded string
     pub fn to_cid_string(&self) -> String {
         self.0.to_string()
     }
@@ -143,6 +145,18 @@ impl Into<Cid> for IPNSAddress {
 }
 
 impl IPNSAddress {
+    /// Returns the pubsub topic used by this address for updates.
+    pub fn to_pubsub_topic(&self) -> String {
+        //https://github.com/ipfs/specs/blob/master/IPNS.md#integration-with-ipfs
+
+        let mut bytes = String::from("/ipns/").into_bytes();
+
+        bytes.extend(self.0.hash().to_bytes());
+
+        format!("/record/{}", Base::Base64Url.encode(bytes))
+    }
+
+    /// Try to return an address from a pubsub topic used by IPNS for updates.
     pub fn from_pubsub_topic(topic: String) -> Result<Self, cid::Error> {
         // https://github.com/ipfs/specs/blob/master/IPNS.md#integration-with-ipfs
 
@@ -156,16 +170,6 @@ impl IPNSAddress {
 
         Ok(Self(cid_v1))
     }
-
-    pub fn to_pubsub_topic(&self) -> String {
-        //https://github.com/ipfs/specs/blob/master/IPNS.md#integration-with-ipfs
-
-        let mut bytes = String::from("/ipns/").into_bytes();
-
-        bytes.extend(self.0.hash().to_bytes());
-
-        format!("/record/{}", Base::Base64Url.encode(bytes))
-    }
 }
 
 impl Display for IPNSAddress {
@@ -174,6 +178,7 @@ impl Display for IPNSAddress {
     }
 }
 
+/// IPLD serializable link
 #[serde_as]
 #[derive(
     Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord,
@@ -189,6 +194,7 @@ impl From<Cid> for IPLDLink {
         Self { link: cid }
     }
 }
+
 impl Into<Cid> for IPLDLink {
     fn into(self) -> Cid {
         self.link

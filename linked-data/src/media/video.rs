@@ -4,11 +4,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Metadata for video thumbnail and playback.
-///
-/// Recursive pin.
+/// Metadata of a video post.
 #[derive(Deserialize, Serialize, PartialEq, Clone, Debug, Default)]
 pub struct Video {
+    /// Creator identity link
     pub identity: IPLDLink,
 
     /// Timestamp at the time of publication in Unix time.
@@ -32,7 +31,7 @@ pub struct Video {
 /// Timecode structure root CID.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Timecode {
-    /// ../time/..
+    /// Path ../time/..
     #[serde(rename = "time")]
     pub timecode: IPLDLink,
 }
@@ -40,7 +39,7 @@ pub struct Timecode {
 /// Links all hour nodes for multiple hours of video.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Day {
-    /// ../time/hour/1/..
+    /// Path ../time/hour/1/..
     #[serde(rename = "hour")]
     pub links_to_hours: Vec<IPLDLink>,
 }
@@ -48,7 +47,7 @@ pub struct Day {
 /// Links all minute nodes for 1 hour of video.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Hour {
-    /// ../time/hour/0/minute/15/..
+    /// Path ../time/hour/0/minute/15/..
     #[serde(rename = "minute")]
     pub links_to_minutes: Vec<IPLDLink>,
 }
@@ -56,7 +55,7 @@ pub struct Hour {
 /// Links all variants nodes for 1 minute of video.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Minute {
-    /// ..time/hour/2/minute/36/second/30/..
+    /// Path ..time/hour/2/minute/36/second/30/..
     #[serde(rename = "second")]
     pub links_to_seconds: Vec<IPLDLink>,
 }
@@ -64,11 +63,11 @@ pub struct Minute {
 /// Links video and chat nodes.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Second {
-    /// ../time/hour/3/minute/59/second/48/video/..
+    /// Path ../time/hour/3/minute/59/second/48/video/..
     #[serde(rename = "video")]
     pub link_to_video: IPLDLink,
 
-    /// ../time/hour/4/minute/27/second/14/chat/0/..
+    /// Path ../time/hour/4/minute/27/second/14/chat/0/..
     #[serde(rename = "chat")]
     pub links_to_chat: Vec<IPLDLink>,
 }
@@ -78,15 +77,15 @@ pub struct Second {
 /// Also link to the previous video node.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Segment {
-    /// ../time/hour/0/minute/36/second/12/video/track/1080p60/..
+    /// Path ../time/hour/0/minute/36/second/12/video/track/1080p60/..
     #[serde(rename = "track")]
     pub tracks: HashMap<String, IPLDLink>,
 
-    /// ../time/hour/0/minute/36/second/12/video/setup/..
+    /// Path ../time/hour/0/minute/36/second/12/video/setup/..
     #[serde(rename = "setup")]
     pub setup: Option<IPLDLink>,
 
-    /// ../time/hour/0/minute/36/second/12/video/previous/..
+    /// Path ../time/hour/0/minute/36/second/12/video/previous/..
     #[serde(rename = "previous")]
     pub previous: Option<IPLDLink>,
 }

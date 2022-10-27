@@ -284,7 +284,7 @@ mod tests {
             }
         }
 
-        let defluencer = Defluencer::new(ipfs);
+        let defluencer = Defluencer::from(ipfs);
 
         let sum = defluencer
             .stream_content_rev_chrono(index.unwrap())
@@ -324,7 +324,7 @@ mod tests {
             }
         }
 
-        let defluencer = Defluencer::new(ipfs);
+        let defluencer = Defluencer::from(ipfs);
 
         let sum = defluencer
             .stream_content_rev_chrono(index.unwrap())
@@ -374,7 +374,7 @@ mod tests {
             }
         }
 
-        let defluencer = Defluencer::new(ipfs);
+        let defluencer = Defluencer::from(ipfs);
 
         let sum = defluencer
             .stream_content_rev_chrono(index.unwrap())

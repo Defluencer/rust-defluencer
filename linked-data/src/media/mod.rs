@@ -1,10 +1,11 @@
 pub mod blog;
 pub mod chat;
+pub mod comments;
 pub mod video;
 
 use serde::Deserialize;
 
-use crate::{comments::Comment, types::IPLDLink};
+use crate::{media::comments::Comment, types::IPLDLink};
 
 use self::{blog::BlogPost, video::Video};
 

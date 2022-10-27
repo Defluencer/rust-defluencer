@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::IPNSAddress;
 
-/// List of followed users.
+/// List of followees.
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Follows {
-    /// Addresses of followed channels.
     pub followees: HashSet<IPNSAddress>,
 }
