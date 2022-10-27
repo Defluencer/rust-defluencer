@@ -65,7 +65,7 @@ impl IpfsService {
             .post(url)
             .query(&[("pin", "false")])
             .query(&[("cid-version", "1")])
-            .query(&[("chunker", "size-2097152")])
+            .query(&[("chunker", "size-1048576")])
             .multipart(form)
             .send()
             .await?
@@ -102,7 +102,7 @@ impl IpfsService {
             .post(url)
             .query(&[("pin", "false")])
             .query(&[("cid-version", "1")])
-            .query(&[("chunker", "size-2097152")])
+            .query(&[("chunker", "size-1048576")])
             .multipart(form)
             .send()
             .await?
