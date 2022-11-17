@@ -6,7 +6,7 @@ edition = "2021"
 description = "Defluencer Command Line Interface."
 
 [dependencies]
-cid = "0.8"
+cid = "0.9"
 clap = { version = "4", default-features = true, features = ["derive"] }
 defluencer = { path = "../defluencer" }
 futures-util = "0.3"

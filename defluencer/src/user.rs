@@ -25,6 +25,7 @@ use linked_data::{
 
 use serde::Serialize;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 #[derive(Clone)]

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cid = { version = "0.8", default-features = false, features = ["std"] }
+cid = { version = "0.9", default-features = false, features = ["std"] }
 ed25519 = { version = "1", default-features = false, features = [] }
 ed25519-dalek = { version = "1", default-features = false, features = ["u64_backend"] }
 elliptic-curve = { version = "0.12", default-features = false, features = [] }

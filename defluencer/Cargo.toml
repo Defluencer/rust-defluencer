@@ -9,7 +9,7 @@ description = "Defluencer Core Crate"
 async-recursion = { version = "1", default-features = false, features = [] }
 async-trait = { version = "0.1", default-features = false, features = [] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
-cid = { version = "0.8", default-features = false, features = ["std"] }
+cid = { version = "0.9", default-features = false, features = ["std"] }
 dag-jose = { path = "../dag-jose" }
 either = { version = "1", default-features = false, features = [] }
 futures = { version = "0.3", default-features = false, features = [] }
@@ -22,7 +22,7 @@ k256 = { version = "0.11", default-features = false, features = ["std"] }
 linked-data = { path = "../linked-data" }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = ["std"] }
-multihash = { version = "0.16", default-features = false, features = ["std"] }
+multihash = { version = "0.17", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = [] }
 sha2 = { version = "0.10", default-features = false, features = [] }
@@ -44,7 +44,7 @@ bytes = { version = "1", default-features = false, features = [] }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-wasm-streams = "0.2"
+wasm-streams = "0.3"
 web3 = { version = "0.18", default-features = false, features = ["eip-1193", "wasm"] }
 web-sys = { version = "0.3", features = ['console']}
 
