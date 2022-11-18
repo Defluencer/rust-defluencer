@@ -6,13 +6,16 @@ edition = "2021"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 cid = { version = "0.9", default-features = false, features = ["std"] }
-ecdsa = { version = "0.14", default-features = false, features = ["sign", "verify", "der"] }
+ecdsa = { version = "0.14", default-features = false, features = ["sign", "verify", "pem"] }
 ed25519 = { version = "1", default-features = false, features = [] }
 ed25519-dalek = { version = "1", default-features = false, features = ["u64_backend"] }
-elliptic-curve = { version = "0.12", default-features = false, features = [] }
+elliptic-curve = { version = "0.12", default-features = false, features = ["std"] }
 multihash = { version = "0.17", default-features = false, features = [] }
+serde_ipld_dagcbor = { version = "0.2", default-features = false, features = []}
 k256 = { version = "0.11", default-features = false, features = ["std", "ecdsa"] }
 prost = { version = "0.11", default-features = false, features = ["std", "prost-derive"] }
+p256 = { version = "0.11", default-features = false, features = ["std", "ecdsa", "pkcs8"] }
+serde = { version = "1", default-features = false, features = [] }
 sha2 = { version = "0.10", default-features = false, features = [] }
 signature = { version = "1", default-features = false, features = ["std", "digest-preview", "derive-preview"] }
 strum = { version = "0.24", default-features = false, features = ["derive"] }
