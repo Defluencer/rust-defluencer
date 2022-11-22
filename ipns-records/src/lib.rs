@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use signature::Signature;
 
-use traits::RecordSigner;
+pub use traits::RecordSigner;
 
 use std::ops::Add;
 

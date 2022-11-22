@@ -7,11 +7,12 @@ pub use errors::Error;
 use cid::Cid;
 
 use linked_data::types::IPLDLink;
+
 use multibase::Base;
 
 use serde::{Deserialize, Serialize};
 
-use traits::BlockSigner;
+pub use traits::BlockSigner;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AlgorithmType {
