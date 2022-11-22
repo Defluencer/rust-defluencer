@@ -7,21 +7,33 @@ pub use errors::Error;
 use cid::Cid;
 
 use linked_data::types::IPLDLink;
+
 use multibase::Base;
 
 use serde::{Deserialize, Serialize};
 
-use traits::BlockSigner;
+pub use traits::{AsyncBlockSigner, BlockSigner};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AlgorithmType {
+    //https://www.rfc-editor.org/rfc/rfc7518.html#section-3.1
+    #[serde(rename = "ES256")]
+    ES256,
+
+    //https://datatracker.ietf.org/doc/html/draft-ietf-cose-webauthn-algorithms-04#section-3.2
     #[serde(rename = "ES256K")]
     ES256K,
 
+    //https://datatracker.ietf.org/doc/html/draft-ietf-jose-cfrg-curves#section-3.1
     #[serde(rename = "EdDSA")]
     EdDSA,
+
+    //https://identity.foundation/EcdsaSecp256k1RecoverySignature2020/#ES256K-R
+    #[serde(rename = "ES256K-R")]
+    ES256KR,
 }
 
+// https://datatracker.ietf.org/doc/html/rfc7518#section-6.1
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum KeyType {
     #[serde(rename = "EC")]
@@ -44,6 +56,10 @@ pub enum CurveType {
 
     #[serde(rename = "secp256k1")]
     Secp256k1,
+
+    // https://datatracker.ietf.org/doc/html/rfc7518#section-6.2.1.1
+    #[serde(rename = "P-256")]
+    P256,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -62,10 +78,10 @@ pub struct JsonWebKey {
         Parameter specific to EC
     */
     #[serde(rename = "kty")]
-    pub key_type: KeyType, // https://datatracker.ietf.org/doc/html/rfc7518#section-6.1
+    pub key_type: KeyType,
 
     #[serde(rename = "crv")]
-    pub curve: CurveType, // https://datatracker.ietf.org/doc/html/rfc7518#section-6.2.1.1
+    pub curve: CurveType,
 
     pub x: String, // https://datatracker.ietf.org/doc/html/rfc7518#section-6.2.1.2
 
@@ -76,7 +92,7 @@ pub struct JsonWebKey {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Header {
     #[serde(rename = "alg", skip_serializing_if = "Option::is_none")]
-    pub algorithm: Option<AlgorithmType>, // https://www.rfc-editor.org/rfc/rfc7515#section-4.1.1
+    pub algorithm: Option<AlgorithmType>,
 
     #[serde(rename = "jwk", skip_serializing_if = "Option::is_none")]
     pub json_web_key: Option<JsonWebKey>,
@@ -209,6 +225,50 @@ impl JsonWebSignature {
         let message = format!("{}.{}", payload, protected);
 
         let signature = signer.try_sign(message.as_bytes())?;
+
+        let jwk = signer.web_key();
+
+        let header = Some(Header {
+            algorithm: None,
+            json_web_key: Some(jwk),
+        });
+
+        let signature = Base::Base64Url.encode(signature);
+
+        let jws = Self {
+            payload,
+            signatures: vec![Signature {
+                header,
+                protected,
+                signature,
+            }],
+            link: IPLDLink::default(), // Skipped when serializing anyway
+        };
+
+        Ok(jws)
+    }
+
+    pub async fn new_async<S, U>(cid: Cid, signer: S) -> Result<Self, Error>
+    where
+        S: AsyncBlockSigner<U>,
+        U: signature::Signature + Send + 'static,
+    {
+        //TODO code reuse
+
+        let payload = cid.to_bytes();
+        let payload = Base::Base64Url.encode(payload);
+
+        let protected = Header {
+            algorithm: Some(signer.algorithm()),
+            json_web_key: None,
+        };
+
+        let protected = serde_json::to_vec(&protected)?;
+        let protected = Base::Base64Url.encode(protected);
+
+        let message = format!("{}.{}", payload, protected);
+
+        let signature = signer.sign_async(message.as_bytes()).await?;
 
         let jwk = signer.web_key();
 

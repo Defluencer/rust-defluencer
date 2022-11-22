@@ -1,5 +1,7 @@
 use signature::{Signature, Signer};
 
+use async_signature::AsyncSigner;
+
 use crate::{AlgorithmType, JsonWebKey};
 
 /// Impl'd the trait is not enough, one must follow the JOSE specs below.
@@ -20,6 +22,15 @@ use crate::{AlgorithmType, JsonWebKey};
 pub trait BlockSigner<U>: Signer<U>
 where
     U: Signature,
+{
+    fn algorithm(&self) -> AlgorithmType;
+
+    fn web_key(&self) -> JsonWebKey;
+}
+
+pub trait AsyncBlockSigner<S>: AsyncSigner<S>
+where
+    S: Signature + Send + 'static,
 {
     fn algorithm(&self) -> AlgorithmType;
 
