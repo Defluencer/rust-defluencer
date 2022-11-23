@@ -6,7 +6,7 @@ use crate::{
     utils::add_image,
 };
 
-use chrono::{TimeZone, Utc};
+use chrono::{LocalResult, TimeZone, Utc};
 
 use cid::Cid;
 
@@ -504,7 +504,11 @@ where
     pub async fn add_content(&self, content_cid: Cid) -> Result<Cid, Error> {
         // path "/link" to skip signature block
         let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
-        let datetime = Utc.timestamp(media.user_timestamp(), 0);
+        let datetime = match Utc.timestamp_opt(media.user_timestamp(), 0) {
+            LocalResult::Single(datetime) => datetime,
+            LocalResult::None => return Err(Error::Timestamp),
+            LocalResult::Ambiguous(_, _) => return Err(Error::Timestamp),
+        };
 
         let (root_cid, mut channel) = self.get_metadata().await?;
 
@@ -525,7 +529,12 @@ where
     /// Also remove associated comments.
     pub async fn remove_content(&self, content_cid: Cid) -> Result<Option<Cid>, Error> {
         let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
-        let datetime = Utc.timestamp(media.user_timestamp(), 0);
+
+        let datetime = match Utc.timestamp_opt(media.user_timestamp(), 0) {
+            LocalResult::Single(datetime) => datetime,
+            LocalResult::None => return Err(Error::Timestamp),
+            LocalResult::Ambiguous(_, _) => return Err(Error::Timestamp),
+        };
 
         let (root_cid, mut channel) = self.get_metadata().await?;
 

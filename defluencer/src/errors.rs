@@ -69,4 +69,7 @@ pub enum Error {
 
     #[error("IPNS Address Mismatch")]
     IPNSMismatch,
+
+    #[error("Invalid Timestamp")]
+    Timestamp,
 }
