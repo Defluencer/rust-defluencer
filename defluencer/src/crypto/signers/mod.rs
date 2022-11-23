@@ -11,16 +11,10 @@ mod ethereum;
 pub use ethereum::EthereumSigner;
 
 #[cfg(target_arch = "wasm32")]
-mod web3;
+mod metamask;
 
 #[cfg(target_arch = "wasm32")]
-pub use web3::Web3Signer;
-
-#[cfg(target_arch = "wasm32")]
-mod web_crypto;
-
-#[cfg(target_arch = "wasm32")]
-pub use web_crypto::WebSigner;
+pub use metamask::MetamaskSigner;
 
 use crate::errors::Error;
 

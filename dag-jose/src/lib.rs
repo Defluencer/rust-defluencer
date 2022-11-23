@@ -109,11 +109,6 @@ pub struct Signature {
 }
 
 /// Json Web Signature
-///
-/// Don't forget to specify --input-codec="dag-json" and --output-codec="dag-jose"
-/// when adding to IPFS.
-///
-/// Assume only the first signature is used.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct JsonWebSignature {
     payload: String,
@@ -179,8 +174,21 @@ impl JsonWebSignature {
         let signature = Base::Base64Url.decode(&self.signatures[0].signature)?;
 
         match (algo, &jwk.key_type, &jwk.curve) {
+            (AlgorithmType::ES256, KeyType::EllipticCurve, CurveType::P256) => {
+                let mut public_key = vec![0x04]; // Uncompressed key prefix
+
+                public_key.extend(Base::Base64Url.decode(&jwk.x)?);
+                public_key
+                    .extend(Base::Base64Url.decode(&jwk.y.expect("Uncompressed Public Key"))?);
+
+                let verif_key = p256::ecdsa::VerifyingKey::from_sec1_bytes(&public_key)?;
+
+                let signature = p256::ecdsa::Signature::from_bytes(&signature)?;
+
+                verif_key.verify(signing_input.as_bytes(), &signature)?;
+            }
             (AlgorithmType::ES256K, KeyType::EllipticCurve, CurveType::Secp256k1) => {
-                let mut public_key = vec![0x04]; // Uncompressed key
+                let mut public_key = vec![0x04]; // Uncompressed key prefix
 
                 public_key.extend(Base::Base64Url.decode(&jwk.x)?);
                 public_key
@@ -259,7 +267,7 @@ impl JsonWebSignature {
         let payload = Base::Base64Url.encode(payload);
 
         let protected = Header {
-            algorithm: Some(signer.algorithm()),
+            algorithm: Some(signer.algorithm().await),
             json_web_key: None,
         };
 
@@ -270,7 +278,63 @@ impl JsonWebSignature {
 
         let signature = signer.sign_async(message.as_bytes()).await?;
 
-        let jwk = signer.web_key();
+        let jwk = signer.web_key().await;
+
+        let header = Some(Header {
+            algorithm: None,
+            json_web_key: Some(jwk),
+        });
+
+        let signature = Base::Base64Url.encode(signature);
+
+        let jws = Self {
+            payload,
+            signatures: vec![Signature {
+                header,
+                protected,
+                signature,
+            }],
+            link: IPLDLink::default(), // Skipped when serializing anyway
+        };
+
+        Ok(jws)
+    }
+
+    //TODO add a new feature "web" for the logic below
+
+    pub fn signing_input(cid: Cid, algorithm: AlgorithmType) -> Result<String, Error> {
+        let payload = cid.to_bytes();
+        let payload = Base::Base64Url.encode(payload);
+
+        let protected = Header {
+            algorithm: Some(algorithm),
+            json_web_key: None,
+        };
+
+        let protected = serde_json::to_vec(&protected)?;
+        let protected = Base::Base64Url.encode(protected);
+
+        let message = format!("{}.{}", payload, protected);
+
+        Ok(message)
+    }
+
+    pub fn from_parts(
+        cid: Cid,
+        algorithm: AlgorithmType,
+        jwk: JsonWebKey,
+        signature: impl signature::Signature,
+    ) -> Result<Self, Error> {
+        let payload = cid.to_bytes();
+        let payload = Base::Base64Url.encode(payload);
+
+        let protected = Header {
+            algorithm: Some(algorithm),
+            json_web_key: None,
+        };
+
+        let protected = serde_json::to_vec(&protected)?;
+        let protected = Base::Base64Url.encode(protected);
 
         let header = Some(Header {
             algorithm: None,

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 async-signature =  { version = "0.2", default-features = false, features = [] }
+async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 cid = { version = "0.9", default-features = false, features = ["std"] }
 ecdsa = { version = "0.14", default-features = false, features = ["sign", "verify", "pem"] }

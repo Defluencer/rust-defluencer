@@ -13,7 +13,7 @@ cid = { version = "0.9", default-features = false, features = ["std"] }
 dag-jose = { path = "../dag-jose", default-features = false, features = []  }
 either = { version = "1", default-features = false, features = [] }
 futures = { version = "0.3", default-features = false, features = [] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
 heck = { version = "0.4", default-features = false, features = [] }
 hex = { version = "0.4", default-features = false, features = [] }
 ipfs-api = { path = "../ipfs-api", default-features = false, features = [] }
@@ -33,7 +33,7 @@ thiserror = { version = "1", default-features = false, features = [] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 elliptic-curve = { version = "0.12", features = ["pem"]}
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"]}
-tokio = { version = "1", default-features = false, features = ["fs"]}
+tokio = { version = "1", default-features = false, features = ["fs", "macros"]}
 tokio-util = { version = "0.7", default-features = false, features = ["io"]}
 ledger-zondax-generic = { version = "0.10", default-features = false, features = [] }
 ledger-transport-hid = { version = "0.10", default-features = false, features = [] }
@@ -41,26 +41,23 @@ ledger-transport = { version = "0.10", default-features = false, features = [] }
 rs_merkle = { version = "1", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-async-signature =  { version = "0.2", default-features = false, features = []}
 bytes = { version = "1", default-features = false, features = []}
 js-sys = { version = "0.3", default-features = false, features = [] }
-p256 = { version = "0.11", default-features = false, features = ["std", "ecdsa"] }
-rexie = { version = "0.4", default-features = false, features = [] }
 wasm-bindgen = { version = "0.2", default-features = false, features = [] }
 wasm-bindgen-futures = { version = "0.4", default-features = false, features = [] }
 wasm-streams = { version = "0.3", default-features = false, features = [] }
 web3 = { version = "0.18", default-features = false, features = ["eip-1193", "wasm"] }
 web-sys = { version = "0.3", default-features = false, features = ['console', 'Window', 'Crypto', 'SubtleCrypto', 'CryptoKey', 'CryptoKeyPair'] }
 
-#[dev-dependencies]
-#pkcs8 = { version = "0.9", default-features = false, features = ["std", "alloc", "pem"] }
+[dev-dependencies]
+pkcs8 = { version = "0.9", default-features = false, features = ["std", "alloc", "pem"] }
 
-#[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-#tokio = { version = "1", features = ['full']}
-#rand = "0.8"
-#rand_xoshiro = "0.6"
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", features = ['full']}
+rand = "0.8"
+rand_xoshiro = "0.6"
+k256 = { version = "0.11" }
 
-
-#[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-#wasm-bindgen-test = "0.3"
-#gloo-console = "0.2"
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+gloo-console = "0.2"

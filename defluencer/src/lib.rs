@@ -169,7 +169,7 @@ impl Defluencer {
             (set, resolve_pool, metadata_pool, follows_pool),
             move |(mut set, mut resolve_pool, mut metadata_pool, mut follows_pool)| async move {
                 loop {
-                    futures::select! {
+                    futures_util::select! {
                         result = resolve_pool.try_next() => {
                             let cid = match result? {
                                 Some(cid) => cid,

@@ -13,19 +13,19 @@ use web3::{transports::eip_1193::Eip1193, Web3};
 use linked_data::types::Address;
 
 #[derive(Clone)]
-pub struct Web3Signer {
+pub struct MetamaskSigner {
     addr: Address,
     web3: Web3<Eip1193>,
 }
 
-impl Web3Signer {
+impl MetamaskSigner {
     pub fn new(addr: Address, web3: Web3<Eip1193>) -> Self {
         Self { addr, web3 }
     }
 }
 
 #[async_trait(?Send)]
-impl Signer for Web3Signer {
+impl Signer for MetamaskSigner {
     async fn sign(
         &self,
         signing_input: &[u8],

@@ -6,7 +6,6 @@ use chrono::Duration;
 
 use ed25519_dalek::{Keypair, PublicKey, SecretKey};
 
-use elliptic_curve::sec1::ToEncodedPoint;
 use prost::Message;
 
 use sha2::{Digest, Sha256};
