@@ -1,4 +1,4 @@
-#![cfg(target_arch = "wasm32")]
+/* #![cfg(target_arch = "wasm32")]
 
 /*
 Install wasm-pack first then ->
@@ -16,7 +16,7 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 use cid::{multibase::Base, multihash::MultihashGeneric, Cid};
 use futures_util::{self, future::AbortHandle, future::FutureExt, join, StreamExt};
-use ipfs_multi_client::IpfsService;
+use ipfs_api::IpfsService;
 
 const PEER_ID: &str = "12D3KooWRsEKtLGLW9FHw7t7dDhHrMDahw3VwssNgh55vksdvfmC";
 
@@ -163,3 +163,4 @@ async fn add_cat_roundtrip() {
 
     assert_eq!(in_data, &out_data[0..12])
 }
+ */

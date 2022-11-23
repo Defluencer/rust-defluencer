@@ -1,4 +1,8 @@
+use async_trait::async_trait;
+
 use signature::{Signature, Signer};
+
+use async_signature::AsyncSigner;
 
 use crate::CryptoKey;
 
@@ -11,9 +15,17 @@ use crate::CryptoKey;
 /// - What hash algorithm is used?
 /// - With which signature algorithm?
 /// - In what format?
-pub trait RecordSigner<U>: Signer<U>
+pub trait RecordSigner<S>: Signer<S>
 where
-    U: Signature,
+    S: Signature,
 {
     fn crypto_key(&self) -> CryptoKey;
+}
+
+#[async_trait]
+pub trait AsyncRecordSigner<S>: AsyncSigner<S>
+where
+    S: Signature + Send + 'static,
+{
+    async fn crypto_key(&self) -> CryptoKey;
 }

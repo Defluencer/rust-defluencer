@@ -133,3 +133,69 @@ fn secp256k1_roundtrip() {
 
     assert!(result.is_ok())
 }
+
+pub struct EcdsaSigner {
+    pub signing_key: p256::ecdsa::SigningKey,
+}
+
+impl Signer<p256::ecdsa::Signature> for EcdsaSigner {
+    fn sign(&self, msg: &[u8]) -> p256::ecdsa::Signature {
+        self.try_sign(msg).expect("signature operation failed")
+    }
+
+    fn try_sign(&self, msg: &[u8]) -> Result<p256::ecdsa::Signature, signature::Error> {
+        self.signing_key.try_sign(msg)
+    }
+}
+
+impl BlockSigner<p256::ecdsa::Signature> for EcdsaSigner {
+    fn algorithm(&self) -> AlgorithmType {
+        AlgorithmType::ES256
+    }
+
+    fn web_key(&self) -> JsonWebKey {
+        //use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+        let verif_key = self.signing_key.verifying_key();
+        let point = verif_key.to_encoded_point(false);
+
+        let (x, y) = match point.coordinates() {
+            Coordinates::Uncompressed { x, y } => (x, y),
+            _ => panic!("Uncompressed Key"),
+        };
+
+        JsonWebKey {
+            key_type: KeyType::EllipticCurve,
+            curve: CurveType::P256,
+            x: Base::Base64Url.encode(x),
+            y: Some(Base::Base64Url.encode(y)),
+        }
+    }
+}
+
+#[test]
+fn ecdsa_roundtrip() {
+    // Need rand_core v0.6
+    //use rand_core::OsRng;
+    //let mut csprng = OsRng {};
+    //let signing_key = SigningKey::random(&mut csprng);
+
+    let signing_key = p256::ecdsa::SigningKey::from_bytes(&[
+        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
+        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
+    ])
+    .unwrap();
+
+    let signer = EcdsaSigner { signing_key };
+
+    let value =
+        Cid::try_from("bafyreih223c6mqauz5ouolokqrofaekpuu45eblm33fm3g2rlwdkqfabo4").unwrap();
+
+    let jws = JsonWebSignature::new(value, signer).unwrap();
+
+    let result = jws.verify();
+
+    println!("Result: {:?}", result);
+
+    assert!(result.is_ok())
+}

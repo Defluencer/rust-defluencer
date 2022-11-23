@@ -1,4 +1,8 @@
+use async_trait::async_trait;
+
 use signature::{Signature, Signer};
+
+use async_signature::AsyncSigner;
 
 use crate::{AlgorithmType, JsonWebKey};
 
@@ -24,4 +28,14 @@ where
     fn algorithm(&self) -> AlgorithmType;
 
     fn web_key(&self) -> JsonWebKey;
+}
+
+#[async_trait]
+pub trait AsyncBlockSigner<S>: AsyncSigner<S>
+where
+    S: Signature + Send + 'static,
+{
+    async fn algorithm(&self) -> AlgorithmType;
+
+    async fn web_key(&self) -> JsonWebKey;
 }

@@ -6,20 +6,20 @@ edition = "2021"
 description = "Defluencer Core Crate"
 
 [dependencies]
-async-recursion = { version = "1", default-features = false, features = [] }
 async-trait = { version = "0.1", default-features = false, features = [] }
+async-recursion = { version = "1", default-features = false, features = [] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 cid = { version = "0.9", default-features = false, features = ["std"] }
-dag-jose = { path = "../dag-jose" }
+dag-jose = { path = "../dag-jose", default-features = false, features = []  }
 either = { version = "1", default-features = false, features = [] }
 futures = { version = "0.3", default-features = false, features = [] }
-futures-util = { version = "0.3", default-features = false, features = [] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
 heck = { version = "0.4", default-features = false, features = [] }
 hex = { version = "0.4", default-features = false, features = [] }
-ipfs-api = { path = "../ipfs-api" }
-ipns-records = { path = "../ipns-records" }
+ipfs-api = { path = "../ipfs-api", default-features = false, features = [] }
+ipns-records = { path = "../ipns-records", default-features = false, features = []  }
 k256 = { version = "0.11", default-features = false, features = ["std"] }
-linked-data = { path = "../linked-data" }
+linked-data = { path = "../linked-data", default-features = false, features = []  }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = ["std"] }
 multihash = { version = "0.17", default-features = false, features = ["std"] }
@@ -27,26 +27,27 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = [] }
 sha2 = { version = "0.10", default-features = false, features = [] }
 sha3 = { version = "0.10", default-features = false, features = [] }
+signature = { version = "1", default-features = false, features = ["std"] }
 thiserror = { version = "1", default-features = false, features = [] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-elliptic-curve = { version = "0.12", features = ["pem"] }
-rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
-tokio = { version = "1", default-features = false, features = ["fs"]}
-tokio-util = { version = "0.7", default-features = false, features = ["io"] }
-ledger-zondax-generic = "0.10"
-ledger-transport-hid = "0.10"
-ledger-transport = "0.10"
+elliptic-curve = { version = "0.12", features = ["pem"]}
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"]}
+tokio = { version = "1", default-features = false, features = ["fs", "macros"]}
+tokio-util = { version = "0.7", default-features = false, features = ["io"]}
+ledger-zondax-generic = { version = "0.10", default-features = false, features = [] }
+ledger-transport-hid = { version = "0.10", default-features = false, features = [] }
+ledger-transport = { version = "0.10", default-features = false, features = [] }
 rs_merkle = { version = "1", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-bytes = { version = "1", default-features = false, features = [] }
-js-sys = "0.3"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-wasm-streams = "0.3"
+bytes = { version = "1", default-features = false, features = []}
+js-sys = { version = "0.3", default-features = false, features = [] }
+wasm-bindgen = { version = "0.2", default-features = false, features = [] }
+wasm-bindgen-futures = { version = "0.4", default-features = false, features = [] }
+wasm-streams = { version = "0.3", default-features = false, features = [] }
 web3 = { version = "0.18", default-features = false, features = ["eip-1193", "wasm"] }
-web-sys = { version = "0.3", features = ['console']}
+web-sys = { version = "0.3", default-features = false, features = ['console', 'Window', 'Crypto', 'SubtleCrypto', 'CryptoKey', 'CryptoKeyPair'] }
 
 [dev-dependencies]
 pkcs8 = { version = "0.9", default-features = false, features = ["std", "alloc", "pem"] }
@@ -55,7 +56,7 @@ pkcs8 = { version = "0.9", default-features = false, features = ["std", "alloc",
 tokio = { version = "1", features = ['full']}
 rand = "0.8"
 rand_xoshiro = "0.6"
-
+k256 = { version = "0.11" }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
