@@ -51,6 +51,33 @@ pub struct CryptoKey {
     pub data: Vec<u8>,
 }
 
+impl CryptoKey {
+    pub fn new_ed15519_dalek(public_key: &ed25519_dalek::PublicKey) -> Self {
+        let r#type = KeyType::Ed25519 as i32;
+        let data = public_key.to_bytes().to_vec();
+        CryptoKey { r#type, data }
+    }
+
+    pub fn new_k256(public_key: &k256::ecdsa::VerifyingKey) -> Self {
+        use elliptic_curve::sec1::ToEncodedPoint;
+
+        let r#type = KeyType::Secp256k1 as i32;
+        let data = public_key.to_encoded_point(true).to_bytes().into_vec();
+        CryptoKey { r#type, data }
+    }
+
+    pub fn new_p256(public_key: &p256::ecdsa::VerifyingKey) -> Self {
+        use elliptic_curve::pkcs8::EncodePublicKey;
+
+        let r#type = KeyType::ECDSA as i32;
+        let data = public_key
+            .to_public_key_der()
+            .expect("Valid document")
+            .into_vec();
+        CryptoKey { r#type, data }
+    }
+}
+
 /// Validity type only valid if EOL.
 #[derive(
     Clone,
@@ -199,19 +226,6 @@ impl IPNSRecord {
 
         signing_input_v2.extend(self.data.iter());
 
-        /* let signing_input_v1 = {
-            let mut data = Vec::with_capacity(
-                self.value.len() + self.validity.len() + 3, /* b"EOL".len() == 3 */
-            );
-
-            data.extend(self.value.iter());
-            data.extend(self.validity.iter());
-
-            data.extend(self.validity_type().to_string().as_bytes());
-
-            data
-        }; */
-
         match crypto_key.r#type() {
             KeyType::RSA => unimplemented!(),
             KeyType::Ed25519 => {
@@ -322,4 +336,111 @@ impl IPNSRecord {
             data,
         })
     }
+
+    /// Create a Record from pre-computed signatures.
+    ///
+    /// Mostly used on the web to get around incompatible traits.
+    ///
+    /// USE WITH CAUTION!!!
+    pub fn from_parts(
+        cid: Cid,
+        valid_for: Duration,
+        sequence: u64,
+        ttl: u64,
+        public_key: CryptoKey,
+        signature_v1: Vec<u8>,
+        signature_v2: Vec<u8>,
+    ) -> Result<Self, Error> {
+        let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
+
+        let validity = Utc::now()
+            .add(valid_for)
+            .to_rfc3339_opts(SecondsFormat::Nanos, false)
+            .into_bytes();
+
+        let validity_type = ValidityType::EOL;
+
+        let mut pub_key = public_key.encode_to_vec();
+
+        if pub_key.len() <= 42 {
+            pub_key.clear();
+        }
+
+        let document = DagCborDocument {
+            value: value.clone(),
+            validity_type,
+            validity: validity.clone(),
+            sequence,
+            ttl,
+        };
+
+        let data = serde_ipld_dagcbor::to_vec(&document).expect("Valid Dag Cbor");
+
+        Ok(Self {
+            value,
+            signature_v1,
+            validity_type: validity_type as i32,
+            validity,
+            sequence,
+            ttl,
+            pub_key,
+            signature_v2,
+            data,
+        })
+    }
+}
+
+pub fn signing_input_v1(cid: Cid, valid_for: Duration) -> Vec<u8> {
+    let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
+
+    let validity = Utc::now()
+        .add(valid_for)
+        .to_rfc3339_opts(SecondsFormat::Nanos, false)
+        .into_bytes();
+
+    let validity_type = ValidityType::EOL;
+
+    let signing_input_v1 = {
+        let mut data = Vec::with_capacity(
+            value.len() + validity.len() + 3, /* b"EOL".len() == 3 */
+        );
+
+        data.extend(value.iter());
+        data.extend(validity.iter());
+        data.extend(validity_type.to_string().as_bytes());
+
+        data
+    };
+
+    signing_input_v1
+}
+
+pub fn signing_input_v2(cid: Cid, valid_for: Duration, sequence: u64, ttl: u64) -> Vec<u8> {
+    let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
+
+    let validity = Utc::now()
+        .add(valid_for)
+        .to_rfc3339_opts(SecondsFormat::Nanos, false)
+        .into_bytes();
+
+    let validity_type = ValidityType::EOL;
+
+    let document = DagCborDocument {
+        value,
+        validity_type,
+        validity,
+        sequence,
+        ttl,
+    };
+
+    let data = serde_ipld_dagcbor::to_vec(&document).expect("Valid Dag Cbor");
+
+    //prefix
+    let mut signing_input_v2: Vec<u8> = vec![
+        0x69, 0x70, 0x6e, 0x73, 0x2d, 0x73, 0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x3a,
+    ];
+
+    signing_input_v2.extend(data.iter());
+
+    signing_input_v2
 }

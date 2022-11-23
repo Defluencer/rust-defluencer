@@ -8,3 +8,5 @@ members = [
     "ipns-records",
     "cli"
 ]
+
+resolver = "2"

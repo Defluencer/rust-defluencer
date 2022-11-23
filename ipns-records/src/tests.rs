@@ -31,9 +31,7 @@ impl Signer<ed25519::Signature> for Ed25519IPNSRecordSigner {
 
 impl RecordSigner<ed25519::Signature> for Ed25519IPNSRecordSigner {
     fn crypto_key(&self) -> CryptoKey {
-        let r#type = KeyType::Ed25519 as i32;
-        let data = self.keypair.public.to_bytes().to_vec();
-        CryptoKey { r#type, data }
+        CryptoKey::new_ed15519_dalek(&self.keypair.public)
     }
 }
 
@@ -113,14 +111,7 @@ impl DigestSigner<Sha256, k256::ecdsa::DerSignature> for Secp256k1Signer {
 
 impl RecordSigner<k256::ecdsa::DerSignature> for Secp256k1Signer {
     fn crypto_key(&self) -> CryptoKey {
-        let r#type = KeyType::Secp256k1 as i32;
-        let data = self
-            .signing_key
-            .verifying_key()
-            .to_encoded_point(true)
-            .to_bytes()
-            .into_vec();
-        CryptoKey { r#type, data }
+        CryptoKey::new_k256(&self.signing_key.verifying_key())
     }
 }
 
@@ -199,17 +190,7 @@ impl DigestSigner<Sha256, p256::ecdsa::DerSignature> for EcdsaSigner {
 
 impl RecordSigner<p256::ecdsa::DerSignature> for EcdsaSigner {
     fn crypto_key(&self) -> CryptoKey {
-        use elliptic_curve::pkcs8::EncodePublicKey;
-
-        let r#type = KeyType::ECDSA as i32;
-        let data = self
-            .signing_key
-            .verifying_key()
-            .to_public_key_der()
-            .expect("Valid document")
-            .into_vec();
-
-        CryptoKey { r#type, data }
+        CryptoKey::new_p256(&self.signing_key.verifying_key())
     }
 }
 
