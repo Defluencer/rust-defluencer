@@ -266,7 +266,7 @@ mod tests {
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
 
-        let mut date_time = Utc.ymd(2020, 7, 8).and_hms(9, 10, 11);
+        let mut date_time = Utc.with_ymd_and_hms(2020, 7, 8, 9, 10, 11).unwrap();
 
         let mut index = None;
 
@@ -309,7 +309,7 @@ mod tests {
                 .into(),
         );
 
-        let mut date_time = Utc.ymd(2020, 7, 8).and_hms(9, 10, 11);
+        let mut date_time = Utc.with_ymd_and_hms(2020, 7, 8, 9, 10, 11).unwrap();
 
         for _ in 0..256 {
             let key = random_cid(&mut rng);
@@ -340,7 +340,7 @@ mod tests {
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
 
-        let mut date_time = Utc.ymd(2020, 7, 8).and_hms(9, 10, 11);
+        let mut date_time = Utc.with_ymd_and_hms(2020, 7, 8, 9, 10, 11).unwrap();
 
         let mut index = None;
 
