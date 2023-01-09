@@ -8,6 +8,7 @@ description = "Defluencer Core Crate"
 [dependencies]
 async-trait = { version = "0.1", default-features = false, features = [] }
 async-recursion = { version = "1", default-features = false, features = [] }
+num = "0.4.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 cid = { version = "0.9", default-features = false, features = ["std"] }
 dag-jose = { path = "../dag-jose", default-features = false, features = []  }
