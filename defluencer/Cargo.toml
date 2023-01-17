@@ -13,7 +13,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "wasm
 cid = { version = "0.9", default-features = false, features = ["std"] }
 dag-jose = { path = "../dag-jose", default-features = false, features = []  }
 either = { version = "1", default-features = false, features = [] }
-futures = { version = "0.3", default-features = false, features = [] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
 heck = { version = "0.4", default-features = false, features = [] }
 hex = { version = "0.4", default-features = false, features = [] }
