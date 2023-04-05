@@ -33,11 +33,13 @@ use sha2::{Digest, Sha512};
 
 //TODO figure out trait bounds for keys and values.
 
+//TODO investigate tricks used in the blue skye impl.
+
 //TODO Is async recursion inefficient? Could refactor but would be less readable.
 
 //TODO Would it be better to have one batch operation that can insert AND remove? Too complex???
 
-//TODO Move all info in config if possible.
+//TODO Move all possible info in config.
 /*
 - BASE
 - HASH ALGO
