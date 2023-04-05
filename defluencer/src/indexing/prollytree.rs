@@ -12,10 +12,10 @@ use futures::{
     channel::mpsc::{self, Sender},
     future::join_all,
     stream::{self, FuturesUnordered},
-    Stream, StreamExt, TryStreamExt,
+    FutureExt, Stream, StreamExt, TryStreamExt,
 };
 
-use either::Either;
+use either::Either::{self, Right};
 
 use ipfs_api::{responses::Codec, IpfsService};
 
@@ -31,11 +31,18 @@ use sha2::{Digest, Sha512};
 
 //TODO is it possible to use relative, instead of absolute, layer?
 
-//TODO fugure out traits for keys. Other info go in config. This means can't use different hash algo?
+//TODO figure out trait bounds for keys and values.
 
 //TODO Is async recursion inefficient? Could refactor but would be less readable.
 
 //TODO Would it be better to have one batch operation that can insert AND remove? Too complex???
+
+//TODO Move all info in config if possible.
+/*
+- BASE
+- HASH ALGO
+- ???
+ */
 
 pub trait Key:
     Default
@@ -50,6 +57,7 @@ pub trait Key:
     + Send
     + Sync
     + Sized
+    + 'static
 {
 }
 impl<
@@ -64,17 +72,28 @@ impl<
             + DeserializeOwned
             + Send
             + Sync
-            + Sized,
+            + Sized
+            + 'static,
     > Key for T
 {
 }
 
 pub trait Value:
-    Default + Debug + Clone + Copy + Eq + Serialize + DeserializeOwned + Send + Sync + Sized
+    Default + Debug + Clone + Copy + Eq + Serialize + DeserializeOwned + Send + Sync + Sized + 'static
 {
 }
 impl<
-        T: Default + Debug + Clone + Copy + Eq + Serialize + DeserializeOwned + Send + Sync + Sized,
+        T: Default
+            + Debug
+            + Clone
+            + Copy
+            + Eq
+            + Serialize
+            + DeserializeOwned
+            + Send
+            + Sync
+            + Sized
+            + 'static,
     > Value for T
 {
 }
@@ -86,10 +105,75 @@ struct TreeNode<K, V> {
     base: usize, //TODO Move to config
 
     /// Keys and values sorted.
-    key_values: VecDeque<(K, V)>, //TODO split into 2 vec
+    key_values: VecDeque<(K, V)>, //TODO split into 2 vec ?
 
     /// Insert indexes into K.V. and links, sorted.
-    index_links: VecDeque<(usize, IPLDLink)>, //TODO split into 2 vec
+    index_links: VecDeque<(usize, IPLDLink)>, //TODO split into 2 vec ?
+}
+
+impl<K: Key, V: Value> IntoIterator for TreeNode<K, V> {
+    type Item = Either<(IPLDLink, (Bound<K>, Bound<K>)), (K, V)>;
+
+    type IntoIter = NodeIterator<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        NodeIterator {
+            node: self,
+            k_v_idx: 0,
+            link_idx: 0,
+        }
+    }
+}
+
+struct NodeIterator<K: Key, V: Value> {
+    node: TreeNode<K, V>,
+    k_v_idx: usize,
+    link_idx: usize,
+}
+
+impl<'a, K: Key, V: Value> Iterator for NodeIterator<K, V> {
+    type Item = Either<(IPLDLink, (Bound<K>, Bound<K>)), (K, V)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.k_v_idx == self.node.key_values.len() {
+            return None;
+        }
+
+        if let Some((insert_idx, link)) = self.node.index_links.get(self.link_idx) {
+            if self.k_v_idx == *insert_idx {
+                let l_bound = {
+                    if self.k_v_idx == 0 {
+                        Bound::Unbounded
+                    } else {
+                        match self
+                            .node
+                            .key_values
+                            .get(self.k_v_idx - 1)
+                            .map(|(key, _)| *key)
+                        {
+                            Some(key) => Bound::Excluded(key),
+                            None => Bound::Unbounded,
+                        }
+                    }
+                };
+
+                let h_bound = match self.node.key_values.get(self.k_v_idx).map(|(key, _)| *key) {
+                    Some(key) => Bound::Excluded(key),
+                    None => Bound::Unbounded,
+                };
+
+                let range = (l_bound, h_bound);
+
+                self.link_idx += 1;
+                return Some(Either::Left((*link, range)));
+            }
+        }
+
+        let (key, value) = self.node.key_values[self.k_v_idx];
+
+        self.k_v_idx += 1;
+        Some(Either::Right((key, value)))
+    }
 }
 
 impl<K: Key, V: Value> TreeNode<K, V> {
@@ -120,7 +204,7 @@ impl<K: Key, V: Value> TreeNode<K, V> {
         }
     }
 
-    /// Remove from batch and node matching keys, merge batch ranges.
+    /// Remove matching keys from batch and node then merge batch ranges.
     fn batch_remove_match(&mut self, batch: &mut Batch<K, V>) {
         for j in (0..batch.elements.len()).rev() {
             let key = batch.elements[j].0;
@@ -421,7 +505,7 @@ async fn execute_batch_get<K: Key, V: Value>(
         }
     };
 
-    //Remove the keys present in this node and send the k-v pair.
+    //Remove the keys present in this node and return the k-v pair.
     let mut stop = node.key_values.len();
     for j in (0..keys.len()).rev() {
         let key = keys[j];
@@ -515,7 +599,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
         },
     };
 
-    // Get range for this node.
+    // Get first range for this node.
     let main_range = main_batch.ranges[0];
 
     // Remove node elements and links outside of batch range.
@@ -759,69 +843,62 @@ async fn execute_batch_remove<K: Key, V: Value>(
     return Ok(Some((link, main_range)));
 }
 
-//TODO why static bounds ????
-pub(crate) fn values<K: Key + 'static, V: Value + 'static>(
-    ipfs: &IpfsService,
+pub(crate) fn values<K: Key, V: Value>(
+    ipfs: IpfsService,
     root: IPLDLink,
-) -> impl Stream<Item = Result<(K, V), Error>> + '_ {
-    stream::try_unfold(Some(root), move |mut root| async move {
-        let ipld = match root.take() {
-            Some(ipld) => ipld,
-            None => return Result::<_, Error>::Ok(None),
-        };
+) -> impl Stream<Item = Result<(K, V), Error>> {
+    stream::try_unfold(Some(root), move |mut root| {
+        let ipfs = ipfs.clone();
 
-        let root_node = ipfs
-            .dag_get::<&str, TreeNode<K, V>>(ipld.link, None)
-            .await?;
+        async move {
+            let ipld = match root.take() {
+                Some(ipld) => ipld,
+                None => return Result::<_, Error>::Ok(None),
+            };
 
-        let stream = stream_data(ipfs, root_node);
+            let root_node = ipfs
+                .dag_get::<&str, TreeNode<K, V>>(ipld.link, None)
+                .await?;
 
-        Ok(Some((stream, root)))
+            let stream = stream_data(ipfs.clone(), root_node);
+
+            Ok(Some((stream, root)))
+        }
     })
     .try_flatten()
 }
 
-//TODO why static bounds ????
-fn stream_data<K: Key + 'static, V: Value + 'static>(
-    ipfs: &IpfsService,
+fn stream_data<K: Key, V: Value>(
+    ipfs: IpfsService,
     node: TreeNode<K, V>,
-) -> impl Stream<Item = Result<(K, V), Error>> + '_ {
-    stream::try_unfold(
-        (
-            node.key_values.into_iter().enumerate().peekable(),
-            node.index_links.into_iter().peekable(),
-        ),
-        move |(mut k_v_iter, mut links_iter)| async move {
-            let (idx, _) = match links_iter.peek() {
-                Some(p) => p,
+) -> impl Stream<Item = Result<(K, V), Error>> {
+    stream::try_unfold(node.into_iter(), move |mut node_iter| {
+        let ipfs = ipfs.clone();
+
+        async move {
+            let item = match node_iter.next() {
+                Some(item) => item,
                 None => return Result::<_, Error>::Ok(None),
             };
 
-            let (i, _) = match k_v_iter.peek() {
-                Some(p) => p,
-                None => return Result::<_, Error>::Ok(None),
-            };
+            match item {
+                Either::Left((link, _)) => {
+                    let node = ipfs
+                        .dag_get::<&str, TreeNode<K, V>>(link.link, None)
+                        .await?;
 
-            // Stream the link if before the values.
-            if idx == i {
-                let (_, link) = links_iter.next().unwrap();
+                    let stream = stream_data(ipfs, node).boxed_local();
 
-                let node = ipfs
-                    .dag_get::<&str, TreeNode<K, V>>(link.link, None)
-                    .await?;
+                    Ok(Some((stream, node_iter)))
+                }
+                Right((key, value)) => {
+                    let stream = async move { Ok((key, value)) }.into_stream().boxed_local();
 
-                let stream = stream_data(ipfs, node).boxed_local();
-
-                return Ok(Some((stream, (k_v_iter, links_iter))));
-            } else {
-                let (_, (key, value)) = k_v_iter.next().unwrap();
-
-                let stream = stream::iter(vec![Ok((key, value))]).boxed_local();
-
-                return Ok(Some((stream, (k_v_iter, links_iter))));
+                    Ok(Some((stream, node_iter)))
+                }
             }
-        },
-    )
+        }
+    })
     .try_flatten()
 }
 
