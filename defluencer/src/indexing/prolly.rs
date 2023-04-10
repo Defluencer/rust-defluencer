@@ -15,6 +15,7 @@ use either::Either::{self};
 use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::types::IPLDLink;
+use serde_json::map::Keys;
 
 use crate::errors::Error;
 
@@ -209,6 +210,32 @@ impl<K: Key, V: Value> TreeNode<K, V> {
 
         result
     }
+
+    fn merge(&mut self, other: Self) {
+        if self.is_leaf {
+            self.insert_values(other.keys.into_iter().zip(other.values.into_iter()))
+        } else {
+            self.insert_links(other.keys.into_iter().zip(other.links.into_iter()))
+        }
+    }
+
+    fn remove_batch(
+        &mut self,
+        batch: impl IntoIterator<Item = K> + Iterator<Item = K> + DoubleEndedIterator,
+    ) {
+        let mut idx = self.keys.len();
+        for batch_key in batch.rev() {
+            for i in (0..idx).rev() {
+                let key = self.keys[i];
+
+                if batch_key == key {
+                    self.keys.remove(i);
+                    idx = i;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /* impl<'a, K: Key, V: Value> IntoIterator for &'a TreeNode<K, V> {
@@ -366,12 +393,102 @@ async fn execute_batch_insert<K: Key, V: Value>(
     return Ok(key_links);
 }
 
+//TODO return the value of the keys removed???
+
 pub(crate) async fn batch_remove<K: Key, V: Value>(
     ipfs: &IpfsService,
     root: IPLDLink,
-    keys: Vec<K>,
-) -> Result<Option<IPLDLink>, Error> {
-    todo!()
+    mut batch: Vec<K>,
+) -> Result<IPLDLink, Error> {
+    //TODO get config node
+
+    batch.sort_unstable();
+
+    let (key, link) = execute_batch_remove::<K, V>(ipfs.clone(), vec![root], batch).await?;
+
+    //TODO update config node
+
+    Ok(link)
+}
+
+#[async_recursion]
+async fn execute_batch_remove<K: Key, V: Value>(
+    ipfs: IpfsService,
+    links: Vec<IPLDLink>,
+    mut batch: Vec<K>,
+) -> Result<(K, IPLDLink), Error> {
+    let futures: Vec<_> = links
+        .into_iter()
+        .map(|link| ipfs.dag_get::<&str, TreeNode<K, V>>(link.into(), None))
+        .collect();
+
+    let results = join_all(futures).await;
+
+    let mut node = TreeNode::default();
+    for result in results {
+        node.merge(result?);
+    }
+
+    if !node.is_leaf {
+        let mut new_batch = Vec::with_capacity(batch.len());
+        let mut links = Vec::with_capacity(node.keys.len());
+        let mut futures = Vec::with_capacity(node.keys.len());
+
+        'node: for i in (0..node.keys.len()).rev() {
+            let key = &node.keys[i];
+
+            let range = (
+                Bound::Included(key),
+                match node.keys.get(i + 1) {
+                    Some(key) => Bound::Excluded(key),
+                    None => Bound::Unbounded,
+                },
+            );
+
+            for j in (0..batch.len()).rev() {
+                let batch_key = &batch[j];
+
+                if Bound::Included(batch_key) == range.start_bound() {
+                    node.keys.remove(i);
+                    let link = node.links.remove(i);
+                    links.push(link);
+
+                    batch.remove(j);
+
+                    continue 'node;
+                }
+
+                if range.contains(batch_key) {
+                    let key = batch.remove(j);
+
+                    new_batch.push(key);
+                }
+            }
+
+            links.push(node.links[i]);
+
+            futures.push(execute_batch_remove::<K, V>(ipfs.clone(), links, new_batch));
+
+            new_batch = Vec::new();
+            links = Vec::new();
+        }
+
+        let results = join_all(futures).await;
+
+        for result in results {
+            let (key, link) = result?;
+
+            node.insert_links(vec![(key, link)].into_iter());
+        }
+    } else {
+        node.remove_batch(batch.into_iter());
+    }
+
+    let key = node.keys[0];
+    let cid = ipfs.dag_put(&node, Codec::DagCbor).await?;
+    let link: IPLDLink = cid.into();
+
+    Ok((key, link))
 }
 
 /* pub(crate) fn values<K: Key, V: Value>(
