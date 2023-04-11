@@ -9,7 +9,7 @@ use async_recursion::async_recursion;
 use futures::{
     channel::mpsc::{self, Sender},
     future::join_all,
-    stream, FutureExt, Stream, StreamExt, TryStreamExt,
+    stream, Stream, StreamExt, TryStreamExt,
 };
 
 use either::Either;
@@ -80,7 +80,31 @@ impl<
 {
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct ProllyTree(IPLDLink, IPLDLink);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum ChunkingStrategy {
+    #[serde(rename = "hashThreshold")]
+    HashThresholdConfig(u32, u32),
+}
+
+impl Default for ChunkingStrategy {
+    fn default() -> Self {
+        Self::HashThresholdConfig(16, 0x12)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProllyTreeConfig(u32, u32, u32, u32, u32, u32, ChunkingStrategy);
+
+impl Default for ProllyTreeConfig {
+    fn default() -> Self {
+        Self(0, 1048576, 1, 0x71, 0x12, 0, ChunkingStrategy::default())
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct TreeNode<K, V>(bool, Vec<K>, Vec<Either<V, IPLDLink>>);
 
 impl<K: Key, V: Value> TreeNode<K, V> {
@@ -104,10 +128,25 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     fn insert(
         &mut self,
         key_values: impl IntoIterator<Item = (K, Either<V, IPLDLink>)>
-            + Iterator<Item = (K, Either<V, IPLDLink>)>
-            + DoubleEndedIterator,
+            + Iterator<Item = (K, Either<V, IPLDLink>)>,
     ) {
-        let mut stop = self.1.len();
+        let mut start = 0;
+        for (key, value) in key_values {
+            match self.1[start..].binary_search(&key) {
+                Ok(idx) => {
+                    self.1[idx] = key;
+                    self.2[idx] = value;
+                    start = idx;
+                }
+                Err(idx) => {
+                    self.1.insert(idx, key);
+                    self.2.insert(idx, value);
+                    start = idx;
+                }
+            }
+        }
+
+        /* let mut stop = self.1.len();
         for (key, value) in key_values.rev() {
             for i in (0..stop).rev() {
                 if self.1[i] < key {
@@ -124,7 +163,7 @@ impl<K: Key, V: Value> TreeNode<K, V> {
                     break;
                 }
             }
-        }
+        } */
     }
 
     /// Run the chunking algorithm on this node. Return splitted nodes.
@@ -139,7 +178,7 @@ impl<K: Key, V: Value> TreeNode<K, V> {
             let key = self.1[i];
 
             let digest = Sha256::new_with_prefix(key);
-            let factor = NonZeroU32::new(CHUNKING_FACTOR).unwrap(); //TODO use config
+            let factor = NonZeroU32::new(CHUNKING_FACTOR).unwrap(); //TODO use config instead of a const
             let is_boundary = bound_check(digest, factor);
 
             if is_boundary {
@@ -162,13 +201,8 @@ impl<K: Key, V: Value> TreeNode<K, V> {
             // Guaranteed node because first key is a boundary
             node.as_mut().unwrap().1.push(key);
 
-            if self.0 {
-                let value = self.2[i];
-                node.as_mut().unwrap().2.push(value);
-            } else {
-                let link = self.2[i];
-                node.as_mut().unwrap().2.push(link);
-            }
+            let value = self.2[i];
+            node.as_mut().unwrap().2.push(value);
 
             if i == self.1.len() - 1 {
                 let node = node.take().unwrap();
@@ -179,24 +213,22 @@ impl<K: Key, V: Value> TreeNode<K, V> {
         result
     }
 
+    /// Merge all node elements with other
     fn merge(&mut self, other: Self) {
         self.insert(other.1.into_iter().zip(other.2.into_iter()))
     }
 
-    fn remove_batch(
-        &mut self,
-        batch: impl IntoIterator<Item = K> + Iterator<Item = K> + DoubleEndedIterator,
-    ) {
-        let mut idx = self.1.len();
-        for batch_key in batch.rev() {
-            for i in (0..idx).rev() {
-                let key = self.1[i];
+    /// Remove KVs that match batch keys
+    ///
+    /// Idempotent.
+    fn remove_batch(&mut self, batch: impl IntoIterator<Item = K> + Iterator<Item = K>) {
+        let mut start = 0;
+        for batch_key in batch {
+            if let Ok(idx) = self.1[start..].binary_search(&batch_key) {
+                self.1.remove(idx);
+                self.2.remove(idx);
 
-                if batch_key == key {
-                    self.1.remove(i);
-                    idx = i;
-                    break;
-                }
+                start = idx;
             }
         }
     }
@@ -272,13 +304,18 @@ impl<K: Key, V: Value> Iterator for NodeIntoIterator<K, V> {
     }
 }
 
+/// Return all KVs for the keys provided.
 pub(crate) async fn batch_get<K: Key, V: Value>(
     ipfs: IpfsService,
     root: IPLDLink,
-    mut batch: Vec<K>,
+    keys: impl Iterator<Item = K> + IntoIterator<Item = K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
+    let mut batch = keys.into_iter().collect::<Vec<_>>();
+
     batch.sort_unstable();
 
+    //TODO is the KV order preserved through the channel???
+    // Is the KVs returned supposed to be ordered???
     let (tx, rx) = mpsc::channel(batch.len());
 
     execute_batch_get(ipfs.clone(), root, batch, tx).await;
@@ -293,7 +330,10 @@ async fn execute_batch_get<K: Key, V: Value>(
     mut batch: Vec<K>,
     mut sender: Sender<Result<(K, V), Error>>,
 ) {
-    let node = match ipfs.dag_get::<&str, TreeNode<K, V>>(link.link, None).await {
+    let node = match ipfs
+        .dag_get::<&str, TreeNode<K, V>>(link.into(), None)
+        .await
+    {
         Ok(n) => n,
         Err(e) => {
             let _ = sender.try_send(Err(e.into()));
@@ -343,18 +383,19 @@ async fn execute_batch_get<K: Key, V: Value>(
             })
             .collect();
 
-        //TODO is the KV order preserved through the channel???
         join_all(futures).await;
     }
 }
 
+/// Add or update values in the tree for all KVs in batch.
 pub(crate) async fn batch_insert<K: Key, V: Value>(
-    ipfs: &IpfsService,
+    ipfs: IpfsService,
     root: IPLDLink,
-    mut batch: Vec<(K, V)>,
+    key_values: impl Iterator<Item = (K, V)> + IntoIterator<Item = (K, V)>,
 ) -> Result<IPLDLink, Error> {
     //TODO get config node
 
+    let mut batch = key_values.into_iter().collect::<Vec<_>>();
     batch.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
     let key_links = execute_batch_insert::<K, V>(ipfs.clone(), root, batch).await?;
@@ -389,7 +430,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
     mut batch: Vec<(K, V)>,
 ) -> Result<Vec<(K, IPLDLink)>, Error> {
     let mut node = ipfs
-        .dag_get::<&str, TreeNode<K, V>>(link.link, None)
+        .dag_get::<&str, TreeNode<K, V>>(link.into(), None)
         .await?;
 
     if !node.0 {
@@ -446,30 +487,32 @@ async fn execute_batch_insert<K: Key, V: Value>(
 
     let results = join_all(futures).await;
 
-    let mut key_2 = Vec::with_capacity(results.len());
+    let mut key_links = Vec::with_capacity(results.len());
     for (i, result) in results.into_iter().enumerate() {
         let cid = result?;
 
         let key = nodes[i].1[0];
         let link: IPLDLink = cid.into();
-        key_2.push((key, link));
+        key_links.push((key, link));
     }
 
-    return Ok(key_2);
+    return Ok(key_links);
 }
 
 //TODO return the value of the key removed???
 
+/// Remove all values in the tree matching the keys.
 pub(crate) async fn batch_remove<K: Key, V: Value>(
     ipfs: &IpfsService,
     root: IPLDLink,
-    mut batch: Vec<K>,
+    keys: impl Iterator<Item = K> + IntoIterator<Item = K>,
 ) -> Result<IPLDLink, Error> {
     //TODO get config node
 
+    let mut batch = keys.into_iter().collect::<Vec<_>>();
     batch.sort_unstable();
 
-    let (key, link) = execute_batch_remove::<K, V>(ipfs.clone(), vec![root], batch).await?;
+    let (_, link) = execute_batch_remove::<K, V>(ipfs.clone(), vec![root], batch).await?;
 
     //TODO update config node
 
@@ -530,9 +573,11 @@ async fn execute_batch_remove<K: Key, V: Value>(
                 }
             }
 
-            links.push(node.2[i].right().unwrap());
+            let link = node.2[i].right().unwrap();
+            links.push(link);
 
-            futures.push(execute_batch_remove::<K, V>(ipfs.clone(), links, new_batch));
+            let future = execute_batch_remove::<K, V>(ipfs.clone(), links, new_batch);
+            futures.push(future);
 
             new_batch = Vec::new();
             links = Vec::new();
@@ -543,7 +588,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
         for result in results {
             let (key, link) = result?;
 
-            node.insert(vec![(key, Either::Right(link))].into_iter());
+            node.insert(std::iter::once((key, Either::Right(link))));
         }
     } else {
         node.remove_batch(batch.into_iter());
@@ -556,6 +601,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
     Ok((key, link))
 }
 
+/// Stream all KVs in the tree in order.
 pub(crate) fn values<K: Key, V: Value>(
     ipfs: IpfsService,
     root: IPLDLink,
