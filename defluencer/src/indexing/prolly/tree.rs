@@ -1,41 +1,25 @@
 use std::{
-    fmt::{self, Debug},
-    marker::PhantomData,
-    num::NonZeroU32,
+    fmt::Debug,
     ops::{Bound, RangeBounds},
 };
 
 use async_recursion::async_recursion;
 
-use futures::{
-    channel::mpsc::{self, Sender},
-    future::{join_all, try_join_all},
-    stream, Stream, StreamExt, TryStreamExt,
-};
-
-use either::Either;
+use futures::{future::try_join_all, stream, Stream, StreamExt, TryStreamExt};
 
 use ipfs_api::{responses::Codec, IpfsService};
-
-use linked_data::types::IPLDLink;
+use libipld_core::ipld::Ipld;
 
 use crate::errors::Error;
 
-use serde::{
-    de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor},
-    ser::SerializeSeq,
-    Deserialize, Deserializer, Serialize,
+use serde::{de::DeserializeOwned, Serialize};
+
+use super::{
+    config::{ChunkingStrategy, Strategies},
+    deserialization::TreeNodes,
 };
 
-use multihash::{Hasher, Sha2_256};
-
-use super::config::{ChunkingStrategy, Strategies, Tree};
-
-use libipld_core::ipld::Ipld;
-
 use cid::Cid;
-
-const CHUNKING_FACTOR: u32 = 16;
 
 pub trait Key:
     Default
@@ -43,10 +27,8 @@ pub trait Key:
     + Clone
     + Eq
     + Ord
-    + Serialize
-    + DeserializeOwned
-    + From<Vec<u8>>
-    + Into<Vec<u8>>
+    + TryFrom<Ipld>
+    + Into<Ipld>
     + Send
     + Sync
     + Sized
@@ -60,10 +42,8 @@ impl<
             + Clone
             + Eq
             + Ord
-            + Serialize
-            + DeserializeOwned
-            + From<Vec<u8>>
-            + Into<Vec<u8>>
+            + TryFrom<Ipld>
+            + Into<Ipld>
             + Send
             + Sync
             + Sized
@@ -74,169 +54,35 @@ impl<
 }
 
 pub trait Value:
-    Default
-    + Debug
-    + Clone
-    + Eq
-    + Serialize
-    + DeserializeOwned
-    + From<Vec<u8>>
-    + Send
-    + Sync
-    + Sized
-    + 'static
+    Default + Debug + Clone + Eq + TryFrom<Ipld> + Into<Ipld> + Send + Sync + Sized + 'static
 {
 }
 impl<
-        T: Default
-            + Debug
-            + Clone
-            + Eq
-            + Serialize
-            + DeserializeOwned
-            + From<Vec<u8>>
-            + Send
-            + Sync
-            + Sized
-            + 'static,
+        T: Default + Debug + Clone + Eq + TryFrom<Ipld> + Into<Ipld> + Send + Sync + Sized + 'static,
     > Value for T
 {
 }
 
 /// Type state for tree leaf nodes
-#[derive(Debug, Clone)]
-struct Leaf<V> {
-    elements: Vec<V>,
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Leaf<V> {
+    pub elements: Vec<V>,
 }
 
 /// Type state for tree branch nodes
-#[derive(Debug, Clone)]
-struct Branch {
-    links: Vec<Cid>,
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Branch {
+    pub links: Vec<Cid>,
 }
 
 pub trait TreeNodeType {}
 impl<V> TreeNodeType for Leaf<V> {}
 impl TreeNodeType for Branch {}
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TreeNode<K, T: TreeNodeType> {
-    keys: Vec<K>, //TODO represent keys as bytes so they can be ordered.
-    values: T,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(try_from = "Ipld")]
-enum TreeNodes<K, V> {
-    #[serde(bound = "K: Key")]
-    Branch(TreeNode<K, Branch>),
-    #[serde(bound = "V: Value")]
-    Leaf(TreeNode<K, Leaf<V>>),
-}
-
-impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
-    type Error = Error;
-
-    fn try_from(value: Ipld) -> Result<Self, Self::Error> {
-        let mut list = match value {
-            Ipld::List(list) => list,
-            _ => return Err(Error::NotFound),
-        };
-
-        let values = match list.remove(2) {
-            Ipld::List(values) => values,
-            _ => return Err(Error::NotFound),
-        };
-
-        let keys = match list.remove(1) {
-            Ipld::List(keys) => keys,
-            _ => return Err(Error::NotFound),
-        };
-
-        let keys = keys
-            .into_iter()
-            .filter_map(|ipld| match ipld {
-                Ipld::Bytes(key) => Some(key.into()),
-                _ => None,
-            })
-            .collect();
-
-        let is_leaf = match list.remove(0) {
-            Ipld::Bool(is_leaf) => is_leaf,
-            _ => return Err(Error::NotFound),
-        };
-
-        let tree = if is_leaf {
-            let elements = values
-                .into_iter()
-                .filter_map(|ipld| match ipld {
-                    Ipld::Bytes(value) => Some(value.into()),
-                    _ => None,
-                })
-                .collect();
-
-            let values = Leaf { elements };
-
-            TreeNodes::Leaf(TreeNode { keys, values })
-        } else {
-            let links = values
-                .into_iter()
-                .filter_map(|ipld| match ipld {
-                    Ipld::Link(value) => Some(value),
-                    _ => None,
-                })
-                .collect();
-
-            let values = Branch { links };
-
-            TreeNodes::Branch(TreeNode { keys, values })
-        };
-
-        Ok(tree)
-    }
-}
-
-impl<K: Key, V: Value> Serialize for TreeNodes<K, V> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            TreeNodes::Branch(branch_node) => {
-                let length = 1 + branch_node.keys.len() + branch_node.values.links.len();
-                let mut seq = serializer.serialize_seq(Some(length))?;
-
-                seq.serialize_element(&false)?;
-
-                for key in branch_node.keys.iter() {
-                    seq.serialize_element(key)?;
-                }
-
-                for link in branch_node.values.links.iter() {
-                    let ipld: Ipld = link.into();
-                    seq.serialize_element(&ipld)?;
-                }
-
-                seq.end()
-            }
-            TreeNodes::Leaf(leaf_node) => {
-                let length = 1 + leaf_node.keys.len() + leaf_node.values.elements.len();
-                let mut seq = serializer.serialize_seq(Some(length))?;
-
-                seq.serialize_element(&true)?;
-
-                for key in leaf_node.keys.iter() {
-                    seq.serialize_element(key)?;
-                }
-
-                for element in leaf_node.values.elements.iter() {
-                    seq.serialize_element(element)?;
-                }
-
-                seq.end()
-            }
-        }
-    }
+    pub keys: Vec<K>, //TODO represent keys as bytes so they can be ordered.
+    pub values: T,
 }
 
 impl<K: Key, T: TreeNodeType> TreeNode<K, T> {
@@ -327,7 +173,7 @@ impl<K: Key> TreeNode<K, Branch> {
         &'a self,
         batch: Vec<(K, V)>,
     ) -> impl Iterator<Item = (Vec<(K, V)>, Cid)> + 'a {
-        //TODO refactor into one scan call
+        //TODO refactor into one scan call???
         batch
             .into_iter()
             .scan((self, 0usize), |(node, start), (key, value)| {
@@ -379,7 +225,7 @@ impl<K: Key> TreeNode<K, Branch> {
     }
 
     /// Run the chunking algorithm on this node. Return splitted nodes.
-    fn split_into(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
+    fn split_with(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
         //TODO Find the boundary indexes then split the nodes, should be simpler.
 
         let mut key_count = self.keys.len();
@@ -539,11 +385,9 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
         }
     }
 
-    /// Run the chunking algorithm on this node. Return splitted nodes.
-    fn split_into(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
+    /// Run the chunking algorithm on this node. Return splitted nodes if any.
+    fn split_with(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
         //TODO Find the boundary indexes then split the nodes, should be simpler.
-
-        //TODO return an iterator
 
         let mut key_count = self.keys.len();
         let mut value_count = self.values.elements.len();
@@ -627,6 +471,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     }
 }
 
+/// Stream all the KVs that coorespond with the keys in batch.
 pub fn batch_get<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
@@ -654,12 +499,12 @@ fn search_branch<K: Key, V: Value>(
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     let ipfs_clone = ipfs.clone();
 
-    let batch: Vec<_> = branch
+    let batches = branch
         .search_batch_split(batch)
         .map(|(batch, link)| Ok((batch, link)))
-        .collect();
+        .collect::<Vec<_>>();
 
-    stream::iter(batch.into_iter())
+    stream::iter(batches.into_iter())
         .and_then(move |(batch, link)| {
             let ipfs = ipfs_clone.clone();
 
@@ -685,7 +530,7 @@ fn search_leaf<K: Key, V: Value>(
     leaf: TreeNode<K, Leaf<V>>,
     batch: Vec<K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
-    //TODO is there a way to consume the node instead of cloning the KV
+    //TODO is there a way to drop the unwanted KVs instead of cloning?
     let result: Vec<_> = leaf
         .search(batch)
         .map(|index| {
@@ -742,12 +587,12 @@ async fn execute_batch_insert<K: Key, V: Value>(
         .dag_get::<&str, TreeNodes<K, V>>(link.into(), None)
         .await?;
 
-    let mut nodes: Vec<TreeNodes<K, V>> = match node {
+    let nodes: Vec<TreeNodes<K, V>> = match node {
         TreeNodes::Leaf(mut leaf_node) => {
             leaf_node.insert(batch.into_iter());
 
             leaf_node
-                .split_into(strategy)
+                .split_with(strategy)
                 .into_iter()
                 .map(|leaf| TreeNodes::Leaf(leaf))
                 .collect()
@@ -760,16 +605,12 @@ async fn execute_batch_insert<K: Key, V: Value>(
                 })
                 .collect();
 
-            let results = join_all(futures).await;
+            let key_links = try_join_all(futures).await?;
 
-            for result in results {
-                let key_links = result?;
-
-                branch_node.insert(key_links.into_iter());
-            }
+            branch_node.insert(key_links.into_iter().flatten());
 
             branch_node
-                .split_into(strategy)
+                .split_with(strategy)
                 .into_iter()
                 .map(|branch| TreeNodes::Branch(branch))
                 .collect()
@@ -785,19 +626,20 @@ async fn execute_batch_insert<K: Key, V: Value>(
         })
         .collect();
 
-    let results = join_all(futures).await;
+    let links = try_join_all(futures).await?;
 
-    let mut key_links = Vec::with_capacity(results.len());
-    for (i, result) in results.into_iter().enumerate() {
-        let cid = result?;
+    let key_links = links
+        .into_iter()
+        .zip(nodes.into_iter())
+        .map(|(link, node)| {
+            let key = match node {
+                TreeNodes::Branch(mut node) => node.keys.swap_remove(0),
+                TreeNodes::Leaf(mut node) => node.keys.swap_remove(0),
+            };
 
-        let key = match &mut nodes[i] {
-            TreeNodes::Branch(node) => node.keys.swap_remove(0),
-            TreeNodes::Leaf(node) => node.keys.swap_remove(0),
-        };
-
-        key_links.push((key, cid));
-    }
+            (key, link)
+        })
+        .collect::<Vec<_>>();
 
     return Ok(key_links);
 }
@@ -824,10 +666,10 @@ async fn execute_batch_remove<K: Key, V: Value>(
     links: Vec<Cid>,
     mut batch: Vec<K>,
 ) -> Result<(K, Cid), Error> {
-    let futures: Vec<_> = links
+    let futures = links
         .into_iter()
-        .map(|link| ipfs.dag_get::<&str, TreeNodes<K, V>>(link.into(), None))
-        .collect();
+        .map(|link| ipfs.dag_get::<&str, TreeNodes<K, V>>(link, None))
+        .collect::<Vec<_>>();
 
     let nodes = try_join_all(futures).await?;
 
@@ -852,13 +694,17 @@ async fn execute_batch_remove<K: Key, V: Value>(
             node.remove_batch(batch.into_iter());
         }
         TreeNodes::Branch(ref mut node) => {
+            // Create futures that will merge the nodes at the links.
+
             let mut new_batch = Vec::with_capacity(batch.len());
             let mut links = Vec::with_capacity(node.keys.len());
             let mut futures = Vec::with_capacity(node.keys.len());
 
+            // For each node keys
             'node: for i in (0..node.keys.len()).rev() {
                 let key = &node.keys[i];
 
+                // Get a range for this key (In a branch node, values are links to other nodes).
                 let range = (
                     Bound::Included(key),
                     match node.keys.get(i + 1) {
@@ -867,32 +713,45 @@ async fn execute_batch_remove<K: Key, V: Value>(
                     },
                 );
 
+                // For each key in batch,
                 for j in (0..batch.len()).rev() {
                     let batch_key = &batch[j];
 
+                    // if the batch key is the first key in the range
                     if Bound::Included(batch_key) == range.start_bound() {
+                        // remove it from this node,
                         node.keys.remove(i);
-                        let link = node.values.links.remove(i);
-                        links.push(link);
-
+                        // remove the key from the batch,
                         batch.remove(j);
 
+                        // remove the link
+                        let link = node.values.links.remove(i);
+                        // and save it.
+                        links.push(link);
+
+                        // Continue with next node key.
                         continue 'node;
                     }
 
+                    // If the batch key is in range
                     if range.contains(batch_key) {
+                        // remove it from this batch
                         let key = batch.remove(j);
-
+                        // and save it.
                         new_batch.push(key);
                     }
                 }
 
+                // Get the link for this node key
                 let link = node.values.links[i];
+                // and save it.
                 links.push(link);
 
+                // Recurse
                 let future = execute_batch_remove::<K, V>(ipfs.clone(), links, new_batch);
                 futures.push(future);
 
+                // Clear the saved batch keys and links
                 new_batch = Vec::new();
                 links = Vec::new();
             }
@@ -958,26 +817,4 @@ fn stream_branch<K: Key, V: Value>(
             }
         })
         .try_flatten()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn serde_roundtrip() {
-        let node = TreeNode {
-            keys: vec![vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]],
-            values: Leaf {
-                elements: vec![vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]],
-            },
-        };
-
-        let trenum = TreeNodes::Leaf(node);
-
-        let encoded = serde_ipld_dagcbor::to_vec(&trenum).unwrap();
-        //let decoded: TreeNodes<K, V> = serde_ipld_dagcbor::from_slice(&encoded).unwrap();
-
-        //println!("{:?}", decoded);
-    }
 }

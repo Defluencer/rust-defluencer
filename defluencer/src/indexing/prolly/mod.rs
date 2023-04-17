@@ -1,4 +1,5 @@
 mod config;
+mod deserialization;
 mod tree;
 
 use std::iter;
