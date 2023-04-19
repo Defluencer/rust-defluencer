@@ -1,12 +1,19 @@
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
 
 use crate::errors::Error;
 
+use ipfs_api::responses::Codec;
+use multihash::Code;
 use serde::{Deserialize, Serialize};
 
-use super::tree::{Branch, Key, Leaf, TreeNode, Value};
+use super::{
+    config::{Config, HashThreshold, Strategies, Tree},
+    tree::{Branch, Key, Leaf, TreeNode, Value},
+};
 
 use libipld_core::ipld::Ipld;
+
+use num::FromPrimitive;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(bound = "K: Key, V: Value", try_from = "Ipld", into = "Ipld")]
@@ -61,6 +68,7 @@ impl<K: Key, V: Value> From<TreeNodes<K, V>> for Ipld {
 }
 
 //TODO add meaningful errors
+//TODO check if nodes have more data then the spec???
 
 impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
     type Error = Error;
@@ -119,6 +127,205 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
 
             TreeNodes::Branch(TreeNode { keys, values })
         };
+
+        Ok(tree)
+    }
+}
+
+impl TryFrom<Ipld> for Config {
+    type Error = Error;
+
+    fn try_from(ipld: Ipld) -> Result<Self, Self::Error> {
+        let Ipld::List(mut list) =  ipld else {
+            return Err(Error::NotFound);
+        };
+
+        let chunking_strategy = {
+            let Some(Ipld::Map(mut map)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            let Some((key, value)) = map.pop_last() else {
+                return Err(Error::NotFound);
+            };
+
+            let Ok(mut chunking_strategy) = Strategies::from_str(&key) else {
+                return Err(Error::NotFound);
+            };
+
+            match chunking_strategy {
+                Strategies::Threshold(ref mut threshold) => {
+                    let Ipld::List(mut list) =  value else {
+                        return Err(Error::NotFound);
+                    };
+
+                    let Some(Ipld::Integer(hash_function)) =  list.pop() else {
+                        return Err(Error::NotFound);
+                    };
+                    let Ok(hash_function) = Code::try_from(hash_function as u64) else{
+                        return Err(Error::NotFound);
+                    };
+
+                    let Some(Ipld::Integer(chunking_factor)) =  list.pop() else {
+                        return Err(Error::NotFound);
+                    };
+                    let chunking_factor = chunking_factor as usize;
+
+                    *threshold = HashThreshold {
+                        chunking_factor,
+                        hash_function,
+                    };
+                }
+            }
+
+            chunking_strategy
+        };
+
+        let hash_length = {
+            let Some(Ipld::Integer(hash_length)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            hash_length as usize
+        };
+
+        let hash_function = {
+            let Some(Ipld::Integer(hash_function)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            let Ok(hash_function) = Code::try_from(hash_function as u64) else{
+                return Err(Error::NotFound);
+            };
+
+            hash_function
+        };
+
+        let codec = {
+            let Some(Ipld::Integer(codec)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            let Some(codec) = Codec::from_i128(codec) else {
+                return Err(Error::NotFound);
+            };
+
+            codec
+        };
+
+        let cid_version = {
+            let Some(Ipld::Integer(cid_version)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            cid_version as usize
+        };
+
+        let max_size = {
+            let Some(Ipld::Integer(max_size)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            max_size as usize
+        };
+
+        let min_size = {
+            let Some(Ipld::Integer(min_size)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+            min_size as usize
+        };
+
+        let config = Self {
+            min_size,
+            max_size,
+            cid_version,
+            codec,
+            hash_function,
+            hash_length,
+            chunking_strategy,
+        };
+
+        Ok(config)
+    }
+}
+
+impl From<Config> for Ipld {
+    fn from(config: Config) -> Self {
+        let Config {
+            min_size,
+            max_size,
+            cid_version,
+            codec,
+            hash_function,
+            hash_length,
+            chunking_strategy,
+        } = config;
+
+        let min_size = Ipld::Integer(min_size as i128);
+        let max_size = Ipld::Integer(max_size as i128);
+        let cid_version = Ipld::Integer(cid_version as i128);
+        let codec = Ipld::Integer(codec as i128);
+        let hash_function = Ipld::Integer(u64::from(hash_function) as i128);
+        let hash_length = Ipld::Integer(hash_length as i128);
+
+        let chunking_strategy = match chunking_strategy {
+            Strategies::Threshold(threshold) => {
+                let HashThreshold {
+                    chunking_factor,
+                    hash_function,
+                } = threshold;
+
+                let map = BTreeMap::from([(
+                    chunking_strategy.to_string(),
+                    Ipld::List(vec![
+                        Ipld::Integer(chunking_factor as i128),
+                        Ipld::Integer(u64::from(hash_function) as i128),
+                    ]),
+                )]);
+
+                Ipld::Map(map)
+            }
+        };
+
+        Ipld::List(vec![
+            min_size,
+            max_size,
+            cid_version,
+            codec,
+            hash_function,
+            hash_length,
+            chunking_strategy,
+        ])
+    }
+}
+
+impl From<Tree> for Ipld {
+    fn from(tree: Tree) -> Self {
+        let Tree { config, root } = tree;
+
+        Ipld::List(vec![Ipld::Link(config), Ipld::Link(root)])
+    }
+}
+
+impl TryFrom<Ipld> for Tree {
+    type Error = Error;
+
+    fn try_from(ipld: Ipld) -> Result<Self, Self::Error> {
+        let Ipld::List(mut list) =  ipld else {
+            return Err(Error::NotFound);
+        };
+
+        let Some(Ipld::Link(root)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+        let Some(Ipld::Link(config)) =  list.pop() else {
+                return Err(Error::NotFound);
+            };
+
+        let tree = Self { config, root };
 
         Ok(tree)
     }

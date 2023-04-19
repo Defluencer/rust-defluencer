@@ -4,6 +4,8 @@ use cid::{multibase::decode, Cid};
 
 use linked_data::types::{IPNSAddress, PeerId};
 
+use num_derive::{FromPrimitive, ToPrimitive};
+
 use strum::{self, Display, EnumString};
 
 use serde::{Deserialize, Serialize};
@@ -194,7 +196,19 @@ impl From<PinLsResponse> for PinList {
 }
 
 //TODO find a way to stop depending on this!
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, EnumString, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    EnumString,
+    Serialize,
+    Deserialize,
+    FromPrimitive,
+    ToPrimitive,
+)]
 pub enum Codec {
     #[strum(serialize = "dag-cbor")]
     DagCbor = 0x71,

@@ -431,21 +431,22 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
 pub fn batch_get<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
+    keys: impl IntoIterator<Item = K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
-    let ipfs_clone = ipfs.clone();
+    let mut batch = keys.into_iter().collect::<Vec<_>>();
+    batch.sort_unstable();
 
-    stream::once(async move { ipfs.dag_get::<&str, TreeNodes<K, V>>(root, None).await })
-        .map_ok(move |node| {
-            let ipfs = ipfs_clone.clone();
-
-            match node {
-                TreeNodes::Branch(branch) => stream_branch(ipfs, branch).boxed_local(),
-                TreeNodes::Leaf(leaf) => stream::iter(leaf.into_iter())
-                    .map(|item| Ok(item))
-                    .boxed_local(),
-            }
-        })
-        .try_flatten()
+    stream::once(async move {
+        match ipfs.dag_get::<&str, TreeNodes<K, V>>(root, None).await {
+            Ok(node) => Ok((ipfs, node, batch)),
+            Err(e) => Err(e),
+        }
+    })
+    .map_ok(|(ipfs, node, batch)| match node {
+        TreeNodes::Branch(branch) => search_branch(ipfs, branch, batch).boxed_local(),
+        TreeNodes::Leaf(leaf) => search_leaf(leaf, batch).boxed_local(),
+    })
+    .try_flatten()
 }
 
 fn search_branch<K: Key, V: Value>(
@@ -453,31 +454,21 @@ fn search_branch<K: Key, V: Value>(
     branch: TreeNode<K, Branch>,
     batch: impl IntoIterator<Item = K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
-    let ipfs_clone = ipfs.clone();
-
     let batches = branch
         .search_batch_split(batch.into_iter())
-        .map(|(batch, link)| Ok((batch, link)))
+        .map(|(batch, link)| Ok((ipfs.clone(), batch, link)))
         .collect::<Vec<_>>();
 
     stream::iter(batches.into_iter())
-        .and_then(move |(batch, link)| {
-            let ipfs = ipfs_clone.clone();
-
-            async move {
-                match ipfs.dag_get::<&str, TreeNodes<K, V>>(link, None).await {
-                    Ok(node) => Ok((node, batch)),
-                    Err(e) => Err(e),
-                }
+        .and_then(|(ipfs, batch, link)| async move {
+            match ipfs.dag_get::<&str, TreeNodes<K, V>>(link, None).await {
+                Ok(node) => Ok((ipfs, node, batch)),
+                Err(e) => Err(e),
             }
         })
-        .map_ok(move |(node, batch)| {
-            let ipfs = ipfs.clone();
-
-            match node {
-                TreeNodes::Branch(branch) => search_branch(ipfs, branch, batch).boxed_local(),
-                TreeNodes::Leaf(leaf) => search_leaf(leaf, batch).boxed_local(),
-            }
+        .map_ok(|(ipfs, node, batch)| match node {
+            TreeNodes::Branch(branch) => search_branch(ipfs, branch, batch).boxed_local(),
+            TreeNodes::Leaf(leaf) => search_leaf(leaf, batch).boxed_local(),
         })
         .try_flatten()
 }
@@ -487,7 +478,7 @@ fn search_leaf<K: Key, V: Value>(
     batch: Vec<K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     //TODO is there a way to drop the unwanted KVs instead of cloning?
-    let result: Vec<_> = leaf
+    let results: Vec<_> = leaf
         .search(batch.into_iter())
         .map(|index| {
             Ok((
@@ -497,7 +488,7 @@ fn search_leaf<K: Key, V: Value>(
         })
         .collect();
 
-    stream::iter(result.into_iter())
+    stream::iter(results.into_iter())
 }
 
 /// Add or update values in the tree.
@@ -566,29 +557,26 @@ async fn execute_batch_insert<K: Key, V: Value>(
         }
     };
 
-    let futures: Vec<_> = nodes
+    let keys = nodes
         .iter()
+        .map(|node| match node {
+            TreeNodes::Branch(node) => node.keys[0].clone(),
+            TreeNodes::Leaf(node) => node.keys[0].clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let futures: Vec<_> = nodes
+        .into_iter()
         .map(|node| {
             let ipfs = ipfs.clone();
-            let node = node.clone();
+
             async move { ipfs.dag_put(&node, Codec::DagCbor).await }
         })
         .collect();
 
     let links = try_join_all(futures).await?;
 
-    let key_links = links
-        .into_iter()
-        .zip(nodes.into_iter())
-        .map(|(link, node)| {
-            let key = match node {
-                TreeNodes::Branch(mut node) => node.keys.swap_remove(0),
-                TreeNodes::Leaf(mut node) => node.keys.swap_remove(0),
-            };
-
-            (key, link)
-        })
-        .collect::<Vec<_>>();
+    let key_links = keys.into_iter().zip(links.into_iter()).collect();
 
     return Ok(key_links);
 }
@@ -597,14 +585,14 @@ async fn execute_batch_insert<K: Key, V: Value>(
 
 /// Remove all values in the tree matching the keys.
 pub async fn batch_remove<K: Key, V: Value>(
-    ipfs: &IpfsService,
+    ipfs: IpfsService,
     root: Cid,
     keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
     let mut batch = keys.into_iter().collect::<Vec<_>>();
     batch.sort_unstable();
 
-    let (_, link) = execute_batch_remove::<K, V>(ipfs.clone(), vec![root], batch).await?;
+    let (_, link) = execute_batch_remove::<K, V>(ipfs, vec![root], batch).await?;
 
     Ok(link)
 }
