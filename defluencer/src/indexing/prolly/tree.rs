@@ -8,11 +8,8 @@ use async_recursion::async_recursion;
 use futures::{future::try_join_all, stream, Stream, StreamExt, TryStreamExt};
 
 use ipfs_api::{responses::Codec, IpfsService};
-use libipld_core::ipld::Ipld;
 
 use crate::errors::Error;
-
-use serde::{de::DeserializeOwned, Serialize};
 
 use super::{
     config::{ChunkingStrategy, Strategies},
@@ -21,47 +18,21 @@ use super::{
 
 use cid::Cid;
 
-pub trait Key:
-    Default
-    + Debug
-    + Clone
-    + Eq
-    + Ord
-    + TryFrom<Ipld>
-    + Into<Ipld>
-    + Send
-    + Sync
-    + Sized
-    + AsRef<[u8]>
-    + 'static
-{
-}
-impl<
-        T: Default
-            + Debug
-            + Clone
-            + Eq
-            + Ord
-            + TryFrom<Ipld>
-            + Into<Ipld>
-            + Send
-            + Sync
-            + Sized
-            + AsRef<[u8]>
-            + 'static,
-    > Key for T
-{
-}
+use libipld_core::ipld::Ipld;
 
-pub trait Value:
-    Default + Debug + Clone + Eq + TryFrom<Ipld> + Into<Ipld> + Send + Sync + Sized + 'static
-{
-}
-impl<
-        T: Default + Debug + Clone + Eq + TryFrom<Ipld> + Into<Ipld> + Send + Sync + Sized + 'static,
-    > Value for T
-{
-}
+/// Trait for tree keys.
+///
+/// Bounds are, ordered by their byte representation and compatible with Ipld.
+///
+/// As for ```str``` and ```String``` read this std [note](https://doc.rust-lang.org/std/cmp/trait.Ord.html#impl-Ord-for-str)
+pub trait Key: Default + Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
+impl<T: Default + Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Key for T {}
+
+/// Trait for tree values.
+///
+/// Only bound is compatiblility with Ipld.
+pub trait Value: Default + Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
+impl<T: Default + Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Value for T {}
 
 /// Type state for tree leaf nodes
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -81,13 +52,16 @@ impl TreeNodeType for Branch {}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TreeNode<K, T: TreeNodeType> {
-    pub keys: Vec<K>, //TODO represent keys as bytes so they can be ordered.
+    pub keys: Vec<K>,
     pub values: T,
 }
 
 impl<K: Key, T: TreeNodeType> TreeNode<K, T> {
     /// Find the index in node for each key in the batch
-    fn search<'a>(&'a self, batch: Vec<K>) -> impl Iterator<Item = usize> + 'a {
+    fn search<'a>(
+        &'a self,
+        batch: impl IntoIterator<Item = K> + 'a,
+    ) -> impl Iterator<Item = usize> + 'a {
         batch
             .into_iter()
             .scan((self, 0usize), |(node, start), key| {
@@ -106,10 +80,7 @@ impl<K: Key> TreeNode<K, Branch> {
     /// Insert sorted keys and links into this node.
     ///
     /// Idempotent.
-    fn insert(
-        &mut self,
-        key_values: impl IntoIterator<Item = (K, Cid)> + Iterator<Item = (K, Cid)>,
-    ) {
+    fn insert(&mut self, key_values: impl IntoIterator<Item = (K, Cid)>) {
         let mut start = 0;
         for (key, value) in key_values {
             match self.keys[start..].binary_search(&key) {
@@ -129,7 +100,10 @@ impl<K: Key> TreeNode<K, Branch> {
 
     /// Split the batch into smaller batch with associated node links
     /// while removing batch key not present in node.
-    fn search_batch_split<'a>(&'a self, batch: Vec<K>) -> impl Iterator<Item = (Vec<K>, Cid)> + 'a {
+    fn search_batch_split<'a>(
+        &'a self,
+        batch: impl IntoIterator<Item = K> + 'a,
+    ) -> impl Iterator<Item = (Vec<K>, Cid)> + 'a {
         //TODO refactor into one scan call
         batch
             .into_iter()
@@ -171,7 +145,7 @@ impl<K: Key> TreeNode<K, Branch> {
     /// Split the batch into smaller batch with associated node links.
     fn insert_batch_split<'a, V: Value>(
         &'a self,
-        batch: Vec<(K, V)>,
+        batch: impl IntoIterator<Item = (K, V)> + 'a,
     ) -> impl Iterator<Item = (Vec<(K, V)>, Cid)> + 'a {
         //TODO refactor into one scan call???
         batch
@@ -228,31 +202,20 @@ impl<K: Key> TreeNode<K, Branch> {
     fn split_with(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
         //TODO Find the boundary indexes then split the nodes, should be simpler.
 
-        let mut key_count = self.keys.len();
-        let mut value_count = self.values.links.len();
-
         let mut result = Vec::new();
 
-        let mut node = Option::<TreeNode<K, Branch>>::None;
+        let mut node = Option::<Self>::None;
         for i in 0..self.keys.len() {
             let key = self.keys.remove(i);
 
-            let is_boundary = chunking.boundary(key.as_ref());
+            let is_boundary = chunking.boundary(key.clone());
 
             if is_boundary {
                 if let Some(node) = node.take() {
-                    key_count -= node.keys.len();
-                    value_count -= node.values.links.len();
-
                     result.push(node);
                 }
 
-                let new_node = Self {
-                    keys: Vec::with_capacity(key_count),
-                    values: Branch {
-                        links: Vec::with_capacity(value_count),
-                    },
-                };
+                let new_node = Self::default();
 
                 node = Some(new_node);
             }
@@ -280,7 +243,7 @@ impl<K: Key> TreeNode<K, Branch> {
     /// Remove key and links that match batch keys
     ///
     /// Idempotent.
-    fn remove_batch(&mut self, batch: impl IntoIterator<Item = K> + Iterator<Item = K>) {
+    fn remove_batch(&mut self, batch: impl IntoIterator<Item = K>) {
         let mut start = 0;
         for batch_key in batch {
             if let Ok(idx) = self.keys[start..].binary_search(&batch_key) {
@@ -307,12 +270,12 @@ impl<K: Key> TreeNode<K, Branch> {
     }
 }
 
-pub struct BranchIterator<'a, K: Key> {
+pub struct BranchIterator<'a, K> {
     node: &'a TreeNode<K, Branch>,
     index: usize,
 }
 
-impl<'a, K: Key> Iterator for BranchIterator<'a, K> {
+impl<'a, K> Iterator for BranchIterator<'a, K> {
     type Item = ((Bound<&'a K>, Bound<&'a K>), &'a Cid);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -331,11 +294,13 @@ impl<'a, K: Key> Iterator for BranchIterator<'a, K> {
         let range = (l_bound, h_bound);
         let link = &self.node.values.links[self.index];
 
+        self.index += 1;
+
         Some((range, link))
     }
 }
 
-pub struct BranchIntoIterator<K: Key> {
+pub struct BranchIntoIterator<K> {
     node: TreeNode<K, Branch>,
     index: usize,
 }
@@ -359,6 +324,8 @@ impl<K: Key> Iterator for BranchIntoIterator<K> {
         let range = (l_bound, h_bound);
         let link = self.node.values.links[self.index];
 
+        self.index += 1;
+
         Some((range, link))
     }
 }
@@ -367,7 +334,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     /// Insert sorted keys and values into this node.
     ///
     /// Idempotent.
-    fn insert(&mut self, key_values: impl IntoIterator<Item = (K, V)> + Iterator<Item = (K, V)>) {
+    fn insert(&mut self, key_values: impl IntoIterator<Item = (K, V)>) {
         let mut start = 0;
         for (key, value) in key_values {
             match self.keys[start..].binary_search(&key) {
@@ -389,31 +356,20 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     fn split_with(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
         //TODO Find the boundary indexes then split the nodes, should be simpler.
 
-        let mut key_count = self.keys.len();
-        let mut value_count = self.values.elements.len();
-
         let mut result = Vec::new();
 
-        let mut node = Option::<TreeNode<K, Leaf<V>>>::None;
+        let mut node = Option::<Self>::None;
         for i in 0..self.keys.len() {
             let key = self.keys.remove(i);
 
-            let is_boundary = chunking.boundary(key.as_ref());
+            let is_boundary = chunking.boundary(key.clone());
 
             if is_boundary {
                 if let Some(node) = node.take() {
-                    key_count -= node.keys.len();
-                    value_count -= node.values.elements.len();
-
                     result.push(node);
                 }
 
-                let new_node = Self {
-                    keys: Vec::with_capacity(key_count),
-                    values: Leaf {
-                        elements: Vec::with_capacity(value_count),
-                    },
-                };
+                let new_node = Self::default();
 
                 node = Some(new_node);
             }
@@ -446,7 +402,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     /// Remove keys and values that match batch keys
     ///
     /// Idempotent.
-    fn remove_batch(&mut self, batch: impl IntoIterator<Item = K> + Iterator<Item = K>) {
+    fn remove_batch(&mut self, batch: impl IntoIterator<Item = K>) {
         let mut start = 0;
         for batch_key in batch {
             if let Ok(idx) = self.keys[start..].binary_search(&batch_key) {
@@ -460,13 +416,13 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
 
     pub fn iter(
         &self,
-    ) -> impl Iterator<Item = (&K, &V)> + IntoIterator<Item = (&K, &V)> + DoubleEndedIterator {
+    ) -> impl IntoIterator<Item = (&K, &V)> + Iterator<Item = (&K, &V)> + DoubleEndedIterator {
         self.keys.iter().zip(self.values.elements.iter())
     }
 
     pub fn into_iter(
         self,
-    ) -> impl Iterator<Item = (K, V)> + IntoIterator<Item = (K, V)> + DoubleEndedIterator {
+    ) -> impl IntoIterator<Item = (K, V)> + Iterator<Item = (K, V)> + DoubleEndedIterator {
         self.keys.into_iter().zip(self.values.elements.into_iter())
     }
 }
@@ -495,12 +451,12 @@ pub fn batch_get<K: Key, V: Value>(
 fn search_branch<K: Key, V: Value>(
     ipfs: IpfsService,
     branch: TreeNode<K, Branch>,
-    batch: Vec<K>,
+    batch: impl IntoIterator<Item = K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     let ipfs_clone = ipfs.clone();
 
     let batches = branch
-        .search_batch_split(batch)
+        .search_batch_split(batch.into_iter())
         .map(|(batch, link)| Ok((batch, link)))
         .collect::<Vec<_>>();
 
@@ -532,7 +488,7 @@ fn search_leaf<K: Key, V: Value>(
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     //TODO is there a way to drop the unwanted KVs instead of cloning?
     let result: Vec<_> = leaf
-        .search(batch)
+        .search(batch.into_iter())
         .map(|index| {
             Ok((
                 leaf.keys[index].clone(),
@@ -549,20 +505,15 @@ pub async fn batch_insert<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
     strategy: Strategies,
-    key_values: impl Iterator<Item = (K, V)> + IntoIterator<Item = (K, V)>,
+    key_values: impl IntoIterator<Item = (K, V)>,
 ) -> Result<Cid, Error> {
     let mut batch = key_values.into_iter().collect::<Vec<_>>();
     batch.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
-    let key_links = execute_batch_insert::<K, V>(ipfs.clone(), root, strategy, batch).await?;
+    let key_links = execute_batch_insert(ipfs.clone(), root, strategy, batch).await?;
 
     if key_links.len() > 1 {
-        let mut node = TreeNode::<K, Branch> {
-            keys: Vec::with_capacity(key_links.len()),
-            values: Branch {
-                links: Vec::with_capacity(key_links.len()),
-            },
-        };
+        let mut node = TreeNode::<K, Branch>::default();
 
         node.insert(key_links.into_iter());
 
@@ -600,9 +551,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
         TreeNodes::Branch(mut branch_node) => {
             let futures: Vec<_> = branch_node
                 .insert_batch_split(batch)
-                .map(|(batch, link)| {
-                    execute_batch_insert::<K, V>(ipfs.clone(), link, strategy, batch)
-                })
+                .map(|(batch, link)| execute_batch_insert(ipfs.clone(), link, strategy, batch))
                 .collect();
 
             let key_links = try_join_all(futures).await?;
@@ -650,7 +599,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
 pub async fn batch_remove<K: Key, V: Value>(
     ipfs: &IpfsService,
     root: Cid,
-    keys: impl Iterator<Item = K> + IntoIterator<Item = K>,
+    keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
     let mut batch = keys.into_iter().collect::<Vec<_>>();
     batch.sort_unstable();

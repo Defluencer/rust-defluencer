@@ -20,7 +20,8 @@ hex = { version = "0.4", default-features = false, features = [] }
 ipfs-api = { path = "../ipfs-api", default-features = false, features = [] }
 ipns-records = { path = "../ipns-records", default-features = false, features = []  }
 k256 = { version = "0.11", default-features = false, features = ["std"] }
-libipld-core = { version = "0.16", default-features = false, features = ["serde-codec"] }
+# Replace with the crate once updated
+libipld-core = { path = "/mnt/Dev/Github/libipld/core", default-features = false, features = ["serde-codec"] }
 linked-data = { path = "../linked-data", default-features = false, features = []  }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = ["std"] }

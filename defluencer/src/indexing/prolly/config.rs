@@ -6,8 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use ipfs_api::responses::Codec;
 
+use libipld_core::ipld::Ipld;
+
+use super::tree::Key;
+
 pub trait ChunkingStrategy {
-    fn boundary(&self, input: &[u8]) -> bool;
+    fn boundary(&self, input: impl Key) -> bool;
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -23,7 +27,7 @@ impl Default for Strategies {
 }
 
 impl ChunkingStrategy for Strategies {
-    fn boundary(&self, input: &[u8]) -> bool {
+    fn boundary(&self, input: impl Key) -> bool {
         match self {
             Strategies::Threshold(strat) => strat.boundary(input),
         }
@@ -40,8 +44,18 @@ impl Default for HashThreshold {
 }
 
 impl ChunkingStrategy for HashThreshold {
-    fn boundary(&self, input: &[u8]) -> bool {
-        let hash = self.1.digest(input);
+    fn boundary(&self, input: impl Key) -> bool {
+        //TODO
+        let ipld: Ipld = input.into();
+
+        let hash = match ipld {
+            Ipld::Bool(bool) => self.1.digest(&[(bool as u8)]),
+            Ipld::Integer(int) => self.1.digest(&int.to_ne_bytes()),
+            Ipld::String(string) => self.1.digest(string.as_bytes()),
+            Ipld::Bytes(bytes) => self.1.digest(&bytes),
+            Ipld::Link(cid) => *cid.hash(),
+            _ => panic!("Keys cannot be this Ipld variant"),
+        };
 
         let zero_count: u32 = hash
             .digest()

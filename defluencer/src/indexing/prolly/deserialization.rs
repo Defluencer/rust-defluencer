@@ -9,57 +9,13 @@ use super::tree::{Branch, Key, Leaf, TreeNode, Value};
 use libipld_core::ipld::Ipld;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "Ipld", into = "Ipld")]
+#[serde(bound = "K: Key, V: Value", try_from = "Ipld", into = "Ipld")]
 pub enum TreeNodes<K, V> {
-    #[serde(bound = "K: Key")]
     Branch(TreeNode<K, Branch>),
-    #[serde(bound = "V: Value")]
     Leaf(TreeNode<K, Leaf<V>>),
 }
 
-//TODO add meaningful errors
-
-/* impl<K: Key, V: Value> Serialize for TreeNodes<K, V> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            TreeNodes::Branch(branch_node) => {
-                let length = 1 + branch_node.keys.len() + branch_node.values.links.len();
-                let mut seq = serializer.serialize_seq(Some(length))?;
-
-                seq.serialize_element(&false)?;
-
-                for key in branch_node.keys.iter() {
-                    seq.serialize_element(key)?;
-                }
-
-                for link in branch_node.values.links.iter() {
-                    seq.serialize_element(&link)?;
-                }
-
-                seq.end()
-            }
-            TreeNodes::Leaf(leaf_node) => {
-                let length = 1 + leaf_node.keys.len() + leaf_node.values.elements.len();
-                let mut seq = serializer.serialize_seq(Some(length))?;
-
-                seq.serialize_element(&true)?;
-
-                for key in leaf_node.keys.iter() {
-                    seq.serialize_element(key)?;
-                }
-
-                for element in leaf_node.values.elements.iter() {
-                    seq.serialize_element(element)?;
-                }
-
-                seq.end()
-            }
-        }
-    }
-} */
+// Is there a way to not use Ipld enum as intermediate representation???
 
 impl<K: Key, V: Value> From<TreeNodes<K, V>> for Ipld {
     fn from(node: TreeNodes<K, V>) -> Self {
@@ -103,6 +59,8 @@ impl<K: Key, V: Value> From<TreeNodes<K, V>> for Ipld {
         }
     }
 }
+
+//TODO add meaningful errors
 
 impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
     type Error = Error;
@@ -168,46 +126,47 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
 
 #[cfg(test)]
 mod tests {
+    use cid::Cid;
+
     use super::*;
 
-    /* #[test]
+    #[test]
     fn serde_roundtrip() {
+        let key_one = vec![255u8, 0u8];
+        let key_two = vec![255u8, 1u8];
+
+        let value_one = String::from("This is value number one");
+        let value_two = String::from("This is value number two");
+
+        let link_one =
+            Cid::try_from("bafkreifdpvsjgvfqtm6ko6hzppibabrrke3peky3pfgjdpje25ub64atqa").unwrap();
+        let link_two =
+            Cid::try_from("bafkreic3bbguse6e5zziexunbvagwlt6zkmrjhy5nehowroelzhisff5ua").unwrap();
+
         let leaf_node = TreeNode {
-            keys: vec![
-                vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0],
-                vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1],
-            ],
+            keys: vec![key_one.clone(), key_two.clone()],
             values: Leaf {
-                elements: vec![
-                    vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0],
-                    vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1],
-                ],
+                elements: vec![value_one.clone(), value_two.clone()],
             },
         };
+        let leaf_node = TreeNodes::Leaf(leaf_node);
+        let encoded_leaf = serde_ipld_dagcbor::to_vec(&leaf_node).unwrap();
+        let decoded_leaf: TreeNodes<Vec<u8>, String> =
+            serde_ipld_dagcbor::from_slice(&encoded_leaf).unwrap();
 
-        let treenum = TreeNodes::Leaf(leaf_node);
+        assert_eq!(leaf_node, decoded_leaf);
 
-        let encoded = serde_ipld_dagcbor::to_vec(&treenum).unwrap();
-        println!("Encoded: {:?}", encoded);
+        let branch_node = TreeNode {
+            keys: vec![key_one, key_two],
+            values: Branch {
+                links: vec![link_one, link_two],
+            },
+        };
+        let branch_node = TreeNodes::Branch(branch_node);
+        let encoded_branch = serde_ipld_dagcbor::to_vec(&branch_node).unwrap();
+        let decoded_branch: TreeNodes<Vec<u8>, String> =
+            serde_ipld_dagcbor::from_slice(&encoded_branch).unwrap();
 
-        let leaf_node_eq = Ipld::List(vec![
-            Ipld::Bool(true),
-            Ipld::Bytes(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]),
-            Ipld::Bytes(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1]),
-            Ipld::Bytes(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]),
-            Ipld::Bytes(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1]),
-        ]);
-
-        let encoded_eq = serde_ipld_dagcbor::to_vec(&leaf_node_eq).unwrap();
-        println!("Encoded EQ: {:?}", encoded_eq);
-
-        assert_eq!(encoded, encoded_eq);
-
-        let decoded: TreeNodes<Vec<u8>, Vec<u8>> =
-            serde_ipld_dagcbor::from_slice(&encoded).unwrap();
-
-        println!("Decoded: {:?}", decoded);
-
-        assert_eq!(treenum, decoded)
-    } */
+        assert_eq!(branch_node, decoded_branch);
+    }
 }
