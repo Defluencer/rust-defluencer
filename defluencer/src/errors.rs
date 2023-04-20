@@ -1,9 +1,17 @@
+use std::collections::TryReserveError;
+
 use thiserror::Error;
 
 use crate::indexing::hamt;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Encodde: {0}")]
+    Encode(#[from] serde_ipld_dagcbor::EncodeError<TryReserveError>),
+
+    #[error("Decodde: {0}")]
+    Decode(#[from] serde_ipld_dagcbor::DecodeError<TryReserveError>),
+
     #[cfg(target_arch = "wasm32")]
     #[error("JS: {0}")]
     JsError(js_sys::JsString),

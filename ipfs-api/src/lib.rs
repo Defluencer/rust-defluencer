@@ -247,6 +247,8 @@ impl IpfsService {
     where
         T: ?Sized + Serialize,
     {
+        //TODO add hash and input codec options.
+
         let data = serde_json::to_vec(node)?;
         let part = Part::bytes(data);
         let form = Form::new().part("object data", part);

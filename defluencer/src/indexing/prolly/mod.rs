@@ -21,7 +21,7 @@ use self::tree::{Key, Value};
 pub struct ProllyTree {
     config: Config,
 
-    ipfs: IpfsService,
+    ipfs: IpfsService, // TODO ipfs should be configured properly.
 
     root: Cid,
 }
@@ -72,7 +72,7 @@ impl ProllyTree {
         let root = tree::batch_insert(
             self.ipfs.clone(),
             self.root,
-            self.config.chunking_strategy,
+            self.config.clone(),
             iter::once((key, value)),
         )
         .await?;
@@ -89,7 +89,7 @@ impl ProllyTree {
         let root = tree::batch_insert(
             self.ipfs.clone(),
             self.root,
-            self.config.chunking_strategy,
+            self.config.clone(),
             key_values,
         )
         .await?;

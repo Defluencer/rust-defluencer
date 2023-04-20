@@ -15,14 +15,16 @@ use libipld_core::ipld::Ipld;
 
 use num::FromPrimitive;
 
+//TODO Is there a way to not use Ipld enum as intermediate representation???
+//TODO add meaningful errors
+//TODO check if nodes have more data then the spec???
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(bound = "K: Key, V: Value", try_from = "Ipld", into = "Ipld")]
 pub enum TreeNodes<K, V> {
     Branch(TreeNode<K, Branch>),
     Leaf(TreeNode<K, Leaf<V>>),
 }
-
-// Is there a way to not use Ipld enum as intermediate representation???
 
 impl<K: Key, V: Value> From<TreeNodes<K, V>> for Ipld {
     fn from(node: TreeNodes<K, V>) -> Self {
@@ -67,9 +69,6 @@ impl<K: Key, V: Value> From<TreeNodes<K, V>> for Ipld {
     }
 }
 
-//TODO add meaningful errors
-//TODO check if nodes have more data then the spec???
-
 impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
     type Error = Error;
 
@@ -78,27 +77,30 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
             return Err(Error::NotFound);
         };
 
-        let Ipld::List(values) =  list.remove(2) else {
+        let Some(Ipld::List(values)) =  list.pop() else {
             return Err(Error::NotFound);
         };
 
-        let Ipld::List(keys) =  list.remove(1) else {
+        let Some(Ipld::List(keys)) =  list.pop() else {
             return Err(Error::NotFound);
         };
 
-        let Ipld::Bool(is_leaf) =  list.remove(0) else {
+        let Some(Ipld::Bool(is_leaf)) =  list.pop() else {
              return Err(Error::NotFound);
         };
 
-        let mut new_keys = Vec::with_capacity(keys.len());
-        for ipld in keys {
-            let Ok(key) = ipld.try_into() else {
+        let keys = {
+            let mut new_keys = Vec::with_capacity(keys.len());
+            for ipld in keys {
+                let Ok(key) = ipld.try_into() else {
                 return Err(Error::NotFound);
             };
 
-            new_keys.push(key);
-        }
-        let keys = new_keys;
+                new_keys.push(key);
+            }
+
+            new_keys
+        };
 
         let tree = if is_leaf {
             let mut elements = Vec::with_capacity(values.len());
@@ -173,7 +175,7 @@ impl TryFrom<Ipld> for Config {
 
                     *threshold = HashThreshold {
                         chunking_factor,
-                        hash_function,
+                        multihash_code: hash_function,
                     };
                 }
             }
@@ -182,11 +184,17 @@ impl TryFrom<Ipld> for Config {
         };
 
         let hash_length = {
-            let Some(Ipld::Integer(hash_length)) =  list.pop() else {
+            let Some(ipld) =  list.pop() else {
                 return Err(Error::NotFound);
             };
 
-            hash_length as usize
+            let hash_length = match ipld {
+                Ipld::Null => None,
+                Ipld::Integer(int) => Some(int as usize),
+                _ => return Err(Error::NotFound),
+            };
+
+            hash_length
         };
 
         let hash_function = {
@@ -242,7 +250,7 @@ impl TryFrom<Ipld> for Config {
             max_size,
             cid_version,
             codec,
-            hash_function,
+            multihash_code: hash_function,
             hash_length,
             chunking_strategy,
         };
@@ -258,7 +266,7 @@ impl From<Config> for Ipld {
             max_size,
             cid_version,
             codec,
-            hash_function,
+            multihash_code: hash_function,
             hash_length,
             chunking_strategy,
         } = config;
@@ -268,20 +276,23 @@ impl From<Config> for Ipld {
         let cid_version = Ipld::Integer(cid_version as i128);
         let codec = Ipld::Integer(codec as i128);
         let hash_function = Ipld::Integer(u64::from(hash_function) as i128);
-        let hash_length = Ipld::Integer(hash_length as i128);
+        let hash_length = match hash_length {
+            Some(int) => Ipld::Integer(int as i128),
+            None => Ipld::Null,
+        };
 
         let chunking_strategy = match chunking_strategy {
-            Strategies::Threshold(threshold) => {
+            Strategies::Threshold(ref threshold) => {
                 let HashThreshold {
                     chunking_factor,
-                    hash_function,
+                    multihash_code: hash_function,
                 } = threshold;
 
                 let map = BTreeMap::from([(
                     chunking_strategy.to_string(),
                     Ipld::List(vec![
-                        Ipld::Integer(chunking_factor as i128),
-                        Ipld::Integer(u64::from(hash_function) as i128),
+                        Ipld::Integer(*chunking_factor as i128),
+                        Ipld::Integer(u64::from(*hash_function) as i128),
                     ]),
                 )]);
 

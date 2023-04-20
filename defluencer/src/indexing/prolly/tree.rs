@@ -11,10 +11,7 @@ use ipfs_api::{responses::Codec, IpfsService};
 
 use crate::errors::Error;
 
-use super::{
-    config::{ChunkingStrategy, Strategies},
-    deserialization::TreeNodes,
-};
+use super::{deserialization::TreeNodes, Config};
 
 use cid::Cid;
 
@@ -22,17 +19,17 @@ use libipld_core::ipld::Ipld;
 
 /// Trait for tree keys.
 ///
-/// Bounds are, ordered by their byte representation and compatible with Ipld.
+/// Notable bounds are; ordered by their byte representation and compatible with Ipld.
 ///
 /// As for ```str``` and ```String``` read this std [note](https://doc.rust-lang.org/std/cmp/trait.Ord.html#impl-Ord-for-str)
-pub trait Key: Default + Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
-impl<T: Default + Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Key for T {}
+pub trait Key: Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
+impl<T: Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Key for T {}
 
 /// Trait for tree values.
 ///
-/// Only bound is compatiblility with Ipld.
-pub trait Value: Default + Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
-impl<T: Default + Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Value for T {}
+/// Only notable bound is compatibility with Ipld.
+pub trait Value: Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
+impl<T: Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Value for T {}
 
 /// Type state for tree leaf nodes
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -50,7 +47,7 @@ pub trait TreeNodeType {}
 impl<V> TreeNodeType for Leaf<V> {}
 impl TreeNodeType for Branch {}
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeNode<K, T: TreeNodeType> {
     pub keys: Vec<K>,
     pub values: T,
@@ -73,6 +70,17 @@ impl<K: Key, T: TreeNodeType> TreeNode<K, T> {
                     Err(_) => None,
                 }
             })
+    }
+}
+
+impl<K: Key> Default for TreeNode<K, Branch> {
+    fn default() -> Self {
+        Self {
+            keys: Default::default(),
+            values: Branch {
+                links: Default::default(),
+            },
+        }
     }
 }
 
@@ -99,7 +107,7 @@ impl<K: Key> TreeNode<K, Branch> {
     }
 
     /// Split the batch into smaller batch with associated node links
-    /// while removing batch key not present in node.
+    /// while ignoring batch key not present in node.
     fn search_batch_split<'a>(
         &'a self,
         batch: impl IntoIterator<Item = K> + 'a,
@@ -198,41 +206,81 @@ impl<K: Key> TreeNode<K, Branch> {
             )
     }
 
-    /// Run the chunking algorithm on this node. Return splitted nodes.
-    fn split_with(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
-        //TODO Find the boundary indexes then split the nodes, should be simpler.
+    /// Run the chunking algorithm on this node. Return splitted nodes in order if any.
+    fn split_with<V: Value>(self, mut config: Config) -> Vec<Self> {
+        let (bytes, mut og) = {
+            let tree_nodes = TreeNodes::<K, V>::Branch(self);
 
-        let mut result = Vec::new();
+            let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
 
-        let mut node = Option::<Self>::None;
-        for i in 0..self.keys.len() {
-            let key = self.keys.remove(i);
+            let TreeNodes::<K, V>::Branch(node) = tree_nodes else {
+                unreachable!();
+            };
 
-            let is_boundary = chunking.boundary(key.clone());
+            (bytes, node)
+        };
 
-            if is_boundary {
-                if let Some(node) = node.take() {
-                    result.push(node);
+        if bytes.len() < config.min_size {
+            return vec![og];
+        }
+
+        let mut nodes = Vec::new();
+
+        for i in (1..og.keys.len()).rev() {
+            let key = &og.keys[i];
+            let value = &og.values.links[i];
+
+            if config.boundary(key.clone(), value.clone()) {
+                //TODO check min size before splitting
+
+                let keys = og.keys.split_off(i);
+                let links = og.values.links.split_off(i);
+
+                let node = TreeNode {
+                    keys,
+                    values: Branch { links },
+                };
+
+                let (node_bytes, mut node) = {
+                    let tree_nodes = TreeNodes::<K, V>::Branch(node);
+                    let bytes =
+                        serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
+                    let TreeNodes::<K, V>::Branch(node) = tree_nodes else {
+                        unreachable!();
+                    };
+                    (bytes, node)
+                };
+
+                if node_bytes.len() > config.max_size {
+                    // Get % of bytes over the max then remove same % of KVs
+                    let percent = ((node_bytes.len() - config.max_size) as f64)
+                        / (config.max_size as f64)
+                        * 100.0;
+                    let count = ((node.keys.len() as f64) * percent) as usize;
+                    let idx = node.keys.len() - count.max(1);
+
+                    let keys = node.keys.split_off(idx);
+                    let links = node.values.links.split_off(idx);
+
+                    let new_node = TreeNode {
+                        keys,
+                        values: Branch { links },
+                    };
+
+                    nodes.push(new_node);
                 }
 
-                let new_node = Self::default();
-
-                node = Some(new_node);
-            }
-
-            // Guaranteed node because first key is always a boundary
-            node.as_mut().unwrap().keys.push(key);
-
-            let value = self.values.links[i];
-            node.as_mut().unwrap().values.links.push(value);
-
-            if i == self.keys.len() - 1 {
-                let node = node.take().unwrap();
-                result.push(node);
+                nodes.push(node);
             }
         }
 
-        result
+        if !og.keys.is_empty() {
+            nodes.push(og);
+        }
+
+        nodes.reverse();
+
+        nodes
     }
 
     /// Merge all node keys and links with other
@@ -330,6 +378,17 @@ impl<K: Key> Iterator for BranchIntoIterator<K> {
     }
 }
 
+impl<K: Key, V: Value> Default for TreeNode<K, Leaf<V>> {
+    fn default() -> Self {
+        Self {
+            keys: Default::default(),
+            values: Leaf {
+                elements: Default::default(),
+            },
+        }
+    }
+}
+
 impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     /// Insert sorted keys and values into this node.
     ///
@@ -352,41 +411,79 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
         }
     }
 
-    /// Run the chunking algorithm on this node. Return splitted nodes if any.
-    fn split_with(mut self, chunking: impl ChunkingStrategy) -> Vec<Self> {
-        //TODO Find the boundary indexes then split the nodes, should be simpler.
+    /// Run the chunking algorithm on this node. Return splitted nodes in order if any.
+    fn split_with(self, mut config: Config) -> Vec<Self> {
+        let (bytes, mut og) = {
+            let tree_nodes = TreeNodes::<K, V>::Leaf(self);
 
-        let mut result = Vec::new();
+            let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
 
-        let mut node = Option::<Self>::None;
-        for i in 0..self.keys.len() {
-            let key = self.keys.remove(i);
+            let TreeNodes::<K, V>::Leaf(node) = tree_nodes else {
+                unreachable!();
+            };
 
-            let is_boundary = chunking.boundary(key.clone());
+            (bytes, node)
+        };
 
-            if is_boundary {
-                if let Some(node) = node.take() {
-                    result.push(node);
+        if bytes.len() < config.min_size {
+            return vec![og];
+        }
+
+        let mut nodes = Vec::new();
+
+        for i in (1..og.keys.len()).rev() {
+            let key = &og.keys[i];
+            let value = &og.values.elements[i];
+
+            if config.boundary(key.clone(), value.clone()) {
+                let keys = og.keys.split_off(i);
+                let elements = og.values.elements.split_off(i);
+
+                let node = TreeNode {
+                    keys,
+                    values: Leaf { elements },
+                };
+
+                let (node_bytes, mut node) = {
+                    let tree_nodes = TreeNodes::<K, V>::Leaf(node);
+                    let bytes =
+                        serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
+                    let TreeNodes::<K, V>::Leaf(node) = tree_nodes else {
+                        unreachable!();
+                    };
+                    (bytes, node)
+                };
+
+                if node_bytes.len() > config.max_size {
+                    // Get % of bytes over the max then remove same % of KVs
+                    let percent = ((node_bytes.len() - config.max_size) as f64)
+                        / (config.max_size as f64)
+                        * 100.0;
+                    let count = ((node.keys.len() as f64) * percent) as usize;
+                    let idx = node.keys.len() - count.max(1);
+
+                    let keys = node.keys.split_off(idx);
+                    let elements = node.values.elements.split_off(idx);
+
+                    let new_node = TreeNode {
+                        keys,
+                        values: Leaf { elements },
+                    };
+
+                    nodes.push(new_node);
                 }
 
-                let new_node = Self::default();
-
-                node = Some(new_node);
-            }
-
-            // Guaranteed node because first key is always a boundary
-            node.as_mut().unwrap().keys.push(key);
-
-            let value = self.values.elements.remove(i);
-            node.as_mut().unwrap().values.elements.push(value);
-
-            if i == self.keys.len() - 1 {
-                let node = node.take().unwrap();
-                result.push(node);
+                nodes.push(node);
             }
         }
 
-        result
+        if !og.keys.is_empty() {
+            nodes.push(og);
+        }
+
+        nodes.reverse();
+
+        nodes
     }
 
     /// Merge all node elements with other
@@ -495,13 +592,13 @@ fn search_leaf<K: Key, V: Value>(
 pub async fn batch_insert<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
-    strategy: Strategies,
+    config: Config,
     key_values: impl IntoIterator<Item = (K, V)>,
 ) -> Result<Cid, Error> {
     let mut batch = key_values.into_iter().collect::<Vec<_>>();
     batch.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
-    let key_links = execute_batch_insert(ipfs.clone(), root, strategy, batch).await?;
+    let key_links = execute_batch_insert(ipfs.clone(), root, config, batch).await?;
 
     if key_links.len() > 1 {
         let mut node = TreeNode::<K, Branch>::default();
@@ -510,7 +607,7 @@ pub async fn batch_insert<K: Key, V: Value>(
 
         let node = TreeNodes::<K, V>::Branch(node);
 
-        let cid = ipfs.dag_put(&node, Codec::DagCbor).await?;
+        let cid = ipfs.dag_put(&node, Codec::DagCbor).await?; // TODO use tree encoding config
 
         return Ok(cid);
     }
@@ -522,7 +619,7 @@ pub async fn batch_insert<K: Key, V: Value>(
 async fn execute_batch_insert<K: Key, V: Value>(
     ipfs: IpfsService,
     link: Cid,
-    strategy: Strategies,
+    config: Config,
     batch: Vec<(K, V)>,
 ) -> Result<Vec<(K, Cid)>, Error> {
     let node = ipfs
@@ -534,7 +631,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
             leaf_node.insert(batch.into_iter());
 
             leaf_node
-                .split_with(strategy)
+                .split_with(config.clone())
                 .into_iter()
                 .map(|leaf| TreeNodes::Leaf(leaf))
                 .collect()
@@ -542,7 +639,9 @@ async fn execute_batch_insert<K: Key, V: Value>(
         TreeNodes::Branch(mut branch_node) => {
             let futures: Vec<_> = branch_node
                 .insert_batch_split(batch)
-                .map(|(batch, link)| execute_batch_insert(ipfs.clone(), link, strategy, batch))
+                .map(|(batch, link)| {
+                    execute_batch_insert(ipfs.clone(), link, config.clone(), batch)
+                })
                 .collect();
 
             let key_links = try_join_all(futures).await?;
@@ -550,7 +649,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
             branch_node.insert(key_links.into_iter().flatten());
 
             branch_node
-                .split_with(strategy)
+                .split_with::<V>(config)
                 .into_iter()
                 .map(|branch| TreeNodes::Branch(branch))
                 .collect()
@@ -570,7 +669,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
         .map(|node| {
             let ipfs = ipfs.clone();
 
-            async move { ipfs.dag_put(&node, Codec::DagCbor).await }
+            async move { ipfs.dag_put(&node, Codec::DagCbor).await } // TODO use tree encoding config
         })
         .collect();
 
@@ -699,7 +798,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
         }
     }
 
-    let cid = ipfs.dag_put(&node, Codec::DagCbor).await?;
+    let cid = ipfs.dag_put(&node, Codec::DagCbor).await?; // TODO use tree encoding config
 
     let key = match node {
         TreeNodes::Branch(ref mut node) => node.keys.swap_remove(0),

@@ -9,15 +9,12 @@ use ipfs_api::responses::Codec;
 use libipld_core::ipld::Ipld;
 use strum::{Display, EnumString};
 
-use super::tree::Key;
+use super::tree::{Key, Value};
 
-//TODO Find better abstraction for chunking strategy. Kinda hard to abstract when there's only one example!
-
-pub trait ChunkingStrategy {
-    fn boundary(&self, input: impl Key) -> bool;
-}
-
-#[derive(Display, Debug, Clone, Copy, EnumString)]
+/// Chunking is the strategy of determining chunk boundaries:
+/// Given a list of key-value pairs, it 'decides' which are still inside node A and
+/// which already go to the next node B on the same level.
+#[derive(Display, Debug, Clone, EnumString, PartialEq, Eq)]
 pub enum Strategies {
     #[strum(serialize = "hashThreshold")]
     Threshold(HashThreshold),
@@ -29,65 +26,45 @@ impl Default for Strategies {
     }
 }
 
-impl ChunkingStrategy for Strategies {
-    fn boundary(&self, input: impl Key) -> bool {
-        match self {
-            Strategies::Threshold(strat) => strat.boundary(input),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+/// Chunking strategy that count 0 bits in the last 4 bytes of a key's hash then
+/// compare it with the chunking factor.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HashThreshold {
     pub chunking_factor: usize,
-    pub hash_function: Code,
+    pub multihash_code: Code,
 }
 
 impl Default for HashThreshold {
     fn default() -> Self {
         Self {
             chunking_factor: 16,
-            hash_function: Code::Sha2_256,
+            multihash_code: Code::Sha2_256,
         }
     }
 }
 
-impl ChunkingStrategy for HashThreshold {
-    fn boundary(&self, input: impl Key) -> bool {
-        let ipld: Ipld = input.into();
-
-        let hash = match ipld {
-            Ipld::Bool(bool) => self.hash_function.digest(&[(bool as u8)]),
-            Ipld::Integer(int) => self.hash_function.digest(&int.to_ne_bytes()),
-            Ipld::String(string) => self.hash_function.digest(string.as_bytes()),
-            Ipld::Bytes(bytes) => self.hash_function.digest(&bytes),
-            Ipld::Link(cid) => *cid.hash(),
-            _ => panic!("Keys cannot be this Ipld variant"),
-        };
-
-        let zero_count: u32 = hash
-            .digest()
-            .into_iter()
-            .rev()
-            .take(4)
-            .map(|byte| byte.count_zeros())
-            .sum();
-
-        let threshold = (u32::MAX / self.chunking_factor as u32).count_zeros();
-
-        zero_count > threshold
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "Ipld", into = "Ipld")]
 pub struct Config {
+    /// Minimum chunk size in bytes.
     pub min_size: usize,
+
+    /// Maximum chunk size in bytes.
     pub max_size: usize,
+
+    /// Content identifier version.
     pub cid_version: usize,
+
+    /// IPLD codec.
     pub codec: Codec,
-    pub hash_function: Code,
-    pub hash_length: usize,
+
+    /// Content identifiers hash function.
+    pub multihash_code: Code,
+
+    /// Content identifiers hash length in bytes.
+    pub hash_length: Option<usize>,
+
+    /// Strategy used to shape the tree.
     pub chunking_strategy: Strategies,
 }
 
@@ -98,14 +75,57 @@ impl Default for Config {
             max_size: 1048576,
             cid_version: 1,
             codec: Codec::DagCbor,
-            hash_function: Code::Sha2_256,
-            hash_length: 0,
+            multihash_code: Code::Sha2_256,
+            hash_length: None,
             chunking_strategy: Strategies::default(),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Config {
+    pub fn boundary(&mut self, key: impl Key, value: impl Value) -> bool {
+        //TODO use reference to keys and values
+        match &self.chunking_strategy {
+            Strategies::Threshold(threshold) => {
+                let mut bytes = match self.codec {
+                    Codec::DagCbor => {
+                        serde_ipld_dagcbor::to_vec(&key.into()).expect("Key Serialization")
+                    }
+                    Codec::DagJson => serde_json::to_vec(&key.into()).expect("Key Serialization"),
+                    Codec::DagJose => unimplemented!(),
+                };
+
+                let mut value_bytes = match self.codec {
+                    Codec::DagCbor => {
+                        serde_ipld_dagcbor::to_vec(&value.into()).expect("Value Serialization")
+                    }
+                    Codec::DagJson => {
+                        serde_json::to_vec(&value.into()).expect("Value Serialization")
+                    }
+                    Codec::DagJose => unimplemented!(),
+                };
+
+                bytes.append(&mut value_bytes);
+
+                let hash = threshold.multihash_code.digest(&bytes);
+
+                let zero_count: u32 = hash
+                    .digest()
+                    .into_iter()
+                    .rev()
+                    .take(4)
+                    .map(|byte| byte.count_zeros())
+                    .sum();
+
+                let threshold = (u32::MAX / threshold.chunking_factor as u32).count_zeros();
+
+                zero_count > threshold
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "Ipld", into = "Ipld")]
 pub struct Tree {
     pub config: Cid,
