@@ -1,10 +1,11 @@
 mod config;
 mod deserialization;
+mod iterators;
 mod tree;
 
-pub use config::{Config, HashThreshold, Strategies};
-
 use std::iter;
+
+pub use config::{Config, HashThreshold, Strategies};
 
 use cid::Cid;
 use futures::{Stream, StreamExt};
@@ -100,8 +101,13 @@ impl ProllyTree {
     }
 
     pub async fn remove<K: Key, V: Value>(&mut self, key: K) -> Result<(), Error> {
-        let root =
-            tree::batch_remove::<K, V>(self.ipfs.clone(), self.root, iter::once(key)).await?;
+        let root = tree::batch_remove::<K, V>(
+            self.ipfs.clone(),
+            self.root,
+            self.config.clone(),
+            iter::once(key),
+        )
+        .await?;
 
         self.root = root;
 
@@ -112,7 +118,9 @@ impl ProllyTree {
         &mut self,
         keys: impl IntoIterator<Item = K>,
     ) -> Result<(), Error> {
-        let root = tree::batch_remove::<K, V>(self.ipfs.clone(), self.root, keys).await?;
+        let root =
+            tree::batch_remove::<K, V>(self.ipfs.clone(), self.root, self.config.clone(), keys)
+                .await?;
 
         self.root = root;
 

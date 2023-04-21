@@ -92,7 +92,7 @@ impl Config {
                         serde_ipld_dagcbor::to_vec(&key.into()).expect("Key Serialization")
                     }
                     Codec::DagJson => serde_json::to_vec(&key.into()).expect("Key Serialization"),
-                    Codec::DagJose => unimplemented!(),
+                    _ => unimplemented!(),
                 };
 
                 let mut value_bytes = match self.codec {
@@ -102,7 +102,7 @@ impl Config {
                     Codec::DagJson => {
                         serde_json::to_vec(&value.into()).expect("Value Serialization")
                     }
-                    Codec::DagJose => unimplemented!(),
+                    _ => unimplemented!(),
                 };
 
                 bytes.append(&mut value_bytes);

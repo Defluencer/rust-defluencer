@@ -11,7 +11,11 @@ use ipfs_api::{responses::Codec, IpfsService};
 
 use crate::errors::Error;
 
-use super::{deserialization::TreeNodes, Config};
+use super::{
+    deserialization::TreeNodes,
+    iterators::{BranchIntoIterator, BranchIterator, Insert, Search},
+    Config,
+};
 
 use cid::Cid;
 
@@ -53,26 +57,6 @@ pub struct TreeNode<K, T: TreeNodeType> {
     pub values: T,
 }
 
-impl<K: Key, T: TreeNodeType> TreeNode<K, T> {
-    /// Find the index in node for each key in the batch
-    fn search<'a>(
-        &'a self,
-        batch: impl IntoIterator<Item = K> + 'a,
-    ) -> impl Iterator<Item = usize> + 'a {
-        batch
-            .into_iter()
-            .scan((self, 0usize), |(node, start), key| {
-                match node.keys[*start..].binary_search(&key) {
-                    Ok(idx) => {
-                        *start = idx;
-                        return Some(idx);
-                    }
-                    Err(_) => None,
-                }
-            })
-    }
-}
-
 impl<K: Key> Default for TreeNode<K, Branch> {
     fn default() -> Self {
         Self {
@@ -107,116 +91,37 @@ impl<K: Key> TreeNode<K, Branch> {
     }
 
     /// Split the batch into smaller batch with associated node links
-    /// while ignoring batch key not present in node.
     fn search_batch_split<'a>(
         &'a self,
         batch: impl IntoIterator<Item = K> + 'a,
-    ) -> impl Iterator<Item = (Vec<K>, Cid)> + 'a {
-        //TODO refactor into one scan call
-        batch
-            .into_iter()
-            .scan((self, 0usize), |(node, start), key| {
-                match node.keys[*start..].binary_search(&key) {
-                    Ok(idx) => {
-                        let link = node.values.links[idx];
-
-                        *start = idx;
-                        return Some((key, link));
-                    }
-                    Err(_) => return None,
-                }
-            })
-            .scan(
-                (Option::<Vec<K>>::None, Option::<Cid>::None),
-                |(batch, batch_link), (key, link)| {
-                    if batch.is_none() || batch_link.is_none() {
-                        *batch = Some(vec![key]);
-                        *batch_link = Some(link);
-
-                        return None;
-                    }
-
-                    if *batch_link.as_ref().unwrap() == link {
-                        batch.as_mut().unwrap().push(key);
-
-                        return None;
-                    }
-
-                    let batch = batch.take().unwrap();
-                    let batch_link = batch_link.take().unwrap();
-
-                    return Some((batch, batch_link));
-                },
-            )
+    ) -> impl Iterator<Item = (Cid, Vec<K>)> + 'a {
+        Search {
+            node: self,
+            batch: batch.into_iter().collect(),
+            search_idx: 0,
+        }
     }
 
     /// Split the batch into smaller batch with associated node links.
     fn insert_batch_split<'a, V: Value>(
         &'a self,
         batch: impl IntoIterator<Item = (K, V)> + 'a,
-    ) -> impl Iterator<Item = (Vec<(K, V)>, Cid)> + 'a {
-        //TODO refactor into one scan call???
-        batch
-            .into_iter()
-            .scan((self, 0usize), |(node, start), (key, value)| {
-                match node.keys[*start..].binary_search(&key) {
-                    Ok(idx) => {
-                        let link = node.values.links[idx];
-
-                        *start = idx;
-                        return Some(((key, value), link));
-                    }
-                    Err(idx) => {
-                        if idx == 0 {
-                            return node.values.links.first().map(|&item| ((key, value), item));
-                        }
-
-                        if idx == node.keys.len() {
-                            return node.values.links.last().map(|&item| ((key, value), item));
-                        }
-
-                        let link = node.values.links[idx - 1];
-
-                        *start = idx;
-                        return Some(((key, value), link));
-                    }
-                }
-            })
-            .scan(
-                (Option::<Vec<(K, V)>>::None, Option::<Cid>::None),
-                |(batch, batch_link), ((key, value), link)| {
-                    if batch.is_none() || batch_link.is_none() {
-                        *batch = Some(vec![(key, value)]);
-                        *batch_link = Some(link);
-
-                        return None;
-                    }
-
-                    if *batch_link.as_ref().unwrap() == link {
-                        batch.as_mut().unwrap().push((key, value));
-
-                        return None;
-                    }
-
-                    let batch = batch.take().unwrap();
-                    let batch_link = batch_link.take().unwrap();
-
-                    return Some((batch, batch_link));
-                },
-            )
+    ) -> impl Iterator<Item = (Cid, Vec<(K, V)>)> + 'a {
+        Insert {
+            node: self,
+            batch: batch.into_iter().collect(),
+            search_idx: 0,
+        }
     }
 
     /// Run the chunking algorithm on this node. Return splitted nodes in order if any.
     fn split_with<V: Value>(self, mut config: Config) -> Vec<Self> {
         let (bytes, mut og) = {
             let tree_nodes = TreeNodes::<K, V>::Branch(self);
-
             let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
-
             let TreeNodes::<K, V>::Branch(node) = tree_nodes else {
                 unreachable!();
             };
-
             (bytes, node)
         };
 
@@ -288,7 +193,7 @@ impl<K: Key> TreeNode<K, Branch> {
         self.insert(other.keys.into_iter().zip(other.values.links.into_iter()))
     }
 
-    /// Remove key and links that match batch keys
+    /* /// Remove key and links that match batch keys
     ///
     /// Idempotent.
     fn remove_batch(&mut self, batch: impl IntoIterator<Item = K>) {
@@ -301,7 +206,7 @@ impl<K: Key> TreeNode<K, Branch> {
                 start = idx;
             }
         }
-    }
+    } */
 
     pub fn iter(&self) -> BranchIterator<K> {
         BranchIterator {
@@ -315,66 +220,6 @@ impl<K: Key> TreeNode<K, Branch> {
             node: self,
             index: 0,
         }
-    }
-}
-
-pub struct BranchIterator<'a, K> {
-    node: &'a TreeNode<K, Branch>,
-    index: usize,
-}
-
-impl<'a, K> Iterator for BranchIterator<'a, K> {
-    type Item = ((Bound<&'a K>, Bound<&'a K>), &'a Cid);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.node.keys.len() {
-            return None;
-        }
-
-        let key = &self.node.keys[self.index];
-        let l_bound = Bound::Included(key);
-
-        let h_bound = match self.node.keys.get(self.index + 1) {
-            Some(key) => Bound::Excluded(key),
-            None => Bound::Unbounded,
-        };
-
-        let range = (l_bound, h_bound);
-        let link = &self.node.values.links[self.index];
-
-        self.index += 1;
-
-        Some((range, link))
-    }
-}
-
-pub struct BranchIntoIterator<K> {
-    node: TreeNode<K, Branch>,
-    index: usize,
-}
-
-impl<K: Key> Iterator for BranchIntoIterator<K> {
-    type Item = ((Bound<K>, Bound<K>), Cid);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.node.keys.len() {
-            return None;
-        }
-
-        let key = self.node.keys[self.index].clone();
-        let l_bound = Bound::Included(key);
-
-        let h_bound = match self.node.keys.get(self.index + 1) {
-            Some(key) => Bound::Excluded(key.clone()),
-            None => Bound::Unbounded,
-        };
-
-        let range = (l_bound, h_bound);
-        let link = self.node.values.links[self.index];
-
-        self.index += 1;
-
-        Some((range, link))
     }
 }
 
@@ -412,16 +257,15 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     }
 
     /// Run the chunking algorithm on this node. Return splitted nodes in order if any.
+    ///
+    /// Idempotent
     fn split_with(self, mut config: Config) -> Vec<Self> {
         let (bytes, mut og) = {
             let tree_nodes = TreeNodes::<K, V>::Leaf(self);
-
             let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
-
             let TreeNodes::<K, V>::Leaf(node) = tree_nodes else {
                 unreachable!();
             };
-
             (bytes, node)
         };
 
@@ -455,7 +299,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
                 };
 
                 if node_bytes.len() > config.max_size {
-                    // Get % of bytes over the max then remove same % of KVs
+                    // Get % of bytes over the max then remove same % of KVs minimum of 1
                     let percent = ((node_bytes.len() - config.max_size) as f64)
                         / (config.max_size as f64)
                         * 100.0;
@@ -487,6 +331,8 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     }
 
     /// Merge all node elements with other
+    ///
+    /// Idempotent
     fn merge(&mut self, other: Self) {
         self.insert(
             other
@@ -522,6 +368,18 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     ) -> impl IntoIterator<Item = (K, V)> + Iterator<Item = (K, V)> + DoubleEndedIterator {
         self.keys.into_iter().zip(self.values.elements.into_iter())
     }
+
+    /// Find all the values associated with batch keys.
+    pub fn search<'a>(
+        &'a self,
+        batch: impl IntoIterator<Item = K>,
+    ) -> impl Iterator<Item = (K, V)> + 'a {
+        Search {
+            node: self,
+            batch: batch.into_iter().collect(),
+            search_idx: 0,
+        }
+    }
 }
 
 /// Stream all the KVs that coorespond with the keys in batch.
@@ -553,11 +411,11 @@ fn search_branch<K: Key, V: Value>(
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     let batches = branch
         .search_batch_split(batch.into_iter())
-        .map(|(batch, link)| Ok((ipfs.clone(), batch, link)))
+        .map(|(link, batch)| Ok((ipfs.clone(), link, batch)))
         .collect::<Vec<_>>();
 
     stream::iter(batches.into_iter())
-        .and_then(|(ipfs, batch, link)| async move {
+        .and_then(|(ipfs, link, batch)| async move {
             match ipfs.dag_get::<&str, TreeNodes<K, V>>(link, None).await {
                 Ok(node) => Ok((ipfs, node, batch)),
                 Err(e) => Err(e),
@@ -574,15 +432,9 @@ fn search_leaf<K: Key, V: Value>(
     leaf: TreeNode<K, Leaf<V>>,
     batch: Vec<K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
-    //TODO is there a way to drop the unwanted KVs instead of cloning?
     let results: Vec<_> = leaf
         .search(batch.into_iter())
-        .map(|index| {
-            Ok((
-                leaf.keys[index].clone(),
-                leaf.values.elements[index].clone(),
-            ))
-        })
+        .map(|item| Ok(item))
         .collect();
 
     stream::iter(results.into_iter())
@@ -639,7 +491,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
         TreeNodes::Branch(mut branch_node) => {
             let futures: Vec<_> = branch_node
                 .insert_batch_split(batch)
-                .map(|(batch, link)| {
+                .map(|(link, batch)| {
                     execute_batch_insert(ipfs.clone(), link, config.clone(), batch)
                 })
                 .collect();
@@ -649,7 +501,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
             branch_node.insert(key_links.into_iter().flatten());
 
             branch_node
-                .split_with::<V>(config)
+                .split_with::<V>(config.clone())
                 .into_iter()
                 .map(|branch| TreeNodes::Branch(branch))
                 .collect()
@@ -669,7 +521,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
         .map(|node| {
             let ipfs = ipfs.clone();
 
-            async move { ipfs.dag_put(&node, Codec::DagCbor).await } // TODO use tree encoding config
+            async move { ipfs.dag_put(&node, config.codec).await }
         })
         .collect();
 
@@ -680,28 +532,42 @@ async fn execute_batch_insert<K: Key, V: Value>(
     return Ok(key_links);
 }
 
-//TODO return the value of the key removed???
+//TODO return the values of the keys removed???
 
 /// Remove all values in the tree matching the keys.
 pub async fn batch_remove<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
+    config: Config,
     keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
     let mut batch = keys.into_iter().collect::<Vec<_>>();
     batch.sort_unstable();
 
-    let (_, link) = execute_batch_remove::<K, V>(ipfs, vec![root], batch).await?;
+    let key_links = execute_batch_remove::<K, V>(ipfs.clone(), vec![root], config, batch).await?;
 
-    Ok(link)
+    if key_links.len() > 1 {
+        let mut node = TreeNode::<K, Branch>::default();
+
+        node.insert(key_links.into_iter());
+
+        let node = TreeNodes::<K, V>::Branch(node);
+
+        let cid = ipfs.dag_put(&node, Codec::DagCbor).await?; // TODO use tree encoding config
+
+        return Ok(cid);
+    }
+
+    Ok(key_links[0].1)
 }
 
 #[async_recursion]
 async fn execute_batch_remove<K: Key, V: Value>(
     ipfs: IpfsService,
     links: Vec<Cid>,
+    config: Config,
     mut batch: Vec<K>,
-) -> Result<(K, Cid), Error> {
+) -> Result<Vec<(K, Cid)>, Error> {
     let futures = links
         .into_iter()
         .map(|link| ipfs.dag_get::<&str, TreeNodes<K, V>>(link, None))
@@ -710,7 +576,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
     let nodes = try_join_all(futures).await?;
 
     // Works only because we know the nodes will be either leafs or branches.
-    let mut node = nodes
+    let node = nodes
         .into_iter()
         .reduce(|acc, x| match (acc, x) {
             (TreeNodes::Branch(mut node), TreeNodes::Branch(other)) => {
@@ -721,15 +587,20 @@ async fn execute_batch_remove<K: Key, V: Value>(
                 node.merge(other);
                 TreeNodes::Leaf(node)
             }
-            _ => unreachable!("The tree should always be symmetrical"),
+            _ => panic!("The tree should always be symmetrical"), //TODO return an error
         })
         .expect("at least one node");
 
-    match node {
-        TreeNodes::Leaf(ref mut node) => {
+    let nodes: Vec<_> = match node {
+        TreeNodes::Leaf(mut node) => {
             node.remove_batch(batch.into_iter());
+
+            node.split_with(config.clone())
+                .into_iter()
+                .map(|leaf| TreeNodes::Leaf(leaf))
+                .collect()
         }
-        TreeNodes::Branch(ref mut node) => {
+        TreeNodes::Branch(mut node) => {
             // Create futures that will merge the nodes at the links.
 
             let mut new_batch = Vec::with_capacity(batch.len());
@@ -784,28 +655,50 @@ async fn execute_batch_remove<K: Key, V: Value>(
                 links.push(link);
 
                 // Recurse
-                let future = execute_batch_remove::<K, V>(ipfs.clone(), links, new_batch);
+                let future =
+                    execute_batch_remove::<K, V>(ipfs.clone(), links, config.clone(), new_batch);
                 futures.push(future);
 
                 // Clear the saved batch keys and links
                 new_batch = Vec::new();
                 links = Vec::new();
+
+                // Continue with next node key.
             }
 
             let key_links = try_join_all(futures).await?;
 
-            node.insert(key_links.into_iter());
+            node.insert(key_links.into_iter().flatten());
+
+            node.split_with::<V>(config)
+                .into_iter()
+                .map(|branch| TreeNodes::Branch(branch))
+                .collect()
         }
-    }
-
-    let cid = ipfs.dag_put(&node, Codec::DagCbor).await?; // TODO use tree encoding config
-
-    let key = match node {
-        TreeNodes::Branch(ref mut node) => node.keys.swap_remove(0),
-        TreeNodes::Leaf(ref mut node) => node.keys.swap_remove(0),
     };
 
-    Ok((key, cid))
+    let keys = nodes
+        .iter()
+        .map(|node| match node {
+            TreeNodes::Branch(node) => node.keys[0].clone(),
+            TreeNodes::Leaf(node) => node.keys[0].clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let futures: Vec<_> = nodes
+        .into_iter()
+        .map(|node| {
+            let ipfs = ipfs.clone();
+
+            async move { ipfs.dag_put(&node, Codec::DagCbor).await } // TODO use tree encoding config
+        })
+        .collect();
+
+    let links = try_join_all(futures).await?;
+
+    let key_links = keys.into_iter().zip(links.into_iter()).collect();
+
+    Ok(key_links)
 }
 
 /// Stream all KVs in the tree in order.
