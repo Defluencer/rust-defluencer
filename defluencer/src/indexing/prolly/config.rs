@@ -7,9 +7,13 @@ use serde::{Deserialize, Serialize};
 use ipfs_api::responses::Codec;
 
 use libipld_core::ipld::Ipld;
+
 use strum::{Display, EnumString};
 
-use super::tree::{Key, Value};
+use super::{
+    errors::Error,
+    tree::{Key, Value},
+};
 
 /// Chunking is the strategy of determining chunk boundaries:
 /// Given a list of key-value pairs, it 'decides' which are still inside node A and
@@ -83,25 +87,18 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn boundary(&mut self, key: impl Key, value: impl Value) -> bool {
-        //TODO use reference to keys and values
+    pub fn boundary(&mut self, key: impl Key, value: impl Value) -> Result<bool, Error> {
         match &self.chunking_strategy {
             Strategies::Threshold(threshold) => {
                 let mut bytes = match self.codec {
-                    Codec::DagCbor => {
-                        serde_ipld_dagcbor::to_vec(&key.into()).expect("Key Serialization")
-                    }
-                    Codec::DagJson => serde_json::to_vec(&key.into()).expect("Key Serialization"),
+                    Codec::DagCbor => serde_ipld_dagcbor::to_vec(&key.into())?,
+                    Codec::DagJson => serde_json::to_vec(&key.into())?,
                     _ => unimplemented!(),
                 };
 
                 let mut value_bytes = match self.codec {
-                    Codec::DagCbor => {
-                        serde_ipld_dagcbor::to_vec(&value.into()).expect("Value Serialization")
-                    }
-                    Codec::DagJson => {
-                        serde_json::to_vec(&value.into()).expect("Value Serialization")
-                    }
+                    Codec::DagCbor => serde_ipld_dagcbor::to_vec(&value.into())?,
+                    Codec::DagJson => serde_json::to_vec(&value.into())?,
                     _ => unimplemented!(),
                 };
 
@@ -119,7 +116,7 @@ impl Config {
 
                 let threshold = (u32::MAX / threshold.chunking_factor as u32).count_zeros();
 
-                zero_count > threshold
+                Ok(zero_count > threshold)
             }
         }
     }

@@ -1,13 +1,16 @@
 use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
 
-use crate::errors::Error;
-
 use ipfs_api::responses::Codec;
+
 use multihash::Code;
+
 use serde::{Deserialize, Serialize};
+
+use serde_ipld_dagcbor::DecodeError;
 
 use super::{
     config::{Config, HashThreshold, Strategies, Tree},
+    errors::Error,
     tree::{Branch, Key, Leaf, TreeNode, Value},
 };
 
@@ -15,9 +18,7 @@ use libipld_core::ipld::Ipld;
 
 use num::FromPrimitive;
 
-//TODO Is there a way to not use Ipld enum as intermediate representation???
-//TODO add meaningful errors
-//TODO check if nodes have more data then the spec???
+//TODO Find a way to not use Ipld enum as intermediate!
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(bound = "K: Key, V: Value", try_from = "Ipld", into = "Ipld")]
@@ -73,40 +74,50 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
     type Error = Error;
 
     fn try_from(ipld: Ipld) -> Result<Self, Self::Error> {
-        let Ipld::List(mut list) =  ipld else {
-            return Err(Error::NotFound);
+        let mut list: Vec<Ipld> = ipld.try_into()?;
+
+        if list.len() != 3 {
+            return Err(DecodeError::RequireLength {
+                name: "tuple",
+                expect: 3,
+                value: list.len(),
+            }
+            .into());
         };
 
-        let Some(Ipld::List(values)) =  list.pop() else {
-            return Err(Error::NotFound);
-        };
-
-        let Some(Ipld::List(keys)) =  list.pop() else {
-            return Err(Error::NotFound);
-        };
-
-        let Some(Ipld::Bool(is_leaf)) =  list.pop() else {
-             return Err(Error::NotFound);
-        };
+        let values: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let keys: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let leaf: bool = list.pop().unwrap().try_into()?;
 
         let keys = {
+            //TODO Find how to fix trait bounds
+            /* let result: Result<Vec<K>, _> = keys.into_iter().map(|ipld| ipld.try_into()).collect();
+
+            result? */
+
             let mut new_keys = Vec::with_capacity(keys.len());
             for ipld in keys {
                 let Ok(key) = ipld.try_into() else {
-                return Err(Error::NotFound);
-            };
+                    return Err(Error::UnknownKeyType);
+                };
 
-                new_keys.push(key);
+                new_keys.push(key)
             }
 
             new_keys
         };
 
-        let tree = if is_leaf {
+        let tree = if leaf {
+            //TODO Find how to fix trait bounds
+            /* let result: Result<Vec<V>, _> =
+                values.into_iter().map(|ipld| ipld.try_into()).collect();
+
+            let elements = result?; */
+
             let mut elements = Vec::with_capacity(values.len());
             for ipld in values {
                 let Ok(value) = ipld.try_into() else {
-                    return Err(Error::NotFound);
+                    return Err(Error::UnknownValueType);
                 };
 
                 elements.push(value);
@@ -116,14 +127,10 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
 
             TreeNodes::Leaf(TreeNode { keys, values })
         } else {
-            let mut links = Vec::with_capacity(values.len());
-            for ipld in values {
-                let Ipld::Link(cid) = ipld else {
-                    return Err(Error::NotFound);
-                };
+            let result: Result<Vec<_>, _> =
+                values.into_iter().map(|ipld| ipld.try_into()).collect();
 
-                links.push(cid)
-            }
+            let links = result?;
 
             let values = Branch { links };
 
@@ -138,44 +145,49 @@ impl TryFrom<Ipld> for Config {
     type Error = Error;
 
     fn try_from(ipld: Ipld) -> Result<Self, Self::Error> {
-        let Ipld::List(mut list) =  ipld else {
-            return Err(Error::NotFound);
+        let mut list: Vec<Ipld> = ipld.try_into()?;
+
+        if list.len() != 7 {
+            return Err(DecodeError::RequireLength {
+                name: "tuple",
+                expect: 7,
+                value: list.len(),
+            }
+            .into());
         };
 
         let chunking_strategy = {
-            let Some(Ipld::Map(mut map)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
+            let mut map: BTreeMap<String, Ipld> = list.pop().unwrap().try_into()?;
 
             let Some((key, value)) = map.pop_last() else {
-                return Err(Error::NotFound);
+                return Err(DecodeError::RequireLength { name: "map", expect: 1, value: map.len() }.into());
             };
 
             let Ok(mut chunking_strategy) = Strategies::from_str(&key) else {
-                return Err(Error::NotFound);
+                return Err(Error::UnknownChunkingStrategy);
             };
 
             match chunking_strategy {
                 Strategies::Threshold(ref mut threshold) => {
-                    let Ipld::List(mut list) =  value else {
-                        return Err(Error::NotFound);
+                    let mut list: Vec<Ipld> = value.try_into()?;
+
+                    if list.len() != 2 {
+                        return Err(DecodeError::RequireLength {
+                            name: "tuple",
+                            expect: 2,
+                            value: list.len(),
+                        }
+                        .into());
                     };
 
-                    let Some(Ipld::Integer(hash_function)) =  list.pop() else {
-                        return Err(Error::NotFound);
-                    };
-                    let Ok(hash_function) = Code::try_from(hash_function as u64) else{
-                        return Err(Error::NotFound);
-                    };
+                    let hf: u64 = list.pop().unwrap().try_into()?;
+                    let multihash_code = Code::try_from(hf)?;
 
-                    let Some(Ipld::Integer(chunking_factor)) =  list.pop() else {
-                        return Err(Error::NotFound);
-                    };
-                    let chunking_factor = chunking_factor as usize;
+                    let chunking_factor = list.pop().unwrap().try_into()?;
 
                     *threshold = HashThreshold {
                         chunking_factor,
-                        multihash_code: hash_function,
+                        multihash_code,
                     };
                 }
             }
@@ -183,67 +195,24 @@ impl TryFrom<Ipld> for Config {
             chunking_strategy
         };
 
-        let hash_length = {
-            let Some(ipld) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
-            let hash_length = match ipld {
-                Ipld::Null => None,
-                Ipld::Integer(int) => Some(int as usize),
-                _ => return Err(Error::NotFound),
-            };
-
-            hash_length
-        };
+        let hash_length = list.pop().unwrap().try_into()?;
 
         let hash_function = {
-            let Some(Ipld::Integer(hash_function)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
-            let Ok(hash_function) = Code::try_from(hash_function as u64) else{
-                return Err(Error::NotFound);
-            };
-
-            hash_function
+            let hf: u64 = list.pop().unwrap().try_into()?;
+            Code::try_from(hf)?
         };
 
         let codec = {
-            let Some(Ipld::Integer(codec)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
+            let codec: i128 = list.pop().unwrap().try_into()?;
             let Some(codec) = Codec::from_i128(codec) else {
-                return Err(Error::NotFound);
+                return Err(Error::UnknownCodec);
             };
-
             codec
         };
 
-        let cid_version = {
-            let Some(Ipld::Integer(cid_version)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
-            cid_version as usize
-        };
-
-        let max_size = {
-            let Some(Ipld::Integer(max_size)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
-            max_size as usize
-        };
-
-        let min_size = {
-            let Some(Ipld::Integer(min_size)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
-            min_size as usize
-        };
+        let cid_version = list.pop().unwrap().try_into()?;
+        let max_size = list.pop().unwrap().try_into()?;
+        let min_size = list.pop().unwrap().try_into()?;
 
         let config = Self {
             min_size,
@@ -324,17 +293,19 @@ impl TryFrom<Ipld> for Tree {
     type Error = Error;
 
     fn try_from(ipld: Ipld) -> Result<Self, Self::Error> {
-        let Ipld::List(mut list) =  ipld else {
-            return Err(Error::NotFound);
+        let mut list: Vec<Ipld> = ipld.try_into()?;
+
+        if list.len() != 2 {
+            return Err(DecodeError::RequireLength {
+                name: "tuple",
+                expect: 2,
+                value: list.len(),
+            }
+            .into());
         };
 
-        let Some(Ipld::Link(root)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
-
-        let Some(Ipld::Link(config)) =  list.pop() else {
-                return Err(Error::NotFound);
-            };
+        let root = list.pop().unwrap().try_into()?;
+        let config = list.pop().unwrap().try_into()?;
 
         let tree = Self { config, root };
 
@@ -349,7 +320,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serde_roundtrip() {
+    fn node_roundtrip() {
         let key_one = vec![255u8, 0u8];
         let key_two = vec![255u8, 1u8];
 

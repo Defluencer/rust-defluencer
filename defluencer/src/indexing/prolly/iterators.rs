@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, ops::Bound};
+use std::{
+    collections::VecDeque,
+    ops::{Bound, RangeBounds},
+};
 
 use super::tree::{Branch, Key, Leaf, TreeNode, TreeNodeType, Value};
 
@@ -49,7 +52,7 @@ impl<'a, K: Key> Iterator for Search<'a, K, Branch> {
 impl<'a, K: Key, V: Value> Iterator for Search<'a, K, Leaf<V>> {
     type Item = (K, V);
 
-    // If we were to iter in reverse we could consume the node then swap remove instead of cloning
+    // If we were to iter in reverse we could consumme the node then swap remove instead of cloning
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(batch_key) = self.batch.pop_front() {
@@ -101,6 +104,64 @@ impl<'a, K: Key, V: Value> Iterator for Insert<'a, K, V, Branch> {
             }
 
             kvs.push((batch_key, batch_value));
+        }
+
+        return None;
+    }
+}
+
+pub struct Remove<'a, K, T>
+where
+    T: TreeNodeType,
+{
+    pub node: &'a mut TreeNode<K, T>,
+    pub batch: VecDeque<K>,
+}
+
+// Split the batch into smaller batches with associated node links while removing batch keys
+impl<'a, K: Key> Iterator for Remove<'a, K, Branch> {
+    type Item = (Vec<Cid>, Vec<K>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut range = None;
+        let mut keys = Vec::new();
+        let mut links = Vec::new();
+
+        for i in 0..self.batch.len() {
+            let batch_key = &self.batch[i];
+
+            let (idx, remove) = match self.node.keys.binary_search(batch_key) {
+                Ok(idx) => (idx, true),
+                Err(idx) => (idx.saturating_sub(1), false),
+            };
+
+            if range.is_none() {
+                range = Some((
+                    Bound::Included(self.batch[i].clone()),
+                    match self.node.keys.get(idx + 1) {
+                        Some(key) => Bound::Excluded(key.clone()),
+                        None => Bound::Unbounded,
+                    },
+                ));
+            }
+
+            if !range.as_ref().unwrap().contains(&batch_key) {
+                return Some((links, keys));
+            }
+
+            if remove {
+                self.batch.remove(i);
+
+                let key = self.node.keys.remove(idx);
+                let link = self.node.values.links.remove(idx);
+
+                keys.push(key);
+                links.push(link);
+            } else {
+                let batch_key = self.batch.pop_front().unwrap();
+
+                keys.push(batch_key);
+            }
         }
 
         return None;

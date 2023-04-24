@@ -1,5 +1,6 @@
 mod config;
 mod deserialization;
+mod errors;
 mod iterators;
 mod tree;
 
@@ -8,15 +9,18 @@ use std::iter;
 pub use config::{Config, HashThreshold, Strategies};
 
 use cid::Cid;
+
 use futures::{Stream, StreamExt};
 
 use ipfs_api::IpfsService;
 
-use crate::errors::Error;
-
 use config::Tree;
 
-use self::tree::{Key, Value};
+use self::tree::Value;
+
+use errors::Error;
+
+type Key = Vec<u8>;
 
 #[derive(Clone)]
 pub struct ProllyTree {
@@ -28,7 +32,7 @@ pub struct ProllyTree {
 }
 
 impl ProllyTree {
-    pub fn new<K: Key, V: Value>(ipfs: IpfsService, config: Option<Config>) -> Result<Self, Error> {
+    pub fn new(ipfs: IpfsService, config: Option<Config>) -> Result<Self, Error> {
         let root = Cid::default();
 
         let config = config.unwrap_or_default();
@@ -50,8 +54,8 @@ impl ProllyTree {
         Ok(tree)
     }
 
-    pub async fn get<K: Key, V: Value>(&self, key: K) -> Result<Option<V>, Error> {
-        let mut results: Vec<Result<(K, V), Error>> =
+    pub async fn get<V: Value>(&self, key: Key) -> Result<Option<V>, Error> {
+        let mut results: Vec<Result<(Key, V), Error>> =
             tree::batch_get(self.ipfs.clone(), self.root, iter::once(key))
                 .collect()
                 .await;
@@ -62,14 +66,14 @@ impl ProllyTree {
         }
     }
 
-    pub fn batch_get<K: Key, V: Value>(
+    pub fn batch_get<V: Value>(
         &self,
-        keys: impl IntoIterator<Item = K>,
-    ) -> impl Stream<Item = Result<(K, V), Error>> {
+        keys: impl IntoIterator<Item = Key>,
+    ) -> impl Stream<Item = Result<(Key, V), Error>> {
         tree::batch_get(self.ipfs.clone(), self.root, keys)
     }
 
-    pub async fn insert<K: Key, V: Value>(&mut self, key: K, value: V) -> Result<(), Error> {
+    pub async fn insert<V: Value>(&mut self, key: Key, value: V) -> Result<(), Error> {
         let root = tree::batch_insert(
             self.ipfs.clone(),
             self.root,
@@ -83,9 +87,9 @@ impl ProllyTree {
         Ok(())
     }
 
-    pub async fn batch_insert<K: Key, V: Value>(
+    pub async fn batch_insert<V: Value>(
         &mut self,
-        key_values: impl IntoIterator<Item = (K, V)>,
+        key_values: impl IntoIterator<Item = (Key, V)>,
     ) -> Result<(), Error> {
         let root = tree::batch_insert(
             self.ipfs.clone(),
@@ -100,8 +104,8 @@ impl ProllyTree {
         Ok(())
     }
 
-    pub async fn remove<K: Key, V: Value>(&mut self, key: K) -> Result<(), Error> {
-        let root = tree::batch_remove::<K, V>(
+    pub async fn remove<V: Value>(&mut self, key: Key) -> Result<(), Error> {
+        let root = tree::batch_remove::<Key, V>(
             self.ipfs.clone(),
             self.root,
             self.config.clone(),
@@ -114,12 +118,12 @@ impl ProllyTree {
         Ok(())
     }
 
-    pub async fn batch_remove<K: Key, V: Value>(
+    pub async fn batch_remove<V: Value>(
         &mut self,
-        keys: impl IntoIterator<Item = K>,
+        keys: impl IntoIterator<Item = Key>,
     ) -> Result<(), Error> {
         let root =
-            tree::batch_remove::<K, V>(self.ipfs.clone(), self.root, self.config.clone(), keys)
+            tree::batch_remove::<Key, V>(self.ipfs.clone(), self.root, self.config.clone(), keys)
                 .await?;
 
         self.root = root;
@@ -127,7 +131,7 @@ impl ProllyTree {
         Ok(())
     }
 
-    pub fn stream<K: Key, V: Value>(&self) -> impl Stream<Item = Result<(K, V), Error>> {
+    pub fn stream<V: Value>(&self) -> impl Stream<Item = Result<(Key, V), Error>> {
         tree::stream_pairs(self.ipfs.clone(), self.root)
     }
 }
