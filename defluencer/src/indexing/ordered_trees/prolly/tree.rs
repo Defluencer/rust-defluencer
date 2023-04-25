@@ -4,32 +4,20 @@ use async_recursion::async_recursion;
 
 use futures::{future::try_join_all, stream, Stream, StreamExt, TryStreamExt};
 
-use ipfs_api::{responses::Codec, IpfsService};
+use ipfs_api::IpfsService;
 
 use super::{
     deserialization::TreeNodes,
-    errors::Error,
     iterators::{BranchIntoIterator, BranchIterator, Insert, Remove, Search},
     Config,
 };
 
 use cid::Cid;
 
-use libipld_core::ipld::Ipld;
-
-/// Trait for tree keys.
-///
-/// Notable bounds are; ordered by their byte representation and compatible with Ipld.
-///
-/// As for ```str``` and ```String``` read this std [note](https://doc.rust-lang.org/std/cmp/trait.Ord.html#impl-Ord-for-str)
-pub trait Key: Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
-impl<T: Clone + Ord + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Key for T {}
-
-/// Trait for tree values.
-///
-/// Only notable bound is compatibility with Ipld.
-pub trait Value: Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static {}
-impl<T: Clone + TryFrom<Ipld> + Into<Ipld> + Send + Sync + 'static> Value for T {}
+use crate::indexing::ordered_trees::{
+    errors::Error,
+    traits::{Key, Value},
+};
 
 /// Type state for tree leaf nodes
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -125,7 +113,7 @@ impl<K: Key> TreeNode<K, Branch> {
     fn split_with<V: Value>(self, mut config: Config) -> Result<Vec<Self>, Error> {
         let (bytes, mut og) = {
             let tree_nodes = TreeNodes::<K, V>::Branch(self);
-            let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
+            let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes)?;
             let TreeNodes::<K, V>::Branch(node) = tree_nodes else {
                 unreachable!();
             };
@@ -153,8 +141,7 @@ impl<K: Key> TreeNode<K, Branch> {
 
                 let (node_bytes, mut node) = {
                     let tree_nodes = TreeNodes::<K, V>::Branch(node);
-                    let bytes =
-                        serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
+                    let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes)?;
                     let TreeNodes::<K, V>::Branch(node) = tree_nodes else {
                         unreachable!();
                     };
@@ -267,7 +254,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     fn split_with(self, mut config: Config) -> Result<Vec<Self>, Error> {
         let (bytes, mut og) = {
             let tree_nodes = TreeNodes::<K, V>::Leaf(self);
-            let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
+            let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes)?;
             let TreeNodes::<K, V>::Leaf(node) = tree_nodes else {
                 unreachable!();
             };
@@ -295,8 +282,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
 
                 let (node_bytes, mut node) = {
                     let tree_nodes = TreeNodes::<K, V>::Leaf(node);
-                    let bytes =
-                        serde_ipld_dagcbor::to_vec(&tree_nodes).expect("Tree node serialization");
+                    let bytes = serde_ipld_dagcbor::to_vec(&tree_nodes)?;
                     let TreeNodes::<K, V>::Leaf(node) = tree_nodes else {
                         unreachable!();
                     };
@@ -596,7 +582,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
                 node.merge(other);
                 TreeNodes::Leaf(node)
             }
-            _ => panic!("The tree should always be symmetrical"), //TODO return an error
+            _ => panic!("The tree should always be symmetrical"),
         })
         .expect("at least one node");
 

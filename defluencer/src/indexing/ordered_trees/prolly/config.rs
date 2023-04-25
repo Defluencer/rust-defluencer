@@ -10,9 +10,9 @@ use libipld_core::ipld::Ipld;
 
 use strum::{Display, EnumString};
 
-use super::{
+use crate::indexing::ordered_trees::{
     errors::Error,
-    tree::{Key, Value},
+    traits::{Key, Value},
 };
 
 /// Chunking is the strategy of determining chunk boundaries:

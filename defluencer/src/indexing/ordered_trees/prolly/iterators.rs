@@ -3,9 +3,11 @@ use std::{
     ops::{Bound, RangeBounds},
 };
 
-use super::tree::{Branch, Key, Leaf, TreeNode, TreeNodeType, Value};
+use super::tree::{Branch, Leaf, TreeNode, TreeNodeType};
 
 use cid::Cid;
+
+use crate::indexing::ordered_trees::traits::{Key, Value};
 
 pub struct Search<'a, K, T>
 where

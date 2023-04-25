@@ -10,15 +10,17 @@ use serde_ipld_dagcbor::DecodeError;
 
 use super::{
     config::{Config, HashThreshold, Strategies, Tree},
-    errors::Error,
-    tree::{Branch, Key, Leaf, TreeNode, Value},
+    tree::{Branch, Leaf, TreeNode},
 };
 
 use libipld_core::ipld::Ipld;
 
 use num::FromPrimitive;
 
-//TODO Find a way to not use Ipld enum as intermediate!
+use crate::indexing::ordered_trees::{
+    errors::Error,
+    traits::{Key, Value},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(bound = "K: Key, V: Value", try_from = "Ipld", into = "Ipld")]
