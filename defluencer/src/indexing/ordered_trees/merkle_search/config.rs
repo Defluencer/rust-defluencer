@@ -15,7 +15,7 @@ use crate::indexing::ordered_trees::{errors::Error, traits::Key};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "Ipld", into = "Ipld")]
 pub struct Config {
-    /// Numeric Base
+    /// Number Base (Radix)
     pub base: usize,
 
     /// IPLD codec.
@@ -45,7 +45,7 @@ pub struct Tree {
 /// Using Horner's method but shortcircuit when first trailling non-zero is reached in the new base.
 ///
 /// https://blogs.sas.com/content/iml/2022/09/12/convert-base-10.html
-pub fn calculate_layer(config: Config, key: impl Key) -> Result<usize, Error> {
+pub fn calculate_layer(config: &Config, key: impl Key) -> Result<usize, Error> {
     let base = BigUint::from(config.base);
 
     let bytes = match config.codec {

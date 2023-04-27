@@ -1,14 +1,14 @@
 mod config;
 mod deserialization;
 mod iterators;
+mod node;
 mod tree;
 
 use std::iter;
 
 use cid::Cid;
 
-use futures::Stream;
-use futures_util::StreamExt;
+use futures::{Stream, StreamExt};
 
 use ipfs_api::IpfsService;
 
@@ -51,24 +51,28 @@ impl MerkelSearchTree {
         Ok(tree)
     }
 
-    pub async fn get<K: Key, V: Value>(&self, key: K) -> Result<Option<V>, Error> {
-        let mut results: Vec<Result<(K, V), Error>> =
-            tree::batch_get::<K, V>(self.ipfs.clone(), self.root, iter::once(key))
-                .await
-                .collect()
-                .await;
+    pub async fn get<K: Key, V: Value>(&self, key: K) -> Result<Option<(K, V)>, Error> {
+        let results = tree::batch_get::<K, V>(self.ipfs.clone(), self.root, iter::once(key))
+            .collect::<Vec<_>>()
+            .await;
 
-        match results.pop() {
-            Some(result) => result.map(|(_, value)| Some(value)),
-            None => return Ok(None),
+        let results: Result<Vec<_>, _> = results.into_iter().collect();
+        let mut results = results?;
+
+        if results.len() != 1 {
+            return Ok(None);
         }
+
+        let kv = results.pop().unwrap();
+
+        Ok(Some(kv))
     }
 
-    pub async fn batch_get<K: Key, V: Value>(
+    pub fn batch_get<K: Key, V: Value>(
         &self,
         keys: impl IntoIterator<Item = K>,
     ) -> impl Stream<Item = Result<(K, V), Error>> {
-        tree::batch_get::<K, V>(self.ipfs.clone(), self.root, keys).await
+        tree::batch_get::<K, V>(self.ipfs.clone(), self.root, keys)
     }
 
     pub async fn insert<K: Key, V: Value>(&mut self, key: K, value: V) -> Result<(), Error> {
@@ -117,6 +121,6 @@ impl MerkelSearchTree {
     }
 
     pub fn stream<K: Key, V: Value>(&self) -> impl Stream<Item = Result<(K, V), Error>> {
-        tree::values(self.ipfs.clone(), self.root)
+        tree::stream_pairs(self.ipfs.clone(), self.root)
     }
 }

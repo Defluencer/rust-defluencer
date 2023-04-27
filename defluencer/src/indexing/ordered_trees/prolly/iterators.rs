@@ -3,7 +3,7 @@ use std::{
     ops::{Bound, RangeBounds},
 };
 
-use super::tree::{Branch, Leaf, TreeNode, TreeNodeType};
+use super::node::{Branch, TreeNode, TreeNodeType};
 
 use cid::Cid;
 
@@ -15,7 +15,6 @@ where
 {
     pub node: &'a TreeNode<K, T>,
     pub batch: VecDeque<K>,
-    pub search_idx: usize,
 }
 
 // Split the batch into smaller batches with associated node links
@@ -26,12 +25,10 @@ impl<'a, K: Key> Iterator for Search<'a, K, Branch> {
         let mut keys = Vec::new();
         let mut link = None;
         while let Some(batch_key) = self.batch.pop_front() {
-            let idx = match self.node.keys[self.search_idx..].binary_search(&batch_key) {
+            let idx = match self.node.keys.binary_search(&batch_key) {
                 Ok(idx) => idx,
                 Err(idx) => idx - 1, // Since links are ordered, the previous one has the correct range.
             };
-
-            self.search_idx = idx;
 
             let Some(link) = link else {
                 keys.push(batch_key);
@@ -46,28 +43,7 @@ impl<'a, K: Key> Iterator for Search<'a, K, Branch> {
             keys.push(batch_key);
         }
 
-        return None;
-    }
-}
-
-// Find all the values associated with batch keys.
-impl<'a, K: Key, V: Value> Iterator for Search<'a, K, Leaf<V>> {
-    type Item = (K, V);
-
-    // If we were to iter in reverse we could consumme the node then swap remove instead of cloning
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(batch_key) = self.batch.pop_front() {
-            if let Ok(idx) = self.node.keys[self.search_idx..].binary_search(&batch_key) {
-                self.search_idx = idx;
-
-                let value = self.node.values.elements[idx].clone();
-
-                return Some((batch_key, value));
-            }
-        }
-
-        return None;
+        None
     }
 }
 
@@ -77,7 +53,6 @@ where
 {
     pub node: &'a TreeNode<K, T>,
     pub batch: VecDeque<(K, V)>,
-    pub search_idx: usize,
 }
 
 // Split the batch into smaller batch with associated node links
@@ -88,12 +63,10 @@ impl<'a, K: Key, V: Value> Iterator for Insert<'a, K, V, Branch> {
         let mut kvs = Vec::new();
         let mut link = None;
         while let Some((batch_key, batch_value)) = self.batch.pop_front() {
-            let idx = match self.node.keys[self.search_idx..].binary_search(&batch_key) {
+            let idx = match self.node.keys.binary_search(&batch_key) {
                 Ok(idx) => idx,
                 Err(idx) => idx - 1, // Since links are ordered, the previous one has the correct range.
             };
-
-            self.search_idx = idx;
 
             let Some(link) = link else {
                 kvs.push((batch_key, batch_value));
@@ -108,7 +81,7 @@ impl<'a, K: Key, V: Value> Iterator for Insert<'a, K, V, Branch> {
             kvs.push((batch_key, batch_value));
         }
 
-        return None;
+        None
     }
 }
 
@@ -154,8 +127,8 @@ impl<'a, K: Key> Iterator for Remove<'a, K, Branch> {
             if remove {
                 self.batch.remove(i);
 
-                let key = self.node.keys.remove(idx);
-                let link = self.node.values.links.remove(idx);
+                let key = self.node.keys.remove(idx).unwrap();
+                let link = self.node.values.links.remove(idx).unwrap();
 
                 keys.push(key);
                 links.push(link);
@@ -166,7 +139,7 @@ impl<'a, K: Key> Iterator for Remove<'a, K, Branch> {
             }
         }
 
-        return None;
+        None
     }
 }
 
@@ -184,15 +157,14 @@ impl<'a, K> Iterator for BranchIterator<'a, K> {
         }
 
         let key = &self.node.keys[self.index];
-        let l_bound = Bound::Included(key);
+        let link = &self.node.values.links[self.index];
 
+        let l_bound = Bound::Included(key);
         let h_bound = match self.node.keys.get(self.index + 1) {
             Some(key) => Bound::Excluded(key),
             None => Bound::Unbounded,
         };
-
         let range = (l_bound, h_bound);
-        let link = &self.node.values.links[self.index];
 
         self.index += 1;
 
@@ -202,29 +174,25 @@ impl<'a, K> Iterator for BranchIterator<'a, K> {
 
 pub struct BranchIntoIterator<K> {
     pub node: TreeNode<K, Branch>,
-    pub index: usize,
 }
 
 impl<K: Key> Iterator for BranchIntoIterator<K> {
     type Item = ((Bound<K>, Bound<K>), Cid);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.node.keys.len() {
+        if self.node.keys.is_empty() {
             return None;
         }
 
-        let key = self.node.keys[self.index].clone();
-        let l_bound = Bound::Included(key);
+        let key = self.node.keys.pop_front().unwrap();
+        let link = self.node.values.links.pop_front().unwrap();
 
-        let h_bound = match self.node.keys.get(self.index + 1) {
+        let l_bound = Bound::Included(key);
+        let h_bound = match self.node.keys.front() {
             Some(key) => Bound::Excluded(key.clone()),
             None => Bound::Unbounded,
         };
-
         let range = (l_bound, h_bound);
-        let link = self.node.values.links[self.index];
-
-        self.index += 1;
 
         Some((range, link))
     }

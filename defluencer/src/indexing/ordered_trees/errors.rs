@@ -16,8 +16,8 @@ pub enum Error {
     #[error("Unknown Codec")]
     UnknownCodec,
 
-    #[error("Ipld Type Error: {0}")]
-    IpldTypeError(#[from] libipld_core::error::TypeError),
+    #[error("Ipld Error: {0}")]
+    IpldError(#[from] libipld_core::error::Error),
 
     #[error("DAG CBOR Encode: {0}")]
     Encode(#[from] serde_ipld_dagcbor::EncodeError<TryReserveError>),

@@ -1,6 +1,8 @@
+use std::collections::VecDeque;
+
 use super::{
     config::{Config, Tree},
-    tree::TreeNode,
+    node::TreeNode,
 };
 
 use crate::indexing::ordered_trees::{
@@ -18,17 +20,111 @@ use serde_ipld_dagcbor::DecodeError;
 
 use num::FromPrimitive;
 
+//TODO figure out if link indexes could be omited.
+
 impl<K: Key, V: Value> TryFrom<Ipld> for TreeNode<K, V> {
     type Error = Error;
 
-    fn try_from(value: Ipld) -> Result<Self, Self::Error> {
-        todo!()
+    fn try_from(ipld: Ipld) -> Result<Self, Self::Error> {
+        let mut list: Vec<Ipld> = ipld.try_into()?;
+
+        if list.len() != 5 {
+            return Err(DecodeError::RequireLength {
+                name: "tuple",
+                expect: 5,
+                value: list.len(),
+            }
+            .into());
+        };
+
+        let links: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let indexes: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let values: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let keys: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let layer: usize = list.pop().unwrap().try_into()?;
+
+        let links = {
+            let result: Result<VecDeque<_>, _> =
+                links.into_iter().map(|ipld| ipld.try_into()).collect();
+
+            result?
+        };
+
+        let indexes = {
+            let result: Result<VecDeque<_>, _> =
+                indexes.into_iter().map(|ipld| ipld.try_into()).collect();
+
+            result?
+        };
+
+        let values = {
+            let mut elements = VecDeque::with_capacity(values.len());
+            for ipld in values {
+                let Ok(value) = ipld.try_into() else {
+                    return Err(Error::UnknownValueType);
+                };
+
+                elements.push_back(value);
+            }
+
+            elements
+        };
+
+        let keys = {
+            let mut new_keys = VecDeque::with_capacity(keys.len());
+            for ipld in keys {
+                let Ok(key) = ipld.try_into() else {
+                    return Err(Error::UnknownKeyType);
+                };
+
+                new_keys.push_back(key)
+            }
+
+            new_keys
+        };
+
+        Ok(Self {
+            layer,
+            keys,
+            values,
+            indexes,
+            links,
+        })
     }
 }
 
 impl<K: Key, V: Value> From<TreeNode<K, V>> for Ipld {
     fn from(node: TreeNode<K, V>) -> Self {
-        todo!()
+        let TreeNode {
+            layer,
+            keys,
+            values,
+            indexes,
+            links,
+        } = node;
+
+        let keys = keys.into_iter().map(|key| key.into()).collect::<Vec<_>>();
+        let keys = Ipld::List(keys);
+
+        let values = values
+            .into_iter()
+            .map(|value| value.into())
+            .collect::<Vec<_>>();
+        let values = Ipld::List(values);
+
+        let indexes = indexes
+            .into_iter()
+            .map(|idx| idx.into())
+            .collect::<Vec<_>>();
+        let indexes = Ipld::List(indexes);
+
+        let links = links
+            .into_iter()
+            .map(|link| link.into())
+            .collect::<Vec<_>>();
+        let links = Ipld::List(links);
+
+        Ipld::List(vec![layer.into(), keys, values, indexes, links])
     }
 }
 
@@ -41,7 +137,7 @@ impl TryFrom<Ipld> for Config {
         if list.len() != 3 {
             return Err(DecodeError::RequireLength {
                 name: "tuple",
-                expect: 7,
+                expect: 3,
                 value: list.len(),
             }
             .into());

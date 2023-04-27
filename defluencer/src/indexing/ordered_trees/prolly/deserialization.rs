@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt::Debug, str::FromStr};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    fmt::Debug,
+    str::FromStr,
+};
 
 use ipfs_api::responses::Codec;
 
@@ -10,7 +14,7 @@ use serde_ipld_dagcbor::DecodeError;
 
 use super::{
     config::{Config, HashThreshold, Strategies, Tree},
-    tree::{Branch, Leaf, TreeNode},
+    node::{Branch, Leaf, TreeNode},
 };
 
 use libipld_core::ipld::Ipld;
@@ -97,13 +101,13 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
 
             result? */
 
-            let mut new_keys = Vec::with_capacity(keys.len());
+            let mut new_keys = VecDeque::with_capacity(keys.len());
             for ipld in keys {
                 let Ok(key) = ipld.try_into() else {
                     return Err(Error::UnknownKeyType);
                 };
 
-                new_keys.push(key)
+                new_keys.push_back(key)
             }
 
             new_keys
@@ -129,7 +133,7 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNodes<K, V> {
 
             TreeNodes::Leaf(TreeNode { keys, values })
         } else {
-            let result: Result<Vec<_>, _> =
+            let result: Result<VecDeque<_>, _> =
                 values.into_iter().map(|ipld| ipld.try_into()).collect();
 
             let links = result?;
@@ -335,7 +339,7 @@ mod tests {
             Cid::try_from("bafkreic3bbguse6e5zziexunbvagwlt6zkmrjhy5nehowroelzhisff5ua").unwrap();
 
         let leaf_node = TreeNode {
-            keys: vec![key_one.clone(), key_two.clone()],
+            keys: VecDeque::from([key_one.clone(), key_two.clone()]),
             values: Leaf {
                 elements: vec![value_one.clone(), value_two.clone()],
             },
@@ -348,9 +352,9 @@ mod tests {
         assert_eq!(leaf_node, decoded_leaf);
 
         let branch_node = TreeNode {
-            keys: vec![key_one, key_two],
+            keys: VecDeque::from([key_one, key_two]),
             values: Branch {
-                links: vec![link_one, link_two],
+                links: VecDeque::from([link_one, link_two]),
             },
         };
         let branch_node = TreeNodes::Branch(branch_node);

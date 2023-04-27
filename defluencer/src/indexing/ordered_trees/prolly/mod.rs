@@ -1,6 +1,7 @@
 mod config;
 mod deserialization;
 mod iterators;
+mod node;
 mod tree;
 
 use std::iter;
@@ -51,16 +52,21 @@ impl ProllyTree {
         Ok(tree)
     }
 
-    pub async fn get<V: Value>(&self, key: Key) -> Result<Option<V>, Error> {
-        let mut results: Vec<Result<(Key, V), Error>> =
-            tree::batch_get(self.ipfs.clone(), self.root, iter::once(key))
-                .collect()
-                .await;
+    pub async fn get<V: Value>(&self, key: Key) -> Result<Option<(Key, V)>, Error> {
+        let results = tree::batch_get(self.ipfs.clone(), self.root, iter::once(key))
+            .collect::<Vec<_>>()
+            .await;
 
-        match results.pop() {
-            Some(result) => result.map(|(_, value)| Some(value)),
-            None => return Ok(None),
+        let results: Result<Vec<_>, _> = results.into_iter().collect();
+        let mut results = results?;
+
+        if results.len() != 1 {
+            return Ok(None);
         }
+
+        let kv = results.pop().unwrap();
+
+        Ok(Some(kv))
     }
 
     pub fn batch_get<V: Value>(
