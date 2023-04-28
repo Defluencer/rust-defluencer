@@ -13,7 +13,7 @@ use crate::indexing::ordered_trees::traits::{Key, Value};
 
 use libipld_core::ipld::Ipld;
 
-use super::iterators::Search;
+use super::iterators::{Insert, Remove, Search};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(bound = "K: Key, V: Value", try_from = "Ipld", into = "Ipld")]
@@ -96,34 +96,46 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     ///
     /// Idempotent.
     pub fn insert_link(&mut self, link: Cid, range: (Bound<&K>, Bound<&K>)) {
-        for i in 0..self.keys.len() {
-            let mut low_b = Bound::Unbounded;
-
-            if i != 0 {
-                let key = &self.keys[i - 1];
-                low_b = Bound::Excluded(key);
-            }
-
-            let mut up_b = Bound::Unbounded;
-
-            if i != self.keys.len() {
-                let key = &self.keys[i];
-                up_b = Bound::Excluded(key);
-            }
-
-            let inter_key_range = (low_b, up_b);
-
-            if range_inclusion(inter_key_range, range) {
-                match self.indexes.binary_search(&i) {
-                    Ok(idx) => {
-                        self.indexes[idx] = i;
-                        self.links[idx] = link;
-                    }
-                    Err(idx) => {
-                        self.indexes.insert(idx, i);
-                        self.links.insert(idx, link);
-                    }
+        let start_idx = match range.start_bound() {
+            Bound::Included(key) => match self.keys.binary_search(key) {
+                Ok(_) => {
+                    panic!("An included link range key should never be found in another node.")
                 }
+                Err(idx) => idx,
+            },
+            Bound::Excluded(key) => match self.keys.binary_search(key) {
+                Ok(idx) => idx + 1,
+                Err(idx) => idx,
+            },
+            Bound::Unbounded => 0,
+        };
+
+        let end_idx = match range.end_bound() {
+            Bound::Included(key) => match self.keys.binary_search(key) {
+                Ok(_) => {
+                    panic!("An included link range key should never be found in another node.")
+                }
+                Err(idx) => idx,
+            },
+            Bound::Excluded(key) => match self.keys.binary_search(key) {
+                Ok(idx) => idx,
+                Err(idx) => idx,
+            },
+            Bound::Unbounded => self.keys.len(),
+        };
+
+        if start_idx != end_idx {
+            panic!("Lower and higher bounds should always agree when inserting a link");
+        }
+
+        match self.indexes.binary_search(&start_idx) {
+            Ok(idx) => {
+                self.indexes[idx] = start_idx;
+                self.links[idx] = link;
+            }
+            Err(idx) => {
+                self.indexes.insert(idx, start_idx);
+                self.links.insert(idx, link);
             }
         }
     }
@@ -131,7 +143,7 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     /// Remove all K-Vs and links outside of range.
     ///
     /// Idempotent.
-    pub fn rm_outrange(&mut self, range: (Bound<&K>, Bound<&K>)) {
+    pub fn trim(&mut self, range: (Bound<&K>, Bound<&K>)) {
         let trunc_len = match range.end_bound() {
             Bound::Included(key) => match self.keys.binary_search(key) {
                 Ok(idx) => Some(idx + 1),
@@ -246,11 +258,36 @@ impl<K: Key, V: Value> TreeNode<K, V> {
         }
     }
 
+    /// Return either splitted batches or the KVs searched for.
     pub fn into_search_iter(self, batch: impl IntoIterator<Item = K>) -> Search<K, V> {
         Search {
             node: self,
             batch: batch.into_iter().collect(),
             offset: 0,
+        }
+    }
+
+    /// Adds the batch KVs in this node, update links and
+    /// returns; links, ranges and splitted batches.
+    pub fn insert_iter(&mut self, batch: impl IntoIterator<Item = (K, V, usize)>) -> Insert<K, V> {
+        Insert {
+            node: self,
+            batch: batch.into_iter().collect(),
+            outdated_link_idx: Vec::new(),
+        }
+    }
+
+    /// Remove the batch keys in this node, update links and
+    /// returns; links, ranges and splitted batches.
+    pub fn remove_iter(
+        &mut self,
+        node_range: (Bound<K>, Bound<K>),
+        batch: impl IntoIterator<Item = K>,
+    ) -> Remove<K, V> {
+        Remove {
+            node: self,
+            batch: batch.into_iter().collect(),
+            node_range,
         }
     }
 }
@@ -364,39 +401,5 @@ impl<K: Key, V: Value> Batch<K, V> {
         }
 
         batches
-    }
-}
-
-/// Is right range included in the left?
-pub fn range_inclusion<T>(
-    left_range: (Bound<&T>, Bound<&T>),
-    right_range: (Bound<&T>, Bound<&T>),
-) -> bool
-where
-    T: PartialOrd,
-{
-    let (left_low_b, left_up_b) = left_range;
-    let (right_low_b, right_up_b) = right_range;
-
-    match (left_low_b, right_low_b, right_up_b, left_up_b) {
-        (
-            Bound::Excluded(left_low),
-            Bound::Excluded(right_low),
-            Bound::Excluded(right_up),
-            Bound::Excluded(left_up),
-        ) if left_low <= right_low && right_up <= left_up => true,
-
-        (Bound::Unbounded, _, Bound::Excluded(right_up), Bound::Excluded(left_up))
-            if right_up <= left_up =>
-        {
-            true
-        }
-        (Bound::Excluded(left_low), Bound::Excluded(right_low), _, Bound::Unbounded)
-            if left_low <= right_low =>
-        {
-            true
-        }
-        (Bound::Unbounded, _, _, Bound::Unbounded) => true,
-        _ => false,
     }
 }

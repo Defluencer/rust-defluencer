@@ -1,31 +1,27 @@
+use crate::indexing::ordered_trees::{
+    errors::Error,
+    traits::{Key, Value},
+};
+
 use std::{
-    collections::VecDeque,
+    collections::HashSet,
     ops::{Bound, RangeBounds},
-    vec,
+};
+
+use super::{
+    config::{calculate_layer, Config},
+    node::TreeNode,
 };
 
 use async_recursion::async_recursion;
 
 use cid::Cid;
 
-use futures::{
-    stream::{self, FuturesUnordered},
-    Stream, StreamExt, TryStreamExt,
-};
+use futures::{future::try_join_all, stream, Stream, StreamExt, TryStreamExt};
 
 use either::Either::{self, Right};
 
 use ipfs_api::IpfsService;
-
-use crate::indexing::ordered_trees::{
-    errors::Error,
-    traits::{Key, Value},
-};
-
-use super::{
-    config::{calculate_layer, Config},
-    node::{range_inclusion, Batch, TreeNode},
-};
 
 pub fn batch_get<K: Key, V: Value>(
     ipfs: IpfsService,
@@ -73,119 +69,72 @@ pub async fn batch_insert<K: Key, V: Value>(
             Err(e) => Err(e),
         })
         .collect();
-    let mut elements = elements?;
+    let mut batch = elements?;
 
-    elements.sort_unstable_by(|(a, _, _), (b, _, _)| a.cmp(&b));
-
-    let elements = VecDeque::from(elements);
+    batch.sort_unstable_by(|(a, _, _), (b, _, _)| a.cmp(&b));
 
     let range = (Bound::Unbounded, Bound::Unbounded);
-    let ranges = VecDeque::from(vec![range]);
-
-    let main_batch = Batch { elements, ranges };
 
     let (link, _) =
-        execute_batch_insert::<K, V>(ipfs.clone(), Some(root), config, main_batch).await?;
+        execute_batch_insert::<K, V>(ipfs.clone(), Some(root), config.clone(), range, batch)
+            .await?;
 
-    return Ok(link);
+    Ok(link)
 }
 
 #[async_recursion]
 async fn execute_batch_insert<K: Key, V: Value>(
     ipfs: IpfsService,
-    link: Option<Cid>,
+    mut node_link: Option<Cid>,
     config: Config,
-    mut main_batch: Batch<K, V>,
+    range: (Bound<K>, Bound<K>),
+    batch: Vec<(K, V, usize)>,
 ) -> Result<(Cid, (Bound<K>, Bound<K>)), Error> {
-    let mut node = match link {
-        Some(cid) => ipfs.dag_get::<&str, TreeNode<K, V>>(cid, None).await?,
-        None => TreeNode::default(),
-    };
+    let layer = batch
+        .iter()
+        .fold(0, |state, (_, _, layer)| state.max(*layer));
 
-    // Get first range for this node.
-    let main_range = main_batch.ranges[0].clone();
-
-    // Remove node elements and links outside of batch range.
-    node.rm_outrange((main_range.start_bound(), main_range.end_bound()));
-
-    // Deconstruct node
-    let (elements, link_ranges) = node.into_inner();
-
-    // Insert node elements into batch,
-    main_batch.batch_insert(elements.into_iter());
-
-    // Split batch ranges around highest layer elements.
-    let (keys, values, layer) = main_batch.rm_highest();
-
-    // Create node with highest layer elements only.
     let mut node = TreeNode {
         layer,
-        keys,
-        values,
-        indexes: VecDeque::default(),
-        links: VecDeque::default(),
+        ..Default::default()
     };
 
-    // Split the batch into single range batches.
-    let batches = main_batch.split_per_range();
-
-    // Schedule each batch.
-    let mut futures: FuturesUnordered<_> = FuturesUnordered::default();
-    let mut modified_links = Vec::with_capacity(link_ranges.len());
-    'batch: for batch in batches.into_iter() {
-        let batch_range = &batch.ranges[0];
-
-        // If batch_range is included in link_range, attach link.
-        for (i, (link, range)) in link_ranges.iter().enumerate() {
-            if range_inclusion(
-                (range.start_bound(), range.end_bound()),
-                (batch_range.start_bound(), batch_range.end_bound()),
-            ) {
-                println!("{:?}", batch);
-
-                let future = execute_batch_insert(ipfs.clone(), Some(*link), config.clone(), batch);
-                futures.push(future);
-
-                modified_links.push(i);
-
-                continue 'batch;
-            }
+    if let Some(link) = node_link {
+        let temp = ipfs.dag_get::<&str, TreeNode<K, V>>(link, None).await?;
+        if temp.layer == layer {
+            node = temp;
+            node_link = None;
         }
+    };
 
-        // Drop empty batches.
-        if !batch.elements.is_empty() {
-            println!("{:?}", batch);
+    // Splitting a node is trimming copies with different ranges.
+    node.trim((range.start_bound(), range.end_bound()));
 
-            let future = execute_batch_insert(ipfs.clone(), None, config.clone(), batch);
-            futures.push(future);
-            continue 'batch;
-        }
-    }
+    let futures: Vec<_> = node
+        .insert_iter(batch.into_iter())
+        .map(|(batch_link, range, batch)| {
+            let link = match (batch_link, node_link) {
+                (None, None) => None,
+                (None, Some(i)) => Some(i),
+                (Some(i), None) => Some(i),
+                (Some(_), Some(_)) => panic!(
+                    "Nodes are either new (no batch links) or the node link was consumed to get the node"
+                ),
+            };
+            execute_batch_insert(ipfs.clone(), link, config.clone(), range, batch)
+        })
+        .collect();
 
-    // Execute batches.
-    while let Some((link, range)) = futures.try_next().await? {
-        // Insert links according to ranges from batch result.
+    let results: Result<Vec<_>, _> = try_join_all(futures).await;
+    let results = results?;
+
+    for (link, range) in results {
         node.insert_link(link, (range.start_bound(), range.end_bound()));
     }
 
-    //Reinsert links that were not modified.
-    for (i, (link, range)) in link_ranges.into_iter().enumerate() {
-        if let Ok(idx) = modified_links.binary_search(&i) {
-            if idx == i {
-                continue;
-            }
-        }
-
-        node.insert_link(link, (range.start_bound(), range.end_bound()));
-    }
-
-    println!("Final {:?}", node);
-
-    // Serialize node and add to ipfs.
     let cid = ipfs.dag_put(&node, config.codec).await?;
 
-    // Return node link and range.
-    Ok((cid, main_range))
+    Ok((cid, range))
 }
 
 pub async fn batch_remove<K: Key, V: Value>(
@@ -194,18 +143,21 @@ pub async fn batch_remove<K: Key, V: Value>(
     config: Config,
     keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
-    let elements: Result<Vec<_>, _> = keys
+    /* let elements: Result<Vec<_>, _> = keys
         .into_iter()
         .map(|key| match calculate_layer(&config, key.clone()) {
             Ok(layer) => Ok((key, V::default(), layer)),
             Err(e) => Err(e),
         })
         .collect();
-    let mut elements = elements?;
+    let mut elements = elements?; */
 
-    elements.sort_unstable_by(|(a, _, _), (b, _, _)| a.cmp(&b));
+    let mut batch: Vec<_> = keys.into_iter().collect();
+    batch.sort_unstable();
 
-    let elements = VecDeque::from(elements);
+    let range = (Bound::Unbounded, Bound::Unbounded);
+
+    //let elements = VecDeque::from(elements);
 
     /* let mut ranges = VecDeque::with_capacity(elements.len() + 1);
     for i in 0..elements.len() {
@@ -232,12 +184,14 @@ pub async fn batch_remove<K: Key, V: Value>(
         ranges.push_back(range);
     } */
 
-    let main_batch = Batch {
+    /* let main_batch = Batch {
         elements,
         ranges: VecDeque::from(vec![(Bound::Unbounded, Bound::Unbounded)]),
-    };
+    }; */
 
-    let result = execute_batch_remove(ipfs.clone(), vec![root], config, main_batch).await?;
+    let result =
+        execute_batch_remove::<K, V>(ipfs.clone(), HashSet::from([root]), config, range, batch)
+            .await?;
     let link = result.map(|(link, _)| link);
 
     Ok(link.unwrap())
@@ -246,70 +200,40 @@ pub async fn batch_remove<K: Key, V: Value>(
 #[async_recursion]
 async fn execute_batch_remove<K: Key, V: Value>(
     ipfs: IpfsService,
-    links: Vec<Cid>,
+    links: HashSet<Cid>,
     config: Config,
-    mut main_batch: Batch<K, V>,
+    range: (Bound<K>, Bound<K>),
+    batch: Vec<K>,
 ) -> Result<Option<(Cid, (Bound<K>, Bound<K>))>, Error> {
-    let mut futures: FuturesUnordered<_> = links
+    let futures: Vec<_> = links
         .into_iter()
         .map(|cid| ipfs.dag_get::<&str, TreeNode<K, V>>(cid, None))
         .collect();
 
-    // Merge all the nodes
-    let mut node = futures.try_next().await?.expect("Dag Get First Link");
-    while let Some(new_node) = futures.try_next().await? {
-        node.merge(new_node)
-    }
+    let results = try_join_all(futures).await;
+    let results = results?;
 
-    // Get range for this node.
-    let main_range = main_batch.ranges[0].clone();
+    let mut node = results
+        .into_iter()
+        .reduce(|mut node, new| {
+            node.merge(new);
+            node
+        })
+        .unwrap();
 
-    let link_ranges = node.rm_link_ranges();
+    let futures: Vec<_> = node
+        .remove_iter(range.clone(), batch)
+        .map(|(links, range, batch)| {
+            execute_batch_remove::<K, V>(ipfs.clone(), links, config.clone(), range, batch)
+        })
+        .collect();
 
-    // Remove node and batch matching elements and merge batch ranges.
-    node.batch_remove_match(&mut main_batch);
-
-    // Split the batch into single range batches.
-    let batches = main_batch.split_per_range();
-
-    // Schedule each batch.
-    let mut futures: FuturesUnordered<_> = FuturesUnordered::default();
-    let mut modified_links = Vec::with_capacity(link_ranges.len());
-    'batch: for batch in batches.into_iter() {
-        let batch_range = &batch.ranges[0];
-
-        // If link_range is included in batch_range, attach link.
-        let mut links = Vec::with_capacity(link_ranges.len());
-        for (i, (link, range)) in link_ranges.iter().enumerate() {
-            if range_inclusion(
-                (batch_range.start_bound(), batch_range.end_bound()),
-                (range.start_bound(), range.end_bound()),
-            ) {
-                links.push(*link);
-                modified_links.push(i);
-            }
-        }
-
-        if links.is_empty() {
-            continue 'batch;
-        }
-
-        // One links can't be a merge and with no element can't change lower nodes.
-        if links.len() == 1 && batch.elements.is_empty() {
-            // Only multi-link or single link with element batch change the links.
-            modified_links.pop();
-            continue 'batch;
-        }
-
-        println!("{:?}", batch);
-
-        let future = execute_batch_remove(ipfs.clone(), links, config.clone(), batch);
-        futures.push(future);
-    }
+    let results = try_join_all(futures).await;
+    let mut results = results?;
 
     if node.keys.is_empty() {
         // This node is empty, it has max one link.
-        if let Some(result) = futures.try_next().await? {
+        if let Some(result) = results.pop() {
             if let Some((link, range)) = result {
                 // Return the lower node since it's not empty.
                 return Ok(Some((link, range)));
@@ -319,33 +243,15 @@ async fn execute_batch_remove<K: Key, V: Value>(
         return Ok(None);
     }
 
-    // Execute batches.
-    while let Some(result) = futures.try_next().await? {
+    for result in results {
         if let Some((link, range)) = result {
-            // Insert links according to ranges from batch result.
             node.insert_link(link, (range.start_bound(), range.end_bound()));
         }
     }
 
-    // Reinsert links that were not modified.
-    for (i, (link, range)) in link_ranges.into_iter().enumerate() {
-        if let Ok(idx) = modified_links.binary_search(&i) {
-            if idx == i {
-                continue;
-            }
-        }
-
-        node.insert_link(link, (range.start_bound(), range.end_bound()));
-    }
-
-    println!("Final {:?}", node);
-
-    // Serialize node and add to ipfs.
     let cid = ipfs.dag_put(&node, config.codec).await?;
-    let link: Cid = cid.into();
 
-    // Return node link and range.
-    return Ok(Some((link, main_range)));
+    Ok(Some((cid, range)))
 }
 
 /// Stream all key value pairs in the tree in order.
