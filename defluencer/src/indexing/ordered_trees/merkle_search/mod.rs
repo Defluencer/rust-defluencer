@@ -120,6 +120,19 @@ impl MerkelSearchTree {
         Ok(())
     }
 
+    pub async fn batch_remove<K: Key, V: Value>(
+        &mut self,
+        keys: impl IntoIterator<Item = K>,
+    ) -> Result<(), Error> {
+        let root =
+            tree::batch_remove::<K, V>(self.ipfs.clone(), self.root, self.config.clone(), keys)
+                .await?;
+
+        self.root = root;
+
+        Ok(())
+    }
+
     pub fn stream<K: Key, V: Value>(&self) -> impl Stream<Item = Result<(K, V), Error>> {
         tree::stream_pairs(self.ipfs.clone(), self.root)
     }

@@ -170,8 +170,6 @@ async fn execute_batch_insert<K: Key, V: Value>(
     Ok(key_links)
 }
 
-//TODO return the values of the keys removed???
-
 /// Remove all values in the tree matching the keys.
 pub async fn batch_remove<K: Key, V: Value>(
     ipfs: IpfsService,

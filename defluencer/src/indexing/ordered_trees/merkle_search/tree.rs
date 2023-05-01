@@ -143,51 +143,10 @@ pub async fn batch_remove<K: Key, V: Value>(
     config: Config,
     keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
-    /* let elements: Result<Vec<_>, _> = keys
-        .into_iter()
-        .map(|key| match calculate_layer(&config, key.clone()) {
-            Ok(layer) => Ok((key, V::default(), layer)),
-            Err(e) => Err(e),
-        })
-        .collect();
-    let mut elements = elements?; */
-
     let mut batch: Vec<_> = keys.into_iter().collect();
     batch.sort_unstable();
 
     let range = (Bound::Unbounded, Bound::Unbounded);
-
-    //let elements = VecDeque::from(elements);
-
-    /* let mut ranges = VecDeque::with_capacity(elements.len() + 1);
-    for i in 0..elements.len() {
-        let range = if i == 0 {
-            let key = elements[i].0;
-            (Bound::Unbounded, Bound::Excluded(key))
-        } else if i == elements.len() - 1 {
-            let key = elements[i].0;
-            (Bound::Excluded(key), Bound::Unbounded)
-        } else {
-            let low_b = {
-                let key = elements[i - 1].0;
-                Bound::Excluded(key)
-            };
-
-            let up_b = {
-                let key = elements[i].0;
-                Bound::Excluded(key)
-            };
-
-            (low_b, up_b)
-        };
-
-        ranges.push_back(range);
-    } */
-
-    /* let main_batch = Batch {
-        elements,
-        ranges: VecDeque::from(vec![(Bound::Unbounded, Bound::Unbounded)]),
-    }; */
 
     let result =
         execute_batch_remove::<K, V>(ipfs.clone(), HashSet::from([root]), config, range, batch)

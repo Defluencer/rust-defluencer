@@ -245,8 +245,7 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     /// Merge all elements and links of two nodes.
     pub fn merge(&mut self, other: Self) {
         if self.layer != other.layer {
-            //TODO should not happen what do???
-            return;
+            panic!("Can never merge node with different layer");
         }
 
         let (elements, link_ranges) = other.into_inner();

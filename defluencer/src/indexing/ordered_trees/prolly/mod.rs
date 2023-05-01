@@ -24,7 +24,7 @@ type Key = Vec<u8>;
 pub struct ProllyTree {
     config: Config,
 
-    ipfs: IpfsService, // TODO ipfs should use config
+    ipfs: IpfsService,
 
     root: Cid,
 }

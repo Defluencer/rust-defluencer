@@ -97,6 +97,7 @@ impl<K: Key, V: Value> Iterator for Search<K, V> {
 
                     self.batch.pop_front().unwrap();
 
+                    // Messing the ordering is fine since we drop the node after anyway.
                     let key = self.node.keys.swap_remove_front(idx).unwrap();
                     let value = self.node.values.swap_remove_front(idx).unwrap();
 
