@@ -24,7 +24,9 @@ pub fn batch_get<K: Key, V: Value>(
     keys: impl IntoIterator<Item = K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     let mut batch = keys.into_iter().collect::<Vec<_>>();
+
     batch.sort_unstable();
+    batch.dedup();
 
     stream::once(async move {
         match ipfs.dag_get::<&str, TreeNodes<K, V>>(root, None).await {
@@ -82,7 +84,9 @@ pub async fn batch_insert<K: Key, V: Value>(
     key_values: impl IntoIterator<Item = (K, V)>,
 ) -> Result<Cid, Error> {
     let mut batch = key_values.into_iter().collect::<Vec<_>>();
+
     batch.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+    batch.dedup_by(|(a, _), (b, _)| a == b);
 
     let key_links = execute_batch_insert(ipfs.clone(), root, config.clone(), batch).await?;
 
@@ -178,7 +182,9 @@ pub async fn batch_remove<K: Key, V: Value>(
     keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
     let mut batch = keys.into_iter().collect::<Vec<_>>();
+
     batch.sort_unstable();
+    batch.dedup();
 
     let key_links =
         execute_batch_remove::<K, V>(ipfs.clone(), vec![root], config.clone(), batch).await?;
