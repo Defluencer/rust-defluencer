@@ -43,10 +43,8 @@ pub struct Tree {
 }
 
 /// Using Horner's method but shortcircuit when first trailling non-zero is reached in the new base.
-///
-/// https://blogs.sas.com/content/iml/2022/09/12/convert-base-10.html
 pub fn calculate_layer(config: &Config, key: impl Key) -> Result<usize, Error> {
-    let base = BigUint::from(config.base);
+    // https://blogs.sas.com/content/iml/2022/09/12/convert-base-10.html
 
     let bytes = match config.codec {
         Codec::DagCbor => serde_ipld_dagcbor::to_vec(&key.into())?,
@@ -56,8 +54,16 @@ pub fn calculate_layer(config: &Config, key: impl Key) -> Result<usize, Error> {
 
     let multihash = config.multihash_code.digest(&bytes);
 
+    let zero_count = horner(config.base, multihash.digest());
+
+    Ok(zero_count)
+}
+
+fn horner(base: usize, hash: &[u8]) -> usize {
+    let base = BigUint::from(base);
+
     // Big endian because you treat the bits as a number reading it from left to right.
-    let hash_as_numb = BigUint::from_bytes_be(multihash.digest());
+    let hash_as_numb = BigUint::from_bytes_be(hash);
 
     let mut quotient = hash_as_numb;
     let mut remainder;
@@ -74,5 +80,66 @@ pub fn calculate_layer(config: &Config, key: impl Key) -> Result<usize, Error> {
         zero_count += 1;
     }
 
-    Ok(zero_count)
+    zero_count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use rand_xoshiro::{
+        rand_core::{RngCore, SeedableRng},
+        Xoshiro256StarStar,
+    };
+
+    #[test]
+    fn layer_calulation() {
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        for _ in 0..100 {
+            let hash = rng.next_u64();
+
+            let mut hex = format!("{:#X}", hash);
+            let mut hex_string_zero_count = 0;
+            while let Some(last_char) = hex.pop() {
+                if last_char != '0' {
+                    break;
+                }
+
+                hex_string_zero_count += 1;
+            }
+
+            let zero_count = horner(16, &hash.to_be_bytes());
+
+            assert_eq!(hex_string_zero_count, zero_count);
+
+            let mut octal = format!("{:#o}", hash);
+            let mut octal_string_zero_count = 0;
+            while let Some(last_char) = octal.pop() {
+                if last_char != '0' {
+                    break;
+                }
+
+                octal_string_zero_count += 1;
+            }
+
+            let zero_count = horner(8, &hash.to_be_bytes());
+
+            assert_eq!(octal_string_zero_count, zero_count);
+
+            let mut binary = format!("{:#b}", hash);
+            let mut binary_string_zero_count = 0;
+            while let Some(last_char) = binary.pop() {
+                if last_char != '0' {
+                    break;
+                }
+
+                binary_string_zero_count += 1;
+            }
+
+            let zero_count = horner(2, &hash.to_be_bytes());
+
+            assert_eq!(binary_string_zero_count, zero_count);
+        }
+    }
 }

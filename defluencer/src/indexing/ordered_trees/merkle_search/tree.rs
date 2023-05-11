@@ -3,10 +3,7 @@ use crate::indexing::ordered_trees::{
     traits::{Key, Value},
 };
 
-use std::{
-    collections::HashSet,
-    ops::{Bound, RangeBounds},
-};
+use std::ops::{Bound, RangeBounds};
 
 use super::{
     config::{calculate_layer, Config},
@@ -108,7 +105,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
     };
 
     // Splitting a node is trimming copies with different ranges.
-    node.trim((range.start_bound(), range.end_bound()));
+    node.crop((range.start_bound(), range.end_bound()));
 
     let futures: Vec<_> = node
         .insert_iter(batch.into_iter())
@@ -149,8 +146,7 @@ pub async fn batch_remove<K: Key, V: Value>(
     let range = (Bound::Unbounded, Bound::Unbounded);
 
     let result =
-        execute_batch_remove::<K, V>(ipfs.clone(), HashSet::from([root]), config, range, batch)
-            .await?;
+        execute_batch_remove::<K, V>(ipfs.clone(), vec![root], config, range, batch).await?;
     let link = result.map(|(link, _)| link);
 
     Ok(link.unwrap())
@@ -159,7 +155,7 @@ pub async fn batch_remove<K: Key, V: Value>(
 #[async_recursion]
 async fn execute_batch_remove<K: Key, V: Value>(
     ipfs: IpfsService,
-    links: HashSet<Cid>,
+    links: Vec<Cid>,
     config: Config,
     range: (Bound<K>, Bound<K>),
     batch: Vec<K>,

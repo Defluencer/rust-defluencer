@@ -290,7 +290,7 @@ mod tests {
             .collect();
 
         let mut node = TreeNode::<u8, Branch> {
-            keys: keys.clone(),
+            keys,
             values: Branch {
                 links: links.clone(),
             },
@@ -327,10 +327,7 @@ mod tests {
             batch_five,
         ]);
 
-        let iter = Search {
-            node,
-            batch: batch.clone(),
-        };
+        let iter = Search { node, batch };
 
         let results: Vec<_> = iter.collect();
 
@@ -349,7 +346,7 @@ mod tests {
             .collect();
 
         let mut node = TreeNode::<u8, Branch> {
-            keys: keys.clone(),
+            keys,
             values: Branch {
                 links: links.clone(),
             },
@@ -390,10 +387,7 @@ mod tests {
             batch_five,
         ]);
 
-        let iter = Insert {
-            node,
-            batch: batch.clone(),
-        };
+        let iter = Insert { node, batch };
 
         let results: Vec<_> = iter.collect();
 
@@ -412,7 +406,7 @@ mod tests {
             .collect();
 
         let mut node = TreeNode::<u8, Branch> {
-            keys: keys.clone(),
+            keys,
             values: Branch {
                 links: links.clone(),
             },
@@ -431,10 +425,7 @@ mod tests {
 
         let expected_results = Vec::from(vec![batch_one, batch_two]);
 
-        let iter = Remove {
-            node,
-            batch: batch.clone(),
-        };
+        let iter = Remove { node, batch };
 
         let results: Vec<_> = iter.collect();
 

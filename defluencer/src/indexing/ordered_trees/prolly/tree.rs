@@ -139,7 +139,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
 
             node.insert(key_links.into_iter().flatten());
 
-            let nodes = node.split_with::<V>(config.clone())?;
+            let nodes = node.split::<V>(config.clone())?;
 
             nodes
                 .into_iter()
@@ -256,7 +256,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
 
             node.insert(key_links.into_iter().flatten());
 
-            let nodes = node.split_with::<V>(config.clone())?;
+            let nodes = node.split::<V>(config.clone())?;
 
             nodes
                 .into_iter()

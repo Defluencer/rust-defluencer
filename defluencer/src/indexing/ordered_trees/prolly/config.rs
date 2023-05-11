@@ -93,13 +93,13 @@ impl Config {
                 let mut bytes = match self.codec {
                     Codec::DagCbor => serde_ipld_dagcbor::to_vec(&key.into())?,
                     Codec::DagJson => serde_json::to_vec(&key.into())?,
-                    _ => unimplemented!(),
+                    _ => unimplemented!("IPLD Codec"),
                 };
 
                 let mut value_bytes = match self.codec {
                     Codec::DagCbor => serde_ipld_dagcbor::to_vec(&value.into())?,
                     Codec::DagJson => serde_json::to_vec(&value.into())?,
-                    _ => unimplemented!(),
+                    _ => unimplemented!("IPLD Codec"),
                 };
 
                 bytes.append(&mut value_bytes);
@@ -116,7 +116,7 @@ impl Config {
 
                 let threshold = (u32::MAX / threshold.chunking_factor as u32).count_zeros();
 
-                Ok(zero_count > threshold)
+                Ok(zero_count < threshold)
             }
         }
     }
@@ -127,4 +127,26 @@ impl Config {
 pub struct Tree {
     pub config: Cid,
     pub root: Cid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boundary() {
+        let mut config = Config::default();
+        config.chunking_strategy = Strategies::Threshold(HashThreshold {
+            chunking_factor: 16,
+            multihash_code: Code::Sha2_256,
+        });
+        config.codec = Codec::DagCbor;
+
+        let key = 1771948u32;
+        let value = Cid::try_from("bafyrgqaz2vrkx2tiwtfsog5wuogn4sbzxgp7o3k5654v2lqilkmtcuy74sqphrbcnykgf2yqmqpa3kreqdryqgp6dq2qqxxmtye5fuq7qvc5o").unwrap();
+
+        let bound = config.boundary(key, value).expect("Find boundary");
+
+        assert!(bound)
+    }
 }

@@ -326,7 +326,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_roundtrip() {
+    fn serde_roundtrip() {
         let key_one = vec![255u8, 0u8];
         let key_two = vec![255u8, 1u8];
 

@@ -20,7 +20,7 @@ use serde_ipld_dagcbor::DecodeError;
 
 use num::FromPrimitive;
 
-// Can link indexes be omited for a more compact representation?
+// Can link indices be omited for a more compact representation?
 
 impl<K: Key, V: Value> TryFrom<Ipld> for TreeNode<K, V> {
     type Error = Error;
@@ -38,7 +38,7 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNode<K, V> {
         };
 
         let links: Vec<Ipld> = list.pop().unwrap().try_into()?;
-        let indexes: Vec<Ipld> = list.pop().unwrap().try_into()?;
+        let indices: Vec<Ipld> = list.pop().unwrap().try_into()?;
         let values: Vec<Ipld> = list.pop().unwrap().try_into()?;
         let keys: Vec<Ipld> = list.pop().unwrap().try_into()?;
         let layer: usize = list.pop().unwrap().try_into()?;
@@ -50,9 +50,9 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNode<K, V> {
             result?
         };
 
-        let indexes = {
+        let indices = {
             let result: Result<VecDeque<_>, _> =
-                indexes.into_iter().map(|ipld| ipld.try_into()).collect();
+                indices.into_iter().map(|ipld| ipld.try_into()).collect();
 
             result?
         };
@@ -87,7 +87,7 @@ impl<K: Key, V: Value> TryFrom<Ipld> for TreeNode<K, V> {
             layer,
             keys,
             values,
-            indexes,
+            indices,
             links,
         })
     }
@@ -99,7 +99,7 @@ impl<K: Key, V: Value> From<TreeNode<K, V>> for Ipld {
             layer,
             keys,
             values,
-            indexes,
+            indices,
             links,
         } = node;
 
@@ -112,11 +112,11 @@ impl<K: Key, V: Value> From<TreeNode<K, V>> for Ipld {
             .collect::<Vec<_>>();
         let values = Ipld::List(values);
 
-        let indexes = indexes
+        let indices = indices
             .into_iter()
             .map(|idx| idx.into())
             .collect::<Vec<_>>();
-        let indexes = Ipld::List(indexes);
+        let indices = Ipld::List(indices);
 
         let links = links
             .into_iter()
@@ -124,7 +124,7 @@ impl<K: Key, V: Value> From<TreeNode<K, V>> for Ipld {
             .collect::<Vec<_>>();
         let links = Ipld::List(links);
 
-        Ipld::List(vec![layer.into(), keys, values, indexes, links])
+        Ipld::List(vec![layer.into(), keys, values, indices, links])
     }
 }
 
@@ -213,5 +213,39 @@ impl TryFrom<Ipld> for Tree {
         let tree = Self { config, root };
 
         Ok(tree)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cid::Cid;
+
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip() {
+        let key_one = 255u16;
+        let key_two = 256u16;
+
+        let value_one = String::from("This is value number one");
+        let value_two = String::from("This is value number two");
+
+        let link_one =
+            Cid::try_from("bafkreifdpvsjgvfqtm6ko6hzppibabrrke3peky3pfgjdpje25ub64atqa").unwrap();
+        let link_two =
+            Cid::try_from("bafkreic3bbguse6e5zziexunbvagwlt6zkmrjhy5nehowroelzhisff5ua").unwrap();
+
+        let node = TreeNode {
+            layer: 1,
+            keys: VecDeque::from([key_one.clone(), key_two.clone()]),
+            values: VecDeque::from(vec![value_one.clone(), value_two.clone()]),
+            indices: VecDeque::from(vec![0, 3]),
+            links: VecDeque::from(vec![link_one.clone(), link_two.clone()]),
+        };
+
+        let encoded = serde_ipld_dagcbor::to_vec(&node).unwrap();
+        let decoded: TreeNode<u16, String> = serde_ipld_dagcbor::from_slice(&encoded).unwrap();
+
+        assert_eq!(node, decoded);
     }
 }
