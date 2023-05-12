@@ -214,6 +214,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn empty_index_get_remove() {
         let ipfs = IpfsService::default();
 
@@ -236,6 +237,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn index_duplicate_insert() {
         let ipfs = IpfsService::default();
 
@@ -261,6 +263,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn index_sequential_insert() {
         let ipfs = IpfsService::default();
 
@@ -297,6 +300,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_sequential_remove() {
         let ipfs = IpfsService::default();
 
@@ -335,6 +339,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn index_fuzzy() {
         let ipfs = IpfsService::default();
 

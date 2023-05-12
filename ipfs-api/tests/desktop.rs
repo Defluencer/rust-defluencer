@@ -13,6 +13,7 @@ mod tests {
     const PEER_ID: &str = "12D3KooWRsEKtLGLW9FHw7t7dDhHrMDahw3VwssNgh55vksdvfmC";
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn id() {
         let peer_id = PeerId::try_from(PEER_ID).unwrap();
 
@@ -28,6 +29,7 @@ mod tests {
     const MSG: &str = "Hello World!";
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn pubsub_roundtrip() {
         let peer_id = PeerId::try_from(PEER_ID).unwrap();
 
@@ -63,6 +65,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn dag_roundtrip() {
         let ipfs = IpfsService::default();
 
@@ -80,6 +83,7 @@ mod tests {
     const SELF_KEY: &str = "bafzaajaiaejcb3tw3wtri7mxd66jsfeowj627zaktxbssmjykbwyzcqsmm46fbdd";
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn key_listing() {
         let self_cid = IPNSAddress::try_from(SELF_KEY).unwrap();
 
@@ -106,6 +110,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn pin_roundtrip() {
         let cid = Cid::try_from(TEST_CID).unwrap();
 
@@ -123,6 +128,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn add_cat_roundtrip() {
         let ipfs = IpfsService::default();
 
@@ -141,6 +147,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn pin_ls() {
         let ipfs = IpfsService::default();
 

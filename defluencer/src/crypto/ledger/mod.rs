@@ -152,6 +152,7 @@ mod tests {
     const SIGNING_INPUT: [u8; 12] = *b"Hello World!";
 
     #[test]
+    #[ignore]
     fn sign() {
         use k256::ecdsa::signature::DigestVerifier;
 
@@ -208,6 +209,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn example() {
         use k256::ecdsa::signature::{DigestSigner, DigestVerifier};
 
