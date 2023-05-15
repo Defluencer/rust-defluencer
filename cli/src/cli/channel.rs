@@ -7,7 +7,7 @@ use defluencer::{
 
 use heck::ToSnakeCase;
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use clap::{Parser, Subcommand};
 
@@ -194,7 +194,9 @@ pub struct Content {
 async fn local_setup(identity: Cid) -> Result<Channel<LocalUpdater>, Error> {
     let ipfs = IpfsService::default();
 
-    let identity = ipfs.dag_get::<String, Identity>(identity, None).await?;
+    let identity = ipfs
+        .dag_get::<String, Identity>(identity, None, Codec::default())
+        .await?;
     let addr = identity.ipns_addr.expect("IPNS Address");
     let key = identity.name.to_snake_case();
 

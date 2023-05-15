@@ -77,7 +77,10 @@ where
             ..Default::default()
         };
 
-        let identity = ipfs.dag_put(&identity, Codec::default()).await?.into();
+        let identity = ipfs
+            .dag_put(&identity, Codec::default(), Codec::default())
+            .await?
+            .into();
 
         let user = Self {
             ipfs,
@@ -102,7 +105,7 @@ where
     ) -> Result<(Cid, Identity), Error> {
         let mut identity = self
             .ipfs
-            .dag_get::<&str, Identity>(self.identity.link, None)
+            .dag_get::<&str, Identity>(self.identity.link, None, Codec::default())
             .await?;
 
         if let Some(name) = name {
@@ -133,7 +136,10 @@ where
             identity.eth_addr = Some(eth_addr);
         }
 
-        let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&identity, Codec::default(), Codec::default())
+            .await?;
 
         self.identity = cid.into();
 
@@ -185,7 +191,10 @@ where
             identity.eth_addr = Some(eth_addr);
         }
 
-        let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&identity, Codec::default(), Codec::default())
+            .await?;
 
         self.identity = cid.into();
 
@@ -389,7 +398,10 @@ where
     where
         V: ?Sized + Serialize,
     {
-        let content_cid = self.ipfs.dag_put(metadata, Codec::default()).await?;
+        let content_cid = self
+            .ipfs
+            .dag_put(metadata, Codec::default(), Codec::default())
+            .await?;
 
         let signed_cid = self.create_signed_link(content_cid).await?;
 
@@ -401,19 +413,28 @@ where
     }
 
     async fn video_duration(&self, video: Cid) -> Result<f64, Error> {
-        let days: Day = self.ipfs.dag_get(video, Some("/time")).await?;
+        let days: Day = self
+            .ipfs
+            .dag_get(video, Some("/time"), Codec::default())
+            .await?;
 
         let mut duration = 0.0;
 
         for (i, ipld) in days.links_to_hours.iter().enumerate().rev().take(1) {
             duration += (i * 3600) as f64; // 3600 second in 1 hour
 
-            let hours: Hour = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
+            let hours: Hour = self
+                .ipfs
+                .dag_get(ipld.link, Option::<&str>::None, Codec::default())
+                .await?;
 
             for (i, ipld) in hours.links_to_minutes.iter().enumerate().rev().take(1) {
                 duration += (i * 60) as f64; // 60 second in 1 minute
 
-                let minutes: Minute = self.ipfs.dag_get(ipld.link, Option::<&str>::None).await?;
+                let minutes: Minute = self
+                    .ipfs
+                    .dag_get(ipld.link, Option::<&str>::None, Codec::default())
+                    .await?;
 
                 duration += (minutes.links_to_seconds.len() - 1) as f64;
             }
@@ -426,7 +447,10 @@ where
     ///
     /// Message will only be valid when sent by this IPFS node.
     pub async fn chat_signature(&self, chat_info: ChatInfo) -> Result<Cid, Error> {
-        let cid = self.ipfs.dag_put(&chat_info, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&chat_info, Codec::default(), Codec::default())
+            .await?;
 
         let cid = self.create_signed_link(cid).await?;
 
@@ -445,7 +469,10 @@ where
             signature: signature.to_der().as_bytes().to_vec(),
         };
 
-        let cid = self.ipfs.dag_put(&signed_link, Default::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&signed_link, Codec::default(), Codec::default())
+            .await?;
 
         Ok(cid)
     }

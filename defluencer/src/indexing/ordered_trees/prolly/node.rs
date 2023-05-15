@@ -109,6 +109,8 @@ impl<K: Key> TreeNode<K, Branch> {
             (bytes, node)
         };
 
+        //println!("Node Size {}", bytes.len());
+
         if bytes.len() < config.min_size {
             return Ok(vec![node]);
         }
@@ -119,7 +121,11 @@ impl<K: Key> TreeNode<K, Branch> {
             (node.keys.len() as f64 * mult).floor() as usize
         };
 
+        //println!("Max key count {}", max_key_count);
+
         let capacity = (node.keys.len() as f64 / max_key_count as f64).ceil() as usize;
+
+        //println!("Capacity {}", capacity);
 
         let mut nodes = Vec::with_capacity(capacity);
 
@@ -129,6 +135,8 @@ impl<K: Key> TreeNode<K, Branch> {
             let value = node.values.links[i];
 
             if config.boundary(key, value)? {
+                //println!("Bound at index {}", i);
+
                 let keys = node.keys.split_off(i);
                 let links = node.values.links.split_off(i);
 
@@ -137,8 +145,8 @@ impl<K: Key> TreeNode<K, Branch> {
                     values: Branch { links },
                 };
 
-                if new_node.keys.len() > max_key_count {
-                    let idx = new_node.keys.len() - (new_node.keys.len() - max_key_count);
+                while new_node.keys.len() > max_key_count {
+                    let idx = new_node.keys.len() - max_key_count;
 
                     let keys = new_node.keys.split_off(idx);
                     let links = new_node.values.links.split_off(idx);
@@ -156,8 +164,8 @@ impl<K: Key> TreeNode<K, Branch> {
         }
 
         if !node.keys.is_empty() {
-            if node.keys.len() > max_key_count {
-                let idx = node.keys.len() - (node.keys.len() - max_key_count);
+            while node.keys.len() > max_key_count {
+                let idx = node.keys.len() - max_key_count;
 
                 let keys = node.keys.split_off(idx);
                 let links = node.values.links.split_off(idx);
@@ -228,7 +236,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
     /// Run the chunking algorithm on this node. Return splitted nodes in order if any.
     ///
     /// Idempotent
-    pub fn split_with(self, mut config: Config) -> Result<Vec<Self>, Error> {
+    pub fn split(self, mut config: Config) -> Result<Vec<Self>, Error> {
         let (bytes, mut node) = {
             let node = TreeNodes::<K, V>::Leaf(self);
             let bytes = serde_ipld_dagcbor::to_vec(&node)?;
@@ -252,6 +260,7 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
 
         let mut nodes = Vec::with_capacity(capacity);
 
+        // Skip index 1 since we already know it's a boundary
         for i in (1..node.keys.len()).rev() {
             let key = node.keys[i].clone();
             let value = node.values.elements[i].clone();
@@ -265,8 +274,8 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
                     values: Leaf { elements },
                 };
 
-                if new_node.keys.len() > max_key_count {
-                    let idx = new_node.keys.len() - (new_node.keys.len() - max_key_count);
+                while new_node.keys.len() > max_key_count {
+                    let idx = new_node.keys.len() - max_key_count;
 
                     let keys = new_node.keys.split_off(idx);
                     let elements = new_node.values.elements.split_off(idx);
@@ -284,8 +293,8 @@ impl<K: Key, V: Value> TreeNode<K, Leaf<V>> {
         }
 
         if !node.keys.is_empty() {
-            if node.keys.len() > max_key_count {
-                let idx = node.keys.len() - (node.keys.len() - max_key_count);
+            while node.keys.len() > max_key_count {
+                let idx = node.keys.len() - max_key_count;
 
                 let keys = node.keys.split_off(idx);
                 let elements = node.values.elements.split_off(idx);
@@ -446,10 +455,7 @@ mod tests {
 
         /* execute */
 
-        let leaf_nodes = leaf_node
-            .clone()
-            .split_with(config.clone())
-            .expect("Node split");
+        let leaf_nodes = leaf_node.clone().split(config.clone()).expect("Node split");
         let branch_nodes = branch_node
             .clone()
             .split::<Cid>(config.clone())
@@ -505,10 +511,7 @@ mod tests {
 
         /* execute */
 
-        let leaf_nodes = leaf_node
-            .clone()
-            .split_with(config.clone())
-            .expect("Node split");
+        let leaf_nodes = leaf_node.clone().split(config.clone()).expect("Node split");
         let branch_nodes = branch_node
             .clone()
             .split::<Cid>(config.clone())
@@ -557,11 +560,7 @@ mod tests {
         /* setup */
         let mut rng = Xoshiro256StarStar::from_entropy();
 
-        let mut keys = VecDeque::from(vec![0, 3, 5, 1771949, 1771950, 1771951, 1771952]);
-        let mut elements: Vec<_> = (0..keys.len())
-            .into_iter()
-            .map(|_| random_cid(&mut rng))
-            .collect();
+        let (mut keys, mut elements) = unique_random_sorted_pairs(46, &mut rng);
         let mut links: VecDeque<_> = elements.clone().into();
 
         let mut config = Config::default();
@@ -574,7 +573,7 @@ mod tests {
         let leaf_node = TreeNode::<u32, Leaf<Cid>> {
             keys: keys.clone(),
             values: Leaf {
-                elements: elements.clone(),
+                elements: elements.clone().into(),
             },
         };
         let branch_node = TreeNode::<u32, Branch> {
@@ -585,52 +584,71 @@ mod tests {
         };
 
         config.min_size = 0;
-        config.max_size = 530;
+        config.max_size = 1000;
 
         /* execute */
 
-        let leaf_nodes = leaf_node
-            .clone()
-            .split_with(config.clone())
-            .expect("Node split");
+        let leaf_nodes = leaf_node.split(config.clone()).expect("Node split");
         let branch_nodes = branch_node
-            .clone()
             .split::<Cid>(config.clone())
             .expect("Node split");
 
         /* results */
 
-        assert_eq!(leaf_nodes.len(), 2);
-        assert_eq!(branch_nodes.len(), 2);
+        assert_eq!(leaf_nodes.len(), 4);
+        assert_eq!(branch_nodes.len(), 4);
 
-        let last_keys = keys.split_off(6);
-        let last_elements = elements.split_off(6);
-        let last_links = links.split_off(6);
+        let results: Vec<_> = branch_nodes
+            .into_iter()
+            .zip(leaf_nodes.into_iter())
+            .collect();
 
-        let last_branch_node = TreeNode::<u32, Branch> {
-            keys: last_keys.clone(),
-            values: Branch { links: last_links },
+        let mut expected_results = Vec::new();
+
+        while keys.len() > 12 {
+            let idx = keys.len() - 12;
+
+            let split_keys = keys.split_off(idx);
+            let split_elements = elements.split_off(idx);
+            let split_links = links.split_off(idx);
+
+            let split_branch_node = TreeNode::<u32, Branch> {
+                keys: split_keys.clone(),
+                values: Branch { links: split_links },
+            };
+
+            let split_leaf_node = TreeNode::<u32, Leaf<Cid>> {
+                keys: split_keys,
+                values: Leaf {
+                    elements: split_elements.into(),
+                },
+            };
+
+            expected_results.push((split_branch_node, split_leaf_node));
+        }
+
+        let split_branch_node = TreeNode::<u32, Branch> {
+            keys: keys.clone(),
+            values: Branch { links: links },
         };
-        let last_leaf_node = TreeNode::<u32, Leaf<Cid>> {
-            keys: last_keys,
+
+        let split_leaf_node = TreeNode::<u32, Leaf<Cid>> {
+            keys: keys,
             values: Leaf {
-                elements: last_elements,
+                elements: elements.into(),
             },
         };
 
-        let first_branch_node = TreeNode::<u32, Branch> {
-            keys: keys.clone(),
-            values: Branch { links },
-        };
-        let first_leaf_node = TreeNode::<u32, Leaf<Cid>> {
-            keys,
-            values: Leaf { elements },
-        };
+        expected_results.push((split_branch_node, split_leaf_node));
 
-        assert_eq!(leaf_nodes[0], first_leaf_node);
-        assert_eq!(leaf_nodes[1], last_leaf_node);
-        assert_eq!(branch_nodes[0], first_branch_node);
-        assert_eq!(branch_nodes[1], last_branch_node);
+        expected_results.reverse();
+
+        for ((branch, leaf), (ex_branch, ex_leaf)) in
+            results.into_iter().zip(expected_results.into_iter())
+        {
+            assert_eq!(branch.keys, ex_branch.keys);
+            assert_eq!(leaf.keys, ex_leaf.keys);
+        }
     }
 
     fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
@@ -642,5 +660,24 @@ mod tests {
         let multihash = Multihash::wrap(0x13, &hash).unwrap();
 
         Cid::new_v1(/* DAG-CBOR */ 0x71, multihash)
+    }
+
+    fn unique_random_sorted_pairs(
+        numb: usize,
+        rng: &mut Xoshiro256StarStar,
+    ) -> (VecDeque<u32>, VecDeque<Cid>) {
+        let mut key_values = Vec::with_capacity(numb);
+
+        for _ in 0..numb {
+            let key = rng.next_u32();
+            let value = random_cid(rng);
+
+            key_values.push((key, value));
+        }
+
+        key_values.sort_unstable_by(|(a, _), (b, _)| a.cmp(&b));
+        key_values.dedup_by(|(a, _), (b, _)| a == b);
+
+        key_values.into_iter().unzip()
     }
 }

@@ -18,34 +18,41 @@ use futures::{future::try_join_all, stream, Stream, StreamExt, TryStreamExt};
 
 use either::Either::{self, Right};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 pub fn batch_get<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
+    codec: Codec,
     keys: impl IntoIterator<Item = K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     let mut keys: Vec<_> = keys.into_iter().collect();
     keys.sort_unstable();
 
-    search(ipfs, root, keys)
+    search(ipfs, root, codec, keys)
 }
 
 fn search<K: Key, V: Value>(
     ipfs: IpfsService,
     link: Cid,
+    codec: Codec,
     batch: Vec<K>,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     stream::once(async move {
-        match ipfs.dag_get::<&str, TreeNode<K, V>>(link, None).await {
+        match ipfs
+            .dag_get::<&str, TreeNode<K, V>>(link, None, codec)
+            .await
+        {
             Ok(node) => Ok((ipfs, node, batch)),
             Err(e) => Err(e),
         }
     })
-    .map_ok(|(ipfs, node, batch)| {
+    .map_ok(move |(ipfs, node, batch)| {
         stream::iter(node.into_search_iter(batch))
             .map(move |either| match either {
-                Either::Left((link, batch)) => search(ipfs.clone(), link, batch).boxed_local(),
+                Either::Left((link, batch)) => {
+                    search(ipfs.clone(), link, codec, batch).boxed_local()
+                }
                 Right((key, value)) => stream::once(async move { Ok((key, value)) }).boxed_local(),
             })
             .flatten()
@@ -97,7 +104,9 @@ async fn execute_batch_insert<K: Key, V: Value>(
     };
 
     if let Some(link) = node_link {
-        let temp = ipfs.dag_get::<&str, TreeNode<K, V>>(link, None).await?;
+        let temp = ipfs
+            .dag_get::<&str, TreeNode<K, V>>(link, None, config.codec)
+            .await?;
         if temp.layer == layer {
             node = temp;
             node_link = None;
@@ -129,7 +138,7 @@ async fn execute_batch_insert<K: Key, V: Value>(
         node.insert_link(link, (range.start_bound(), range.end_bound()));
     }
 
-    let cid = ipfs.dag_put(&node, config.codec).await?;
+    let cid = ipfs.dag_put(&node, config.codec, config.codec).await?;
 
     Ok((cid, range))
 }
@@ -162,7 +171,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
 ) -> Result<Option<(Cid, (Bound<K>, Bound<K>))>, Error> {
     let futures: Vec<_> = links
         .into_iter()
-        .map(|cid| ipfs.dag_get::<&str, TreeNode<K, V>>(cid, None))
+        .map(|cid| ipfs.dag_get::<&str, TreeNode<K, V>>(cid, None, config.codec))
         .collect();
 
     let results = try_join_all(futures).await;
@@ -204,7 +213,7 @@ async fn execute_batch_remove<K: Key, V: Value>(
         }
     }
 
-    let cid = ipfs.dag_put(&node, config.codec).await?;
+    let cid = ipfs.dag_put(&node, config.codec, config.codec).await?;
 
     Ok(Some((cid, range)))
 }
@@ -213,9 +222,13 @@ async fn execute_batch_remove<K: Key, V: Value>(
 pub fn stream_pairs<K: Key, V: Value>(
     ipfs: IpfsService,
     root: Cid,
+    codec: Codec,
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     stream::once(async move {
-        match ipfs.dag_get::<&str, TreeNode<K, V>>(root, None).await {
+        match ipfs
+            .dag_get::<&str, TreeNode<K, V>>(root, None, codec)
+            .await
+        {
             Ok(node) => Ok((ipfs, node)),
             Err(e) => Err(e),
         }
@@ -223,7 +236,7 @@ pub fn stream_pairs<K: Key, V: Value>(
     .map_ok(move |(ipfs, node)| {
         stream::iter(node.into_iter())
             .map(move |either| match either {
-                Either::Left((link, _)) => stream_pairs(ipfs.clone(), link).boxed_local(),
+                Either::Left((link, _)) => stream_pairs(ipfs.clone(), link, codec).boxed_local(),
                 Right((key, value)) => stream::once(async move { Ok((key, value)) }).boxed_local(),
             })
             .flatten()

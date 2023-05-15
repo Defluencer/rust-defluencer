@@ -73,9 +73,15 @@ mod tests {
             data: String::from("This is a test"),
         };
 
-        let cid = ipfs.dag_put(&node, Codec::default()).await.unwrap();
+        let cid = ipfs
+            .dag_put(&node, Codec::default(), Codec::default())
+            .await
+            .unwrap();
 
-        let new_node: TestBlock = ipfs.dag_get(cid, Option::<&str>::None).await.unwrap();
+        let new_node: TestBlock = ipfs
+            .dag_get(cid, Option::<&str>::None, Codec::default())
+            .await
+            .unwrap();
 
         assert_eq!(node, new_node)
     }

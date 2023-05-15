@@ -125,7 +125,9 @@ async fn create_id(args: Identity) -> Result<(), Error> {
         eth_addr,
     };
 
-    let cid = ipfs.dag_put(&identity, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&identity, Codec::default(), Codec::default())
+        .await?;
 
     println!("✅ User Identity Created\nCID: {}", cid);
 
@@ -245,7 +247,9 @@ async fn agregate(args: Address) -> Result<(), Error> {
 
     let cid = ipfs.name_resolve(args.address.into()).await?;
 
-    let meta = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+    let meta = ipfs
+        .dag_get::<&str, ChannelMetadata>(cid, None, Codec::default())
+        .await?;
 
     let topic = match meta.agregation_channel {
         Some(tp) => tp,
@@ -312,7 +316,9 @@ async fn stream_comments(addr: IPNSAddress) -> Result<(), Error> {
     let defluencer = Defluencer::from(ipfs.clone());
 
     let cid = ipfs.name_resolve(addr.into()).await?;
-    let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+    let metadata = ipfs
+        .dag_get::<&str, ChannelMetadata>(cid, None, Codec::default())
+        .await?;
 
     let index = match metadata.comment_index {
         Some(ipns) => ipns,
@@ -344,7 +350,9 @@ async fn stream_content(addr: IPNSAddress) -> Result<(), Error> {
     let defluencer = Defluencer::from(ipfs.clone());
 
     let cid = ipfs.name_resolve(addr.into()).await?;
-    let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+    let metadata = ipfs
+        .dag_get::<&str, ChannelMetadata>(cid, None, Codec::default())
+        .await?;
 
     let index = match metadata.content_index {
         Some(ipns) => ipns,

@@ -59,7 +59,9 @@ impl Channel<LocalUpdater> {
     ///
     /// Returns channel and new identity with channel address included.
     pub async fn create_local(ipfs: IpfsService, mut id_cid: Cid) -> Result<(Self, Cid), Error> {
-        let mut identity = ipfs.dag_get::<String, Identity>(id_cid, None).await?;
+        let mut identity = ipfs
+            .dag_get::<String, Identity>(id_cid, None, Codec::default())
+            .await?;
 
         use heck::ToSnakeCase;
         let key = identity.name.to_snake_case();
@@ -72,7 +74,10 @@ impl Channel<LocalUpdater> {
 
                 identity.ipns_addr = Some(addr);
 
-                id_cid = ipfs.dag_put(&identity, Codec::default()).await?.into();
+                id_cid = ipfs
+                    .dag_put(&identity, Codec::default(), Codec::default())
+                    .await?
+                    .into();
 
                 addr
             }
@@ -83,7 +88,9 @@ impl Channel<LocalUpdater> {
             ..Default::default()
         };
 
-        let root = ipfs.dag_put(&metadata, Codec::default()).await?;
+        let root = ipfs
+            .dag_put(&metadata, Codec::default(), Codec::default())
+            .await?;
 
         ipfs.pin_add(root, true).await?;
 
@@ -125,7 +132,7 @@ where
 
         let mut identity = self
             .ipfs
-            .dag_get::<&str, Identity>(channel.identity.link, None)
+            .dag_get::<&str, Identity>(channel.identity.link, None, Codec::default())
             .await?;
 
         if let Some(name) = name {
@@ -156,7 +163,10 @@ where
             identity.btc_addr = Some(btc_addr);
         }
 
-        let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&identity, Codec::default(), Codec::default())
+            .await?;
 
         channel.identity = cid.into();
 
@@ -192,7 +202,10 @@ where
             identity.ipns_addr = Some(ipns);
         }
 
-        let cid = self.ipfs.dag_put(&identity, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&identity, Codec::default(), Codec::default())
+            .await?;
 
         channel.identity = cid.into();
 
@@ -217,7 +230,11 @@ where
         let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut follows = match channel.follows {
-            Some(ipld) => self.ipfs.dag_get::<&str, Follows>(ipld.link, None).await?,
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, Follows>(ipld.link, None, Codec::default())
+                    .await?
+            }
             None => Follows::default(),
         };
 
@@ -225,7 +242,10 @@ where
             return Err(Error::AlreadyAdded);
         }
 
-        let cid = self.ipfs.dag_put(&follows, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&follows, Codec::default(), Codec::default())
+            .await?;
 
         channel.follows = Some(cid.into());
 
@@ -239,7 +259,11 @@ where
         let (root_cid, mut channel) = self.get_metadata().await?;
 
         let mut follows = match channel.follows {
-            Some(ipld) => self.ipfs.dag_get::<&str, Follows>(ipld.link, None).await?,
+            Some(ipld) => {
+                self.ipfs
+                    .dag_get::<&str, Follows>(ipld.link, None, Codec::default())
+                    .await?
+            }
             None => return Err(Error::NotFound),
         };
 
@@ -247,7 +271,10 @@ where
             return Err(Error::NotFound);
         }
 
-        let cid = self.ipfs.dag_put(&follows, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&follows, Codec::default(), Codec::default())
+            .await?;
 
         channel.follows = Some(cid.into());
 
@@ -280,7 +307,7 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
@@ -302,7 +329,10 @@ where
             live.archiving = archive;
         }
 
-        let cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
 
         channel.live = Some(cid.into());
 
@@ -329,14 +359,18 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
         };
 
         let mut bans: Bans = match live.bans {
-            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            Some(link) => {
+                self.ipfs
+                    .dag_get(link.link, Option::<&str>::None, Codec::default())
+                    .await?
+            }
             None => Bans::default(),
         };
 
@@ -344,10 +378,16 @@ where
             return Ok(None);
         }
 
-        let bans_cid = self.ipfs.dag_put(&bans, Codec::default()).await?;
+        let bans_cid = self
+            .ipfs
+            .dag_put(&bans, Codec::default(), Codec::default())
+            .await?;
         live.bans = Some(bans_cid.into());
 
-        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let live_cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
         channel.live = Some(live_cid.into());
 
         self.update_metadata(root_cid, &channel).await?;
@@ -362,14 +402,18 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
         };
 
         let mut bans: Bans = match live.bans {
-            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            Some(link) => {
+                self.ipfs
+                    .dag_get(link.link, Option::<&str>::None, Codec::default())
+                    .await?
+            }
             None => return Ok(None),
         };
 
@@ -377,10 +421,16 @@ where
             return Ok(None);
         }
 
-        let bans_cid = self.ipfs.dag_put(&bans, Codec::default()).await?;
+        let bans_cid = self
+            .ipfs
+            .dag_put(&bans, Codec::default(), Codec::default())
+            .await?;
         live.bans = Some(bans_cid.into());
 
-        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let live_cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
         channel.live = Some(live_cid.into());
 
         self.update_metadata(root_cid, &channel).await?;
@@ -395,7 +445,7 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
@@ -403,7 +453,10 @@ where
 
         live.bans = Some(bans);
 
-        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let live_cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
         channel.live = Some(live_cid.into());
 
         self.update_metadata(root_cid, &channel).await?;
@@ -418,14 +471,18 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
         };
 
         let mut mods: Moderators = match live.mods {
-            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            Some(link) => {
+                self.ipfs
+                    .dag_get(link.link, Option::<&str>::None, Codec::default())
+                    .await?
+            }
             None => Moderators::default(),
         };
 
@@ -433,10 +490,16 @@ where
             return Ok(None);
         }
 
-        let mods_cid = self.ipfs.dag_put(&mods, Codec::default()).await?;
+        let mods_cid = self
+            .ipfs
+            .dag_put(&mods, Codec::default(), Codec::default())
+            .await?;
         live.mods = Some(mods_cid.into());
 
-        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let live_cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
         channel.live = Some(live_cid.into());
 
         self.update_metadata(root_cid, &channel).await?;
@@ -451,14 +514,18 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
         };
 
         let mut mods: Moderators = match live.mods {
-            Some(link) => self.ipfs.dag_get(link.link, Option::<&str>::None).await?,
+            Some(link) => {
+                self.ipfs
+                    .dag_get(link.link, Option::<&str>::None, Codec::default())
+                    .await?
+            }
             None => return Ok(None),
         };
 
@@ -466,10 +533,16 @@ where
             return Ok(None);
         }
 
-        let mods_cid = self.ipfs.dag_put(&mods, Codec::default()).await?;
+        let mods_cid = self
+            .ipfs
+            .dag_put(&mods, Codec::default(), Codec::default())
+            .await?;
         live.mods = Some(mods_cid.into());
 
-        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let live_cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
         channel.live = Some(live_cid.into());
 
         self.update_metadata(root_cid, &channel).await?;
@@ -484,7 +557,7 @@ where
         let mut live = match channel.live {
             Some(ipld) => {
                 self.ipfs
-                    .dag_get::<&str, LiveSettings>(ipld.link, None)
+                    .dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
                     .await?
             }
             None => LiveSettings::default(),
@@ -492,7 +565,10 @@ where
 
         live.mods = Some(moderators);
 
-        let live_cid = self.ipfs.dag_put(&live, Codec::default()).await?;
+        let live_cid = self
+            .ipfs
+            .dag_put(&live, Codec::default(), Codec::default())
+            .await?;
         channel.live = Some(live_cid.into());
 
         self.update_metadata(root_cid, &channel).await?;
@@ -503,7 +579,10 @@ where
     /// Add new content.
     pub async fn add_content(&self, content_cid: Cid) -> Result<Cid, Error> {
         // path "/link" to skip signature block
-        let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
+        let media: Media = self
+            .ipfs
+            .dag_get(content_cid, Some("/link"), Codec::default())
+            .await?;
         let datetime = match Utc.timestamp_opt(media.user_timestamp(), 0) {
             LocalResult::Single(datetime) => datetime,
             LocalResult::None => return Err(Error::Timestamp),
@@ -528,7 +607,10 @@ where
     /// Remove a specific media.
     /// Also remove associated comments.
     pub async fn remove_content(&self, content_cid: Cid) -> Result<Option<Cid>, Error> {
-        let media: Media = self.ipfs.dag_get(content_cid, Some("/link")).await?;
+        let media: Media = self
+            .ipfs
+            .dag_get(content_cid, Some("/link"), Codec::default())
+            .await?;
 
         let datetime = match Utc.timestamp_opt(media.user_timestamp(), 0) {
             LocalResult::Single(datetime) => datetime,
@@ -565,7 +647,10 @@ where
 
     /// Add a new comment on the specified media.
     pub async fn add_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
-        let comment: Comment = self.ipfs.dag_get(comment_cid, Some("/link")).await?;
+        let comment: Comment = self
+            .ipfs
+            .dag_get(comment_cid, Some("/link"), Codec::default())
+            .await?;
         let media_cid = comment.origin.expect("Comment Origin");
 
         let (root_cid, mut channel) = self.get_metadata().await?;
@@ -574,7 +659,7 @@ where
             Some(index) => index,
             None => self
                 .ipfs
-                .dag_put(&HAMTRoot::default(), Codec::default())
+                .dag_put(&HAMTRoot::default(), Codec::default(), Codec::default())
                 .await?
                 .into(),
         };
@@ -583,7 +668,7 @@ where
             Some(comments) => comments.into(),
             None => self
                 .ipfs
-                .dag_put(&HAMTRoot::default(), Codec::default())
+                .dag_put(&HAMTRoot::default(), Codec::default(), Codec::default())
                 .await?
                 .into(),
         };
@@ -601,7 +686,10 @@ where
 
     /// Remove a specific comment.
     pub async fn remove_comment(&self, comment_cid: Cid) -> Result<Option<Cid>, Error> {
-        let comment: Comment = self.ipfs.dag_get(comment_cid, Some("/link")).await?;
+        let comment: Comment = self
+            .ipfs
+            .dag_get(comment_cid, Some("/link"), Codec::default())
+            .await?;
         let media_cid = comment.origin.expect("Comment Origin");
 
         let (root_cid, mut channel) = self.get_metadata().await?;
@@ -630,13 +718,19 @@ where
     pub async fn get_metadata(&self) -> Result<(Cid, ChannelMetadata), Error> {
         let cid = self.ipfs.name_resolve(self.addr.into()).await?;
 
-        let meta = self.ipfs.dag_get(cid, Option::<&str>::None).await?;
+        let meta = self
+            .ipfs
+            .dag_get(cid, Option::<&str>::None, Codec::default())
+            .await?;
 
         Ok((cid, meta))
     }
 
     async fn update_metadata(&self, old_cid: Cid, channel: &ChannelMetadata) -> Result<Cid, Error> {
-        let root = self.ipfs.dag_put(channel, Codec::default()).await?;
+        let root = self
+            .ipfs
+            .dag_put(channel, Codec::default(), Codec::default())
+            .await?;
 
         self.ipfs.pin_update(old_cid, root).await?;
 

@@ -10,7 +10,7 @@ use cid::Cid;
 
 use futures::{Stream, StreamExt};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use self::config::{Config, Tree};
 
@@ -40,21 +40,49 @@ impl MerkelSearchTree {
     }
 
     pub async fn load(ipfs: IpfsService, cid: Cid) -> Result<Self, Error> {
-        let tree = ipfs.dag_get::<&str, Tree>(cid, None).await?;
+        let tree = ipfs
+            .dag_get::<&str, Tree>(cid, None, Codec::default())
+            .await?;
 
         let Tree { config, root } = tree;
 
-        let config = ipfs.dag_get::<&str, Config>(config, None).await?;
+        let config = ipfs
+            .dag_get::<&str, Config>(config, None, Codec::default())
+            .await?;
 
         let tree = Self { ipfs, config, root };
 
         Ok(tree)
     }
 
+    pub async fn save(&self) -> Result<Cid, Error> {
+        let config = self
+            .ipfs
+            .dag_put(&self.config, self.config.codec, self.config.codec)
+            .await?;
+
+        let tree = Tree {
+            config,
+            root: self.root,
+        };
+
+        let cid = self
+            .ipfs
+            .dag_put(&tree, self.config.codec, self.config.codec)
+            .await?;
+
+        Ok(cid)
+    }
+
     pub async fn get<K: Key, V: Value>(&self, key: K) -> Result<Option<(K, V)>, Error> {
-        let results = tree::batch_get::<K, V>(self.ipfs.clone(), self.root, iter::once(key))
-            .collect::<Vec<_>>()
-            .await;
+        let results = tree::batch_get::<K, V>(
+            self.ipfs.clone(),
+            self.root,
+            self.config.codec,
+            iter::once(key),
+        )
+        .collect::<Vec<_>>()
+        .await;
 
         let results: Result<Vec<_>, _> = results.into_iter().collect();
         let mut results = results?;
@@ -72,7 +100,7 @@ impl MerkelSearchTree {
         &self,
         keys: impl IntoIterator<Item = K>,
     ) -> impl Stream<Item = Result<(K, V), Error>> {
-        tree::batch_get::<K, V>(self.ipfs.clone(), self.root, keys)
+        tree::batch_get::<K, V>(self.ipfs.clone(), self.root, self.config.codec, keys)
     }
 
     pub async fn insert<K: Key, V: Value>(&mut self, key: K, value: V) -> Result<(), Error> {
@@ -134,6 +162,6 @@ impl MerkelSearchTree {
     }
 
     pub fn stream<K: Key, V: Value>(&self) -> impl Stream<Item = Result<(K, V), Error>> {
-        tree::stream_pairs(self.ipfs.clone(), self.root)
+        tree::stream_pairs(self.ipfs.clone(), self.root, self.config.codec)
     }
 }

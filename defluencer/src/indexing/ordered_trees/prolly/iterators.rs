@@ -448,42 +448,4 @@ mod tests {
 
         Cid::new_v1(/* DAG-CBOR */ 0x71, multihash)
     }
-
-    /* fn unique_random_sorted_pairs(
-        numb: usize,
-        rng: &mut Xoshiro256StarStar,
-    ) -> (VecDeque<u8>, VecDeque<Cid>) {
-        let mut key_values = Vec::with_capacity(numb);
-
-        for _ in 0..numb {
-            let mut byte = [0];
-            rng.fill_bytes(&mut byte);
-            let key = byte[0];
-            let link = random_cid(rng);
-
-            key_values.push((key, link));
-        }
-
-        key_values.sort_unstable_by(|(a, _), (b, _)| a.cmp(&b));
-        key_values.dedup_by(|(a, _), (b, _)| a == b);
-
-        key_values.into_iter().unzip()
-    } */
-
-    /* fn unique_random_sorted_batch(numb: usize, rng: &mut Xoshiro256StarStar) -> VecDeque<u8> {
-        let mut keys = Vec::with_capacity(numb);
-
-        for _ in 0..numb {
-            let mut byte = [0];
-            rng.fill_bytes(&mut byte);
-            let key = byte[0];
-
-            keys.push(key);
-        }
-
-        keys.sort_unstable();
-        keys.dedup();
-
-        keys.into()
-    } */
 }

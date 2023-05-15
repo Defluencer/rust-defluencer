@@ -27,7 +27,10 @@ use linked_data::{
     types::{IPLDLink, IPNSAddress},
 };
 
-use ipfs_api::{responses::PubSubMessage, IpfsService};
+use ipfs_api::{
+    responses::{Codec, PubSubMessage},
+    IpfsService,
+};
 
 #[derive(Default, Clone)]
 pub struct Defluencer {
@@ -86,7 +89,10 @@ impl Defluencer {
 
                 let cid = Cid::try_from(data)?;
 
-                let _media = self.ipfs.dag_get::<String, Media>(cid, None).await?;
+                let _media = self
+                    .ipfs
+                    .dag_get::<String, Media>(cid, None, Codec::default())
+                    .await?;
 
                 Ok(Some(cid))
             })
@@ -180,7 +186,7 @@ impl Defluencer {
                                 continue;
                             }
 
-                            metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await) });
+                            metadata_pool.push(async move { (cid, self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None, Codec::default()).await) });
                         },
                         option = metadata_pool.next() => {
                              let (cid, metadata) = match option {
@@ -191,7 +197,7 @@ impl Defluencer {
                             let metadata = metadata?;
 
                             if let Some(ipld) = metadata.follows {
-                                follows_pool.push(self.ipfs.dag_get::<&str, Follows>(ipld.link, None));
+                                follows_pool.push(self.ipfs.dag_get::<&str, Follows>(ipld.link, None, Codec::default()));
                             }
 
                             let next_item = (cid, metadata.clone());
@@ -233,7 +239,11 @@ impl Defluencer {
         stream
             .filter_map(|result| async move {
                 match result {
-                    Ok(cid) => match self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await {
+                    Ok(cid) => match self
+                        .ipfs
+                        .dag_get::<&str, ChannelMetadata>(cid, None, Codec::default())
+                        .await
+                    {
                         Ok(channel) => Some((cid, channel)),
                         Err(_) => None,
                     },
@@ -251,9 +261,10 @@ impl Defluencer {
     ) -> HashMap<Cid, Identity> {
         let stream: FuturesUnordered<_> = channels
             .filter_map(|channel| {
-                channel
-                    .follows
-                    .map(|ipld| self.ipfs.dag_get::<&str, Follows>(ipld.link, None))
+                channel.follows.map(|ipld| {
+                    self.ipfs
+                        .dag_get::<&str, Follows>(ipld.link, None, Codec::default())
+                })
             })
             .collect();
 
@@ -272,7 +283,11 @@ impl Defluencer {
                 }
             })
             .filter_map(|cid| async move {
-                match self.ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await {
+                match self
+                    .ipfs
+                    .dag_get::<&str, ChannelMetadata>(cid, None, Codec::default())
+                    .await
+                {
                     Ok(channel) => Some(channel),
                     Err(_) => None,
                 }
@@ -280,7 +295,7 @@ impl Defluencer {
             .filter_map(|channel| async move {
                 match self
                     .ipfs
-                    .dag_get::<&str, Identity>(channel.identity.link, None)
+                    .dag_get::<&str, Identity>(channel.identity.link, None, Codec::default())
                     .await
                 {
                     Ok(identity) => Some((channel.identity.link, identity)),
@@ -299,7 +314,7 @@ impl Defluencer {
         stream::once(async move {
             let yearly = self
                 .ipfs
-                .dag_get::<&str, Yearly>(content_index.link, None)
+                .dag_get::<&str, Yearly>(content_index.link, None, Codec::default())
                 .await?;
 
             Result::<_, Error>::Ok(yearly)
@@ -323,7 +338,10 @@ impl Defluencer {
                 None => return Ok(None),
             };
 
-            let months = self.ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?;
+            let months = self
+                .ipfs
+                .dag_get::<&str, Monthly>(ipld.link, None, Codec::default())
+                .await?;
 
             Ok(Some((months, iter)))
         })
@@ -338,7 +356,10 @@ impl Defluencer {
                     None => return Ok(None),
                 };
 
-                let days = self.ipfs.dag_get::<&str, Daily>(ipld.link, None).await?;
+                let days = self
+                    .ipfs
+                    .dag_get::<&str, Daily>(ipld.link, None, Codec::default())
+                    .await?;
 
                 Ok(Some((days, iter)))
             },
@@ -352,7 +373,10 @@ impl Defluencer {
                 None => return Ok(None),
             };
 
-            let hours = self.ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?;
+            let hours = self
+                .ipfs
+                .dag_get::<&str, Hourly>(ipld.link, None, Codec::default())
+                .await?;
 
             Ok(Some((hours, iter)))
         })
@@ -365,7 +389,10 @@ impl Defluencer {
                 None => return Ok(None),
             };
 
-            let minutes = self.ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?;
+            let minutes = self
+                .ipfs
+                .dag_get::<&str, Minutes>(ipld.link, None, Codec::default())
+                .await?;
 
             Ok(Some((minutes, iter)))
         })
@@ -380,7 +407,10 @@ impl Defluencer {
                     None => return Result::<_, Error>::Ok(None),
                 };
 
-                let seconds = self.ipfs.dag_get::<&str, Seconds>(ipld.link, None).await?;
+                let seconds = self
+                    .ipfs
+                    .dag_get::<&str, Seconds>(ipld.link, None, Codec::default())
+                    .await?;
 
                 let stream = stream::iter(
                     seconds

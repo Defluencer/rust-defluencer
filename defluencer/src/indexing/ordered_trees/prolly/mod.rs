@@ -12,9 +12,14 @@ use cid::Cid;
 
 use futures::{Stream, StreamExt};
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use config::Tree;
+
+use self::{
+    deserialization::TreeNodes,
+    node::{Leaf, TreeNode},
+};
 
 use super::{errors::Error, traits::Value};
 
@@ -30,10 +35,12 @@ pub struct ProllyTree {
 }
 
 impl ProllyTree {
-    pub fn new(ipfs: IpfsService, config: Option<Config>) -> Result<Self, Error> {
-        let root = Cid::default();
-
+    pub async fn new<V: Value>(ipfs: IpfsService, config: Option<Config>) -> Result<Self, Error> {
         let config = config.unwrap_or_default();
+
+        let node = TreeNode::<Key, Leaf<V>>::default();
+        let node = TreeNodes::Leaf(node);
+        let root = ipfs.dag_put(&node, config.codec, config.codec).await?;
 
         let tree = Self { config, ipfs, root };
 
@@ -41,21 +48,49 @@ impl ProllyTree {
     }
 
     pub async fn load(ipfs: IpfsService, cid: Cid) -> Result<Self, Error> {
-        let tree = ipfs.dag_get::<&str, Tree>(cid, None).await?;
+        let tree = ipfs
+            .dag_get::<&str, Tree>(cid, None, Codec::default())
+            .await?;
 
         let Tree { config, root } = tree;
 
-        let config = ipfs.dag_get::<&str, Config>(config, None).await?;
+        let config = ipfs
+            .dag_get::<&str, Config>(config, None, Codec::default())
+            .await?;
 
         let tree = Self { ipfs, config, root };
 
         Ok(tree)
     }
 
+    pub async fn save(&self) -> Result<Cid, Error> {
+        let config = self
+            .ipfs
+            .dag_put(&self.config, self.config.codec, self.config.codec)
+            .await?;
+
+        let tree = Tree {
+            config,
+            root: self.root,
+        };
+
+        let cid = self
+            .ipfs
+            .dag_put(&tree, self.config.codec, self.config.codec)
+            .await?;
+
+        Ok(cid)
+    }
+
     pub async fn get<V: Value>(&self, key: Key) -> Result<Option<(Key, V)>, Error> {
-        let results = tree::batch_get(self.ipfs.clone(), self.root, iter::once(key))
-            .collect::<Vec<_>>()
-            .await;
+        let results = tree::batch_get(
+            self.ipfs.clone(),
+            self.root,
+            self.config.codec,
+            iter::once(key),
+        )
+        .collect::<Vec<_>>()
+        .await;
 
         let results: Result<Vec<_>, _> = results.into_iter().collect();
         let mut results = results?;
@@ -73,7 +108,7 @@ impl ProllyTree {
         &self,
         keys: impl IntoIterator<Item = Key>,
     ) -> impl Stream<Item = Result<(Key, V), Error>> {
-        tree::batch_get(self.ipfs.clone(), self.root, keys)
+        tree::batch_get(self.ipfs.clone(), self.root, self.config.codec, keys)
     }
 
     pub async fn insert<V: Value>(&mut self, key: Key, value: V) -> Result<(), Error> {
@@ -135,6 +170,6 @@ impl ProllyTree {
     }
 
     pub fn stream<V: Value>(&self) -> impl Stream<Item = Result<(Key, V), Error>> {
-        tree::stream_pairs(self.ipfs.clone(), self.root)
+        tree::stream_pairs(self.ipfs.clone(), self.root, self.config.codec)
     }
 }

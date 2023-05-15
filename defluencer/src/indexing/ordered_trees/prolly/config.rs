@@ -41,7 +41,7 @@ pub struct HashThreshold {
 impl Default for HashThreshold {
     fn default() -> Self {
         Self {
-            chunking_factor: 16,
+            chunking_factor: 1 << 26,
             multihash_code: Code::Sha2_256,
         }
     }
@@ -76,7 +76,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             min_size: 0,
-            max_size: 1048576,
+            max_size: 1048572,
             cid_version: 1,
             codec: Codec::DagCbor,
             multihash_code: Code::Sha2_256,
@@ -106,20 +106,25 @@ impl Config {
 
                 let hash = threshold.multihash_code.digest(&bytes);
 
-                let zero_count: u32 = hash
-                    .digest()
-                    .into_iter()
-                    .rev()
-                    .take(4)
-                    .map(|byte| byte.count_zeros())
-                    .sum();
+                let bound = chunking(threshold.chunking_factor as u32, hash.digest());
 
-                let threshold = (u32::MAX / threshold.chunking_factor as u32).count_zeros();
-
-                Ok(zero_count < threshold)
+                Ok(bound)
             }
         }
     }
+}
+
+fn chunking(factor: u32, hash: &[u8]) -> bool {
+    let zero_count: u32 = hash
+        .into_iter()
+        .rev()
+        .take(4)
+        .map(|byte| byte.count_zeros())
+        .sum();
+
+    let threshold = (u32::MAX / factor).count_zeros();
+
+    zero_count > threshold
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -133,20 +138,35 @@ pub struct Tree {
 mod tests {
     use super::*;
 
+    use rand_xoshiro::{
+        rand_core::{RngCore, SeedableRng},
+        Xoshiro256StarStar,
+    };
+
     #[test]
-    fn boundary() {
-        let mut config = Config::default();
-        config.chunking_strategy = Strategies::Threshold(HashThreshold {
-            chunking_factor: 16,
-            multihash_code: Code::Sha2_256,
-        });
-        config.codec = Codec::DagCbor;
+    fn bounds() {
+        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut hash = [0u8; 4];
+        let factor = 1 << 22;
+        let threshold = (u32::MAX / factor).count_zeros();
 
-        let key = 1771948u32;
-        let value = Cid::try_from("bafyrgqaz2vrkx2tiwtfsog5wuogn4sbzxgp7o3k5654v2lqilkmtcuy74sqphrbcnykgf2yqmqpa3kreqdryqgp6dq2qqxxmtye5fuq7qvc5o").unwrap();
+        for _ in 0..10000 {
+            rng.fill_bytes(&mut hash);
 
-        let bound = config.boundary(key, value).expect("Find boundary");
+            let mut binary = format!("{:b}", u32::from_be_bytes(hash));
 
-        assert!(bound)
+            let mut binary_string_zero_count = 32;
+            while let Some(char) = binary.pop() {
+                if char != '0' {
+                    binary_string_zero_count -= 1;
+                }
+            }
+
+            let expected_bound = binary_string_zero_count > threshold;
+
+            let bound = chunking(factor, &hash);
+
+            assert_eq!(bound, expected_bound);
+        }
     }
 }

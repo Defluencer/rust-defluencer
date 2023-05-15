@@ -15,7 +15,7 @@ use defluencer::{
     user::User,
 };
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use linked_data::identity::Identity;
 
@@ -121,7 +121,9 @@ async fn micro_blog(
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let id = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+    let id = ipfs
+        .dag_get::<&str, Identity>(identity, None, Codec::default())
+        .await?;
 
     let addr = Some(addr);
     if id.eth_addr != addr && id.btc_addr != addr {
@@ -169,7 +171,9 @@ async fn blog(
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let id = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+    let id = ipfs
+        .dag_get::<&str, Identity>(identity, None, Codec::default())
+        .await?;
 
     let addr = Some(addr);
     if id.eth_addr != addr && id.btc_addr != addr {
@@ -220,7 +224,9 @@ async fn video(
 ) -> Result<(), Error> {
     let ipfs = IpfsService::default();
 
-    let id = ipfs.dag_get::<&str, Identity>(identity, None).await?;
+    let id = ipfs
+        .dag_get::<&str, Identity>(identity, None, Codec::default())
+        .await?;
 
     let addr = Some(addr);
     if id.eth_addr != addr && id.btc_addr != addr {
