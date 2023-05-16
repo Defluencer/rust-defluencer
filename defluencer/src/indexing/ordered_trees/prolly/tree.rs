@@ -389,6 +389,8 @@ mod tests {
 
     use multihash::Multihash;
 
+    use rand::prelude::*;
+
     use rand_xoshiro::{
         rand_core::{RngCore, SeedableRng},
         Xoshiro256StarStar,
@@ -404,7 +406,7 @@ mod tests {
 
         let config = Config::default();
 
-        let node = TreeNode::<u32, Leaf<MockCID>>::default();
+        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
         let node = TreeNodes::Leaf(node);
         let root = ipfs
             .dag_put(&node, config.codec, config.codec)
@@ -413,16 +415,16 @@ mod tests {
 
         println!("Empty Root {}", root);
 
-        let batch = unique_random_sorted_pairs(100_000, &mut rng);
+        let batch = unique_random_sorted_pairs::<32>(100_000, &mut rng);
 
         let tree_cid =
-            batch_insert::<u32, MockCID>(ipfs.clone(), root, config.clone(), batch.clone())
+            batch_insert::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
                 .await
                 .expect("Batch insert");
 
         println!("New Root {}", tree_cid);
 
-        let result: Vec<_> = stream_pairs::<u32, MockCID>(ipfs, tree_cid, config.codec)
+        let result: Vec<_> = stream_pairs::<u32, DataBlob>(ipfs, tree_cid, config.codec)
             .collect()
             .await;
         let results: Result<Vec<_>, Error> = result.into_iter().collect();
@@ -439,7 +441,7 @@ mod tests {
 
         let config = Config::default();
 
-        let batch = unique_random_sorted_pairs(100_000, &mut rng);
+        let batch = unique_random_sorted_pairs::<32>(100_000, &mut rng);
         let (keys, _): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
 
         //Run first test to generate the prolly tree
@@ -448,7 +450,7 @@ mod tests {
         let tree_cid =
             Cid::try_from("bafyreih2kps4md36dixdub2pha42b47iwvgybl2wb26tllg3332h5xo2dm").unwrap();
 
-        let result = batch_remove::<u32, MockCID>(ipfs, tree_cid, config, keys)
+        let result = batch_remove::<u32, DataBlob>(ipfs, tree_cid, config, keys)
             .await
             .expect("Empty tree");
 
@@ -467,7 +469,7 @@ mod tests {
         let tree_cid =
             Cid::try_from("bafyreih2kps4md36dixdub2pha42b47iwvgybl2wb26tllg3332h5xo2dm").unwrap();
 
-        let batch = unique_random_sorted_pairs(100_000, &mut rng);
+        let batch = unique_random_sorted_pairs::<32>(100_000, &mut rng);
 
         // the 6th key for each node
         let batch = vec![
@@ -482,7 +484,7 @@ mod tests {
 
         let keys: Vec<_> = batch.clone().into_iter().map(|(key, _)| key).collect();
 
-        let result: Vec<_> = batch_get::<u32, MockCID>(ipfs, tree_cid, config.codec, keys)
+        let result: Vec<_> = batch_get::<u32, DataBlob>(ipfs, tree_cid, config.codec, keys)
             .collect()
             .await;
         let results: Result<Vec<_>, Error> = result.into_iter().collect();
@@ -525,7 +527,7 @@ mod tests {
             Cid::try_from("bafyreih2kps4md36dixdub2pha42b47iwvgybl2wb26tllg3332h5xo2dm").unwrap();
 
         let root =
-            batch_insert::<u32, MockCID>(ipfs.clone(), tree_cid, config.clone(), batch.clone())
+            batch_insert::<u32, DataBlob>(ipfs.clone(), tree_cid, config.clone(), batch.clone())
                 .await
                 .expect("Full tree");
 
@@ -533,7 +535,7 @@ mod tests {
 
         let (keys, _): (Vec<_>, Vec<_>) = batch.clone().into_iter().unzip();
 
-        let result = batch_remove::<u32, MockCID>(ipfs, root, config, keys)
+        let result = batch_remove::<u32, DataBlob>(ipfs, root, config, keys)
             .await
             .unwrap();
 
@@ -548,10 +550,10 @@ mod tests {
 
         let mut config = Config::default();
         let mut strat = HashThreshold::default();
-        strat.chunking_factor = 1 << 24;
+        strat.chunking_factor = 1 << 22;
         config.chunking_strategy = Strategies::Threshold(strat);
 
-        let node = TreeNode::<u32, Leaf<MockCID>>::default();
+        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
         let node = TreeNodes::Leaf(node);
         let root = ipfs
             .dag_put(&node, config.codec, config.codec)
@@ -560,14 +562,110 @@ mod tests {
 
         println!("Empty Root {}", root);
 
-        let batch = unique_random_sorted_pairs(1_000_000, &mut rng);
+        let batch = unique_random_sorted_pairs::<32>(1_000_000, &mut rng);
 
         let tree_cid =
-            batch_insert::<u32, MockCID>(ipfs.clone(), root, config.clone(), batch.clone())
+            batch_insert::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
                 .await
                 .expect("Batch insert");
 
         println!("New Root {}", tree_cid);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
+    async fn tree_visual() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(7835467835467354678u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        let mut strat = HashThreshold::default();
+        strat.chunking_factor = 1 << 20;
+        config.chunking_strategy = Strategies::Threshold(strat);
+
+        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
+        let node = TreeNodes::Leaf(node);
+        let root = ipfs
+            .dag_put(&node, config.codec, config.codec)
+            .await
+            .expect("Root node");
+
+        println!("Empty Root {}", root);
+
+        let batch = unique_random_sorted_pairs::<100_000>(1_000, &mut rng);
+
+        let tree_cid =
+            batch_insert::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
+                .await
+                .expect("Batch insert");
+
+        println!("New Root {}", tree_cid);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
+    async fn tree_fuzz() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(7835467835467354678u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        let mut strat = HashThreshold::default();
+        strat.chunking_factor = 1 << 20;
+        config.chunking_strategy = Strategies::Threshold(strat);
+
+        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
+        let node = TreeNodes::Leaf(node);
+        let mut root = ipfs
+            .dag_put(&node, config.codec, config.codec)
+            .await
+            .expect("Root node");
+
+        let mut added = vec![];
+
+        for _ in 0..1000 {
+            let add = rng.gen_bool(2.0 / 3.0);
+
+            if add {
+                let numb = rng.gen_range(1..15);
+                let batch = unique_random_sorted_pairs::<100_000>(numb, &mut rng);
+
+                root = batch_insert::<u32, DataBlob>(
+                    ipfs.clone(),
+                    root,
+                    config.clone(),
+                    batch.clone(),
+                )
+                .await
+                .expect("Batch insert");
+
+                added.extend(batch.into_iter());
+            } else {
+                if added.is_empty() {
+                    continue;
+                }
+
+                let mut batch = vec![];
+
+                let numb = rng.gen_range(1..15);
+
+                for _ in 0..numb {
+                    if added.is_empty() {
+                        continue;
+                    }
+
+                    let idx = rng.gen_range(0..added.len());
+                    let (key, _) = added.swap_remove(idx);
+                    batch.push(key);
+                }
+
+                batch.sort_unstable();
+                batch.dedup();
+
+                root = batch_remove::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch)
+                    .await
+                    .expect("Batch remove");
+            }
+        }
     }
 
     fn _random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
@@ -581,17 +679,17 @@ mod tests {
         Cid::new_v1(/* DAG-CBOR */ 0x71, multihash)
     }
 
-    type MockCID = Vec<u8>;
+    type DataBlob = Vec<u8>;
 
-    fn unique_random_sorted_pairs(
+    fn unique_random_sorted_pairs<const T: usize>(
         numb: usize,
         rng: &mut Xoshiro256StarStar,
-    ) -> Vec<(u32, MockCID)> {
+    ) -> Vec<(u32, DataBlob)> {
         let mut key_values = Vec::with_capacity(numb);
 
         for _ in 0..numb {
             let key = rng.next_u32();
-            let mut value = [0u8; 32];
+            let mut value = [0u8; T];
             rng.fill_bytes(&mut value);
 
             key_values.push((key, value.to_vec()));
