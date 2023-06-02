@@ -20,8 +20,6 @@ use serde_ipld_dagcbor::DecodeError;
 
 use num::FromPrimitive;
 
-// Can link indices be omited for a more compact representation?
-
 impl<K: Key, V: Value> TryFrom<Ipld> for TreeNode<K, V> {
     type Error = Error;
 

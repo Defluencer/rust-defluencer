@@ -103,7 +103,7 @@ impl MerkelSearchTree {
         tree::batch_get::<K, V>(self.ipfs.clone(), self.root, self.config.codec, keys)
     }
 
-    pub async fn insert<K: Key, V: Value>(&mut self, key: K, value: V) -> Result<(), Error> {
+    /* pub async fn insert<K: Key, V: Value>(&mut self, key: K, value: V) -> Result<(), Error> {
         let root = tree::batch_insert(
             self.ipfs.clone(),
             self.root,
@@ -115,9 +115,9 @@ impl MerkelSearchTree {
         self.root = root;
 
         Ok(())
-    }
+    } */
 
-    pub async fn batch_insert<K: Key, V: Value>(
+    /* pub async fn batch_insert<K: Key, V: Value>(
         &mut self,
         key_values: impl IntoIterator<Item = (K, V)>,
     ) -> Result<(), Error> {
@@ -132,9 +132,9 @@ impl MerkelSearchTree {
         self.root = root;
 
         Ok(())
-    }
+    } */
 
-    pub async fn remove<K: Key, V: Value>(&mut self, key: K) -> Result<(), Error> {
+    /* pub async fn remove<K: Key, V: Value>(&mut self, key: K) -> Result<(), Error> {
         let root = tree::batch_remove::<K, V>(
             self.ipfs.clone(),
             self.root,
@@ -146,9 +146,9 @@ impl MerkelSearchTree {
         self.root = root;
 
         Ok(())
-    }
+    } */
 
-    pub async fn batch_remove<K: Key, V: Value>(
+    /* pub async fn batch_remove<K: Key, V: Value>(
         &mut self,
         keys: impl IntoIterator<Item = K>,
     ) -> Result<(), Error> {
@@ -159,7 +159,7 @@ impl MerkelSearchTree {
         self.root = root;
 
         Ok(())
-    }
+    } */
 
     pub fn stream<K: Key, V: Value>(&self) -> impl Stream<Item = Result<(K, V), Error>> {
         tree::stream_pairs(self.ipfs.clone(), self.root, self.config.codec)

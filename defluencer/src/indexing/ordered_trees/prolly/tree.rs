@@ -377,7 +377,6 @@ fn stream_branch<K: Key, V: Value>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
 
     use crate::indexing::ordered_trees::prolly::{HashThreshold, Strategies};
 
@@ -387,26 +386,22 @@ mod tests {
 
     use ipfs_api::IpfsService;
 
-    use multihash::Multihash;
-
     use rand::prelude::*;
 
-    use rand_xoshiro::{
-        rand_core::{RngCore, SeedableRng},
-        Xoshiro256StarStar,
-    };
+    use rand_xoshiro::Xoshiro256StarStar;
 
-    use sha2::{Digest, Sha256};
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn tree_stream_all() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
         let ipfs = IpfsService::default();
 
-        let config = Config::default();
+        let mut config = Config::default();
+        let mut strat = HashThreshold::default();
+        strat.chunking_factor = 1 << 19;
+        config.chunking_strategy = Strategies::Threshold(strat);
 
-        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
+        let node = TreeNode::<u16, Leaf<DataBlob>>::default();
         let node = TreeNodes::Leaf(node);
         let root = ipfs
             .dag_put(&node, config.codec, config.codec)
@@ -415,16 +410,16 @@ mod tests {
 
         println!("Empty Root {}", root);
 
-        let batch = unique_random_sorted_pairs::<32>(100_000, &mut rng);
+        let batch = unique_random_sorted_pairs::<32>(10_000, &mut rng);
 
         let tree_cid =
-            batch_insert::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
+            batch_insert::<u16, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
                 .await
                 .expect("Batch insert");
 
         println!("New Root {}", tree_cid);
 
-        let result: Vec<_> = stream_pairs::<u32, DataBlob>(ipfs, tree_cid, config.codec)
+        let result: Vec<_> = stream_pairs::<u16, DataBlob>(ipfs, tree_cid, config.codec)
             .collect()
             .await;
         let results: Result<Vec<_>, Error> = result.into_iter().collect();
@@ -433,176 +428,157 @@ mod tests {
         assert_eq!(result, batch);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn tree_batch_insert() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        let mut strat = HashThreshold::default();
+        strat.chunking_factor = 1 << 19;
+        config.chunking_strategy = Strategies::Threshold(strat);
+
+        let original_batch = unique_random_sorted_pairs::<32>(10_000, &mut rng);
+
+        //Run first test to generate the prolly tree
+        let tree_cid =
+            Cid::try_from("bafyreiacttehgexdhblgzfcco2chzf64s6x3e6asyzhyr4qhh2vmwkaiwu").unwrap();
+
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        let batch = unique_random_sorted_pairs::<32>(100, &mut rng);
+
+        /* println!(
+            "Test Insert Keys {:?}",
+            batch.iter().map(|(key, _)| *key).collect::<Vec<_>>()
+        ); */
+
+        let tree_cid = batch_insert::<u16, DataBlob>(
+            ipfs.clone(),
+            tree_cid,
+            config.clone(),
+            batch.clone().into_iter(),
+        )
+        .await
+        .expect("Empty tree");
+
+        println!("Result {}", tree_cid);
+
+        let keys: Vec<_> = batch.clone().into_iter().map(|(key, _)| key).collect();
+
+        let result: Vec<_> =
+            batch_get::<u16, DataBlob>(ipfs.clone(), tree_cid, config.codec, keys.clone())
+                .collect()
+                .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Batch Get");
+
+        assert_eq!(result, batch);
+
+        let result: Vec<_> = stream_pairs::<u16, DataBlob>(ipfs, tree_cid, config.codec)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Streaming");
+
+        let result_keys: Vec<_> = result.into_iter().map(|(key, _)| key).collect();
+
+        let mut batch_keys: Vec<_> = original_batch.into_iter().map(|(key, _)| key).collect();
+        batch_keys.extend(keys.into_iter());
+        batch_keys.sort_unstable();
+        batch_keys.dedup();
+
+        assert_eq!(result_keys, batch_keys);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn tree_batch_remove() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        let mut strat = HashThreshold::default();
+        strat.chunking_factor = 1 << 19;
+        config.chunking_strategy = Strategies::Threshold(strat);
+
+        let mut batch = unique_random_sorted_pairs::<32>(10_000, &mut rng);
+
+        //Run first test to generate the prolly tree
+        let tree_cid =
+            Cid::try_from("bafyreiacttehgexdhblgzfcco2chzf64s6x3e6asyzhyr4qhh2vmwkaiwu").unwrap();
+
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        // 100 random KVs
+        let mut keys = Vec::with_capacity(10);
+
+        for _ in 0..100 {
+            let (key, _) = batch.remove(rng.gen_range(0..batch.len()));
+            keys.push(key);
+        }
+
+        keys.sort_unstable();
+        keys.dedup();
+
+        //println!("Test Remove Keys {:?}", keys);
+
+        let tree_cid =
+            batch_remove::<u16, DataBlob>(ipfs.clone(), tree_cid, config.clone(), keys.clone())
+                .await
+                .expect("Empty tree");
+
+        println!("Result {}", tree_cid);
+
+        let result: Vec<_> = batch_get::<u16, DataBlob>(ipfs.clone(), tree_cid, config.codec, keys)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Batch Get");
+
+        assert!(result.is_empty(), "Result {:?}", result);
+
+        let result: Vec<_> = stream_pairs::<u16, DataBlob>(ipfs, tree_cid, config.codec)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Streaming");
+
+        let result_keys: Vec<_> = result.into_iter().map(|(key, _)| key).collect();
+        let batch_keys: Vec<_> = batch.into_iter().map(|(key, _)| key).collect();
+
+        assert_eq!(result_keys, batch_keys);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn tree_remove_all() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
         let ipfs = IpfsService::default();
 
-        let config = Config::default();
+        let mut config = Config::default();
+        let mut strat = HashThreshold::default();
+        strat.chunking_factor = 1 << 19;
+        config.chunking_strategy = Strategies::Threshold(strat);
 
-        let batch = unique_random_sorted_pairs::<32>(100_000, &mut rng);
-        let (keys, _): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
+        let batch = unique_random_sorted_pairs::<32>(10_000, &mut rng);
+        let keys: Vec<_> = batch.into_iter().map(|(key, _)| key).collect();
 
         //Run first test to generate the prolly tree
         let empty_tree_cid =
             Cid::try_from("bafyreiekfsw2g3fbdebzwf4equw2kygz6blz7uxtyvyd36xokibnd6hvgi").unwrap();
         let tree_cid =
-            Cid::try_from("bafyreih2kps4md36dixdub2pha42b47iwvgybl2wb26tllg3332h5xo2dm").unwrap();
+            Cid::try_from("bafyreiacttehgexdhblgzfcco2chzf64s6x3e6asyzhyr4qhh2vmwkaiwu").unwrap();
 
-        let result = batch_remove::<u32, DataBlob>(ipfs, tree_cid, config, keys)
+        let result = batch_remove::<u16, DataBlob>(ipfs, tree_cid, config, keys)
             .await
             .expect("Empty tree");
 
         assert_eq!(result, empty_tree_cid);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore]
-    async fn tree_batch_get() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
-        let ipfs = IpfsService::default();
-
-        let config = Config::default();
-
-        //Run first test to generate the prolly tree
-        let tree_cid =
-            Cid::try_from("bafyreih2kps4md36dixdub2pha42b47iwvgybl2wb26tllg3332h5xo2dm").unwrap();
-
-        let batch = unique_random_sorted_pairs::<32>(100_000, &mut rng);
-
-        // the 6th key for each node
-        let batch = vec![
-            batch[6].clone(),
-            batch[15960].clone(),
-            batch[42846].clone(),
-            batch[59698].clone(),
-            batch[71612].clone(),
-            batch[72209].clone(),
-            batch[93232].clone(),
-        ];
-
-        let keys: Vec<_> = batch.clone().into_iter().map(|(key, _)| key).collect();
-
-        let result: Vec<_> = batch_get::<u32, DataBlob>(ipfs, tree_cid, config.codec, keys)
-            .collect()
-            .await;
-        let results: Result<Vec<_>, Error> = result.into_iter().collect();
-        let result = results.expect("Tree Batch Get");
-
-        assert_eq!(result, batch);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore]
-    async fn tree_insert_remove_bound() {
-        let mut config = Config::default();
-
-        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
-        rng.jump();
-
-        let mut batch = Vec::new();
-
-        loop {
-            let key = rng.next_u32();
-            let mut value = [0u8; 32];
-            rng.fill_bytes(&mut value);
-            let value = value.to_vec();
-
-            let bound = config.boundary(key, value.clone()).unwrap();
-
-            if bound {
-                //println!("Bound Key {}, Value {:?}", key, value);
-                batch.push((key, value));
-                break;
-            }
-        }
-
-        let ipfs = IpfsService::default();
-
-        let config = Config::default();
-
-        //Run first test to generate the prolly tree
-        let tree_cid =
-            Cid::try_from("bafyreih2kps4md36dixdub2pha42b47iwvgybl2wb26tllg3332h5xo2dm").unwrap();
-
-        let root =
-            batch_insert::<u32, DataBlob>(ipfs.clone(), tree_cid, config.clone(), batch.clone())
-                .await
-                .expect("Full tree");
-
-        println!("New Root {}", root);
-
-        let (keys, _): (Vec<_>, Vec<_>) = batch.clone().into_iter().unzip();
-
-        let result = batch_remove::<u32, DataBlob>(ipfs, root, config, keys)
-            .await
-            .unwrap();
-
-        assert_eq!(result, tree_cid);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore]
-    async fn tree_tall() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(7835467835467354678u64);
-        let ipfs = IpfsService::default();
-
-        let mut config = Config::default();
-        let mut strat = HashThreshold::default();
-        strat.chunking_factor = 1 << 22;
-        config.chunking_strategy = Strategies::Threshold(strat);
-
-        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
-        let node = TreeNodes::Leaf(node);
-        let root = ipfs
-            .dag_put(&node, config.codec, config.codec)
-            .await
-            .expect("Root node");
-
-        println!("Empty Root {}", root);
-
-        let batch = unique_random_sorted_pairs::<32>(1_000_000, &mut rng);
-
-        let tree_cid =
-            batch_insert::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
-                .await
-                .expect("Batch insert");
-
-        println!("New Root {}", tree_cid);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore]
-    async fn tree_visual() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(7835467835467354678u64);
-        let ipfs = IpfsService::default();
-
-        let mut config = Config::default();
-        let mut strat = HashThreshold::default();
-        strat.chunking_factor = 1 << 20;
-        config.chunking_strategy = Strategies::Threshold(strat);
-
-        let node = TreeNode::<u32, Leaf<DataBlob>>::default();
-        let node = TreeNodes::Leaf(node);
-        let root = ipfs
-            .dag_put(&node, config.codec, config.codec)
-            .await
-            .expect("Root node");
-
-        println!("Empty Root {}", root);
-
-        let batch = unique_random_sorted_pairs::<100_000>(1_000, &mut rng);
-
-        let tree_cid =
-            batch_insert::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
-                .await
-                .expect("Batch insert");
-
-        println!("New Root {}", tree_cid);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn tree_fuzz() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(7835467835467354678u64);
@@ -629,7 +605,7 @@ mod tests {
                 let numb = rng.gen_range(1..15);
                 let batch = unique_random_sorted_pairs::<100_000>(numb, &mut rng);
 
-                root = batch_insert::<u32, DataBlob>(
+                root = batch_insert::<u16, DataBlob>(
                     ipfs.clone(),
                     root,
                     config.clone(),
@@ -661,22 +637,11 @@ mod tests {
                 batch.sort_unstable();
                 batch.dedup();
 
-                root = batch_remove::<u32, DataBlob>(ipfs.clone(), root, config.clone(), batch)
+                root = batch_remove::<u16, DataBlob>(ipfs.clone(), root, config.clone(), batch)
                     .await
                     .expect("Batch remove");
             }
         }
-    }
-
-    fn _random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
-        let mut input = [0u8; 64];
-        rng.fill_bytes(&mut input);
-
-        let hash = Sha256::new_with_prefix(input).finalize();
-
-        let multihash = Multihash::wrap(0x13, &hash).unwrap();
-
-        Cid::new_v1(/* DAG-CBOR */ 0x71, multihash)
     }
 
     type DataBlob = Vec<u8>;
@@ -684,11 +649,11 @@ mod tests {
     fn unique_random_sorted_pairs<const T: usize>(
         numb: usize,
         rng: &mut Xoshiro256StarStar,
-    ) -> Vec<(u32, DataBlob)> {
+    ) -> Vec<(u16, DataBlob)> {
         let mut key_values = Vec::with_capacity(numb);
 
         for _ in 0..numb {
-            let key = rng.next_u32();
+            let key = rng.next_u32() as u16;
             let mut value = [0u8; T];
             rng.fill_bytes(&mut value);
 
@@ -699,20 +664,5 @@ mod tests {
         key_values.dedup_by(|(a, _), (b, _)| a == b);
 
         key_values
-    }
-
-    fn _unique_random_sorted_batch(numb: usize, rng: &mut Xoshiro256StarStar) -> VecDeque<u64> {
-        let mut keys = Vec::with_capacity(numb);
-
-        for _ in 0..numb {
-            let key = rng.next_u64();
-
-            keys.push(key);
-        }
-
-        keys.sort_unstable();
-        keys.dedup();
-
-        keys.into()
     }
 }

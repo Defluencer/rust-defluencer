@@ -28,6 +28,7 @@ pub fn batch_get<K: Key, V: Value>(
 ) -> impl Stream<Item = Result<(K, V), Error>> {
     let mut keys: Vec<_> = keys.into_iter().collect();
     keys.sort_unstable();
+    keys.dedup();
 
     search(ipfs, root, codec, keys)
 }
@@ -76,12 +77,15 @@ pub async fn batch_insert<K: Key, V: Value>(
     let mut batch = elements?;
 
     batch.sort_unstable_by(|(a, _, _), (b, _, _)| a.cmp(&b));
+    batch.dedup_by(|(a, _, _), (b, _, _)| a == b);
 
     let range = (Bound::Unbounded, Bound::Unbounded);
 
-    let (link, _) =
-        execute_batch_insert::<K, V>(ipfs.clone(), Some(root), config.clone(), range, batch)
+    let option =
+        execute_batch_insert::<K, V>(ipfs.clone(), config.clone(), Some(root), range, batch)
             .await?;
+
+    let (link, _) = option.unwrap();
 
     Ok(link)
 }
@@ -89,58 +93,85 @@ pub async fn batch_insert<K: Key, V: Value>(
 #[async_recursion]
 async fn execute_batch_insert<K: Key, V: Value>(
     ipfs: IpfsService,
-    mut node_link: Option<Cid>,
     config: Config,
-    range: (Bound<K>, Bound<K>),
-    batch: Vec<(K, V, usize)>,
-) -> Result<(Cid, (Bound<K>, Bound<K>)), Error> {
-    let layer = batch
-        .iter()
-        .fold(0, |state, (_, _, layer)| state.max(*layer));
-
-    let mut node = TreeNode {
-        layer,
-        ..Default::default()
-    };
-
-    if let Some(link) = node_link {
-        let temp = ipfs
-            .dag_get::<&str, TreeNode<K, V>>(link, None, config.codec)
-            .await?;
-        if temp.layer == layer {
-            node = temp;
-            node_link = None;
-        }
-    };
-
-    // Splitting a node is trimming copies with different ranges.
-    node.crop((range.start_bound(), range.end_bound()));
-
-    let futures: Vec<_> = node
-        .insert_iter(batch.into_iter())
-        .map(|(batch_link, range, batch)| {
-            let link = match (batch_link, node_link) {
-                (None, None) => None,
-                (None, Some(i)) => Some(i),
-                (Some(i), None) => Some(i),
-                (Some(_), Some(_)) => panic!(
-                    "Nodes are either new (no batch links) or the node link was consumed to get the node"
-                ),
-            };
-            execute_batch_insert(ipfs.clone(), link, config.clone(), range, batch)
-        })
+    link: Option<Cid>,
+    node_range: (Bound<K>, Bound<K>),
+    mut batch: Vec<(K, V, usize)>,
+) -> Result<Option<(Cid, (Bound<K>, Bound<K>))>, Error> {
+    let futures: Vec<_> = link
+        .into_iter()
+        .map(|link| ipfs.dag_get::<&str, TreeNode<K, V>>(link, None, config.codec))
         .collect();
 
     let results: Result<Vec<_>, _> = try_join_all(futures).await;
     let results = results?;
 
-    for (link, range) in results {
-        node.insert_link(link, (range.start_bound(), range.end_bound()));
+    let mut link_ranges = vec![];
+    for node in results {
+        let (elements, l_r) = node.into_inner(&node_range);
+
+        for (key, value, layer) in elements {
+            if let Err(idx) = batch.binary_search_by(|(batch_key, _, _)| batch_key.cmp(&key)) {
+                batch.insert(idx, (key, value, layer));
+            }
+        }
+
+        link_ranges.extend(l_r);
+    }
+
+    let mut node = TreeNode::<K, V>::default();
+
+    let futures: Vec<_> = node
+        .insert_iter(&node_range, batch, link_ranges)
+        .into_iter()
+        .flatten()
+        .map(|(link, range, batch)| {
+            /* #[cfg(debug_assertions)]
+            println!(
+                "Link {:?}\nRange {:?}\nBatch {:?}",
+                link,
+                range,
+                batch.iter().map(|(key, _, _)| key).collect::<Vec<_>>(),
+            ); */
+
+            execute_batch_insert(ipfs.clone(), config.clone(), link, range, batch)
+        })
+        .collect();
+
+    let results = try_join_all(futures).await;
+    let results = results?;
+
+    for result in results {
+        if let Some((link, range)) = result {
+            /* #[cfg(debug_assertions)]
+            println!(
+                "Insert Link {}\nIn Keys {:?}\nAt Range {:?}",
+                link, node.keys, range
+            ); */
+
+            node.insert_link(link, (range.start_bound(), range.end_bound()));
+        }
+    }
+
+    if node.keys.is_empty() {
+        // This node is empty, it has max one link.
+        if let Some(link) = node.links.pop_back() {
+            // Return the lower node since it's not empty.
+            return Ok(Some((link, node_range)));
+        }
+
+        return Ok(None);
     }
 
     let cid = ipfs.dag_put(&node, config.codec, config.codec).await?;
 
-    Ok((cid, range))
+    /* #[cfg(debug_assertions)]
+    println!(
+        "Final Node {}\nLayer {}\nRange {:?}\nKeys {:?}\nIndices {:?}",
+        cid, node.layer, node_range, node.keys, node.indices
+    ); */
+
+    Ok(Some((cid, node_range)))
 }
 
 pub async fn batch_remove<K: Key, V: Value>(
@@ -150,47 +181,116 @@ pub async fn batch_remove<K: Key, V: Value>(
     keys: impl IntoIterator<Item = K>,
 ) -> Result<Cid, Error> {
     let mut batch: Vec<_> = keys.into_iter().collect();
+
+    if batch.is_empty() {
+        return Ok(root);
+    }
+
     batch.sort_unstable();
 
     let range = (Bound::Unbounded, Bound::Unbounded);
 
-    let result =
-        execute_batch_remove::<K, V>(ipfs.clone(), vec![root], config, range, batch).await?;
-    let link = result.map(|(link, _)| link);
+    let result = execute_batch_remove::<K, V>(
+        ipfs.clone(),
+        config.clone(),
+        vec![root],
+        vec![range],
+        vec![batch],
+    )
+    .await?;
 
-    Ok(link.unwrap())
+    let Some((link, _)) = result else {
+        let empty_node = TreeNode::<K, V>::default();
+
+        let root = ipfs
+            .dag_put(&empty_node, config.codec, config.codec)
+            .await?;
+
+        return Ok(root);
+    };
+
+    Ok(link)
 }
 
 #[async_recursion]
 async fn execute_batch_remove<K: Key, V: Value>(
     ipfs: IpfsService,
-    links: Vec<Cid>,
     config: Config,
-    range: (Bound<K>, Bound<K>),
-    batch: Vec<K>,
+    links: Vec<Cid>,
+    ranges: Vec<(Bound<K>, Bound<K>)>,
+    batches: Vec<Vec<K>>,
 ) -> Result<Option<(Cid, (Bound<K>, Bound<K>))>, Error> {
     let futures: Vec<_> = links
-        .into_iter()
-        .map(|cid| ipfs.dag_get::<&str, TreeNode<K, V>>(cid, None, config.codec))
+        .iter()
+        .map(|cid| ipfs.dag_get::<&str, TreeNode<K, V>>(*cid, None, config.codec))
         .collect();
 
     let results = try_join_all(futures).await;
-    let results = results?;
+    let mut results = results?;
 
-    let mut node = results
-        .into_iter()
-        .reduce(|mut node, new| {
-            node.merge(new);
-            node
-        })
-        .unwrap();
+    let h_lvl = results.iter().fold(0, |acc, node| acc.max(node.layer));
 
-    let futures: Vec<_> = node
-        .remove_iter(range.clone(), batch)
-        .map(|(links, range, batch)| {
-            execute_batch_remove::<K, V>(ipfs.clone(), links, config.clone(), range, batch)
-        })
-        .collect();
+    for i in 0..results.len() {
+        if results[i].layer < h_lvl {
+            let link = links[i];
+
+            let mut empty_node = TreeNode::<K, V>::default();
+            empty_node.layer = h_lvl;
+            empty_node.indices.push_back(0);
+            empty_node.links.push_back(link);
+
+            results[i] = empty_node;
+        }
+    }
+
+    let mut node = TreeNode::<K, V>::default();
+    let mut range = (Bound::Unbounded, Bound::Unbounded);
+
+    for (new_node, new_range) in results.into_iter().zip(ranges.into_iter()) {
+        node.merge(&range, new_node, &new_range);
+
+        range = match (range, new_range) {
+            ((Bound::Unbounded, Bound::Excluded(prev_end)), (_, Bound::Excluded(next_end))) => {
+                (Bound::Unbounded, Bound::Excluded(next_end.max(prev_end)))
+            }
+            (
+                (Bound::Excluded(prev_start), Bound::Excluded(prev_end)),
+                (Bound::Excluded(next_start), Bound::Excluded(next_end)),
+            ) => (
+                Bound::Excluded(next_start.min(prev_start)),
+                Bound::Excluded(next_end.max(prev_end)),
+            ),
+            ((Bound::Excluded(prev_start), Bound::Unbounded), (Bound::Excluded(next_start), _)) => {
+                (
+                    Bound::Excluded(next_start.min(prev_start)),
+                    Bound::Unbounded,
+                )
+            }
+            _ => (Bound::Unbounded, Bound::Unbounded),
+        };
+    }
+
+    let batch: Vec<_> = batches.into_iter().flatten().collect();
+
+    let mut futures = Vec::new();
+    for batches in node.remove_iter(range.clone(), batch) {
+        let mut links = Vec::with_capacity(batches.len());
+        let mut ranges = Vec::with_capacity(batches.len());
+        let mut keys = Vec::with_capacity(batches.len());
+
+        for (link, range, batch) in batches {
+            /* #[cfg(debug_assertions)]
+            println!("Batch {:?}\nRange {:?}\nLink {:?}", batch, range, link); */
+
+            links.push(link);
+            ranges.push(range);
+            keys.push(batch);
+        }
+
+        let fut = execute_batch_remove::<K, V>(ipfs.clone(), config.clone(), links, ranges, keys);
+
+        futures.push(fut);
+    }
 
     let results = try_join_all(futures).await;
     let mut results = results?;
@@ -212,6 +312,12 @@ async fn execute_batch_remove<K: Key, V: Value>(
             node.insert_link(link, (range.start_bound(), range.end_bound()));
         }
     }
+
+    /* #[cfg(debug_assertions)]
+    println!(
+        "Final Node\nLayer {}\nRange {:?}\nKeys {:?}\nIndices {:?}",
+        node.layer, range, node.keys, node.indices
+    ); */
 
     let cid = ipfs.dag_put(&node, config.codec, config.codec).await?;
 
@@ -244,325 +350,259 @@ pub fn stream_pairs<K: Key, V: Value>(
     .try_flatten()
 }
 
-/* #[cfg(test)]
+#[cfg(test)]
 mod tests {
     #![cfg(not(target_arch = "wasm32"))]
 
     use super::*;
 
+    use rand::Rng;
     use rand_core::RngCore;
 
     use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
 
-    use sha2::{Digest, Sha512};
-
-    use cid::Cid;
-
-    use multihash::Multihash;
-
-    fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
-        let mut input = [0u8; 64];
-        rng.fill_bytes(&mut input);
-
-        let hash = Sha512::new_with_prefix(input).finalize();
-
-        let multihash = Multihash::wrap(0x13, &hash).unwrap();
-
-        Cid::new_v1(/* DAG-CBOR */ 0x71, multihash)
-    }
-
-    #[test]
-    fn test_zero_counting() {
-        //let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
-
-        let base = 8;
-        let zeros_to_find = 3;
-
-        let mut key = 1usize;
-        loop {
-            //let key = random_cid(&mut rng);
-
-            //let layer = calculate_layer(base, key.hash().digest());
-            let layer = calculate_layer(base, &key.to_be_bytes());
-
-            if layer == zeros_to_find {
-                println!("{} Zero count in base {}", layer, base);
-
-                //println!("Digest: {:?}", key.hash().digest());
-                println!("Digest: {:?}", key.to_be_bytes());
-                //let hash_as_numb = BigUint::from_bytes_be(key.hash().digest());
-                let hash_as_numb = BigUint::from_bytes_be(&key.to_be_bytes());
-
-                //let string = format!("{:#x}", hash_as_numb);
-                let string = format!("{:#o}", hash_as_numb);
-
-                //println!("Hex {}", string);
-                println!("Octal {}", string);
-
-                assert!(string.ends_with("000"));
-
-                break;
-            }
-
-            key += 1;
-        }
-    }
-
-    fn generate_simple_key_value_pairs<const LAYERS: usize>(
-        base: usize,
-        keys_per_layers: usize,
-    ) -> Vec<(usize, usize)> {
-        let mut key_values = Vec::with_capacity(keys_per_layers * LAYERS);
-        let mut counters = [0; LAYERS];
-
-        let mut key = 1usize;
-
-        'outer: loop {
-            let layer = calculate_layer(base, &key.to_be_bytes());
-
-            'inner: for i in 0..LAYERS {
-                if i == layer {
-                    if counters[i] >= keys_per_layers {
-                        break 'inner;
-                    }
-
-                    counters[i] += 1;
-
-                    //println!("Layer {} Count {}", i, counters[i]);
-
-                    key_values.push((key, 0));
-
-                    if counters == [keys_per_layers; LAYERS] {
-                        break 'outer;
-                    }
-                }
-            }
-
-            key += 1;
-        }
-
-        key_values
-    }
-
-    fn generate_cid_key_value_pairs<const LAYERS: usize>(
-        base: usize,
-        keys_per_layers: usize,
-    ) -> Vec<(Cid, Cid)> {
-        let mut key_values = Vec::with_capacity(keys_per_layers * LAYERS);
-        let mut counters = [0; LAYERS];
-
-        let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
-
-        'outer: loop {
-            let random_key = random_cid(&mut rng);
-            let layer = calculate_layer(base, &random_key.hash().digest());
-
-            'inner: for i in 0..LAYERS {
-                if i == layer {
-                    if counters[i] >= keys_per_layers {
-                        break 'inner;
-                    }
-
-                    counters[i] += 1;
-
-                    println!("Layer {} Count {}", i, counters[i]);
-
-                    let random_value = random_cid(&mut rng);
-                    key_values.push((random_key.into(), random_value.into()));
-
-                    if counters == [keys_per_layers; LAYERS] {
-                        break 'outer;
-                    }
-                }
-            }
-        }
-
-        key_values
-    }
-
-    async fn test_batch_insert(
-        ipfs: &IpfsService,
-        root: Cid,
-        key_values: Vec<(usize, usize)>,
-    ) -> Result<Cid, Error> {
-        let root_node = ipfs
-            .dag_get::<&str, TreeNode<usize, usize>>(root.link, None)
-            .await?;
-
-        let base = root_node.base;
-
-        let mut elements: Vec<_> = key_values
-            .into_iter()
-            .map(|(key, value)| {
-                let layer = calculate_layer(base, &key.to_be_bytes());
-                (key, value, layer)
-            })
-            .collect();
-
-        elements.sort_unstable_by(|(a, _, _), (b, _, _)| a.cmp(&b));
-
-        let elements = VecDeque::from(elements);
-
-        let range = (Bound::Unbounded, Bound::Unbounded);
-        let ranges = VecDeque::from(vec![range]);
-
-        let main_batch = Batch { elements, ranges };
-
-        let (link, _) =
-            execute_batch_insert::<usize, usize>(ipfs.clone(), Either::Left(root), main_batch)
-                .await?;
-
-        return Ok(link);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_batch_insert_idempotence() {
-        const LAYERS: usize = 4;
-        let keys_per_layers = 10;
-        let base = 16;
-
-        let key_values = generate_simple_key_value_pairs::<LAYERS>(base, keys_per_layers);
-
-        println!("Keys & values generated!");
-
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn tree_stream_all() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
         let ipfs = IpfsService::default();
 
-        let node = TreeNode::<[u8; 8], [u8; 1]> {
-            base,
-            ..Default::default()
-        };
+        let mut config = Config::default();
+        config.base = 2;
 
-        let empty_root = ipfs
-            .dag_put(&node, Codec::default())
+        let empty_node = TreeNode::<u16, DataBlob>::default();
+
+        let root = ipfs
+            .dag_put(&empty_node, config.codec, config.codec)
             .await
-            .expect("Empty Root Creation");
-        let empty_root: Cid = empty_root.into();
+            .expect("Empty Node");
 
-        let first_root = test_batch_insert(&ipfs, empty_root, key_values.clone())
-            .await
-            .expect("Tree Batch Write");
+        println!("Empty Root {}", root);
 
-        println!("First tree root {}", first_root.link);
+        let batch = unique_random_sorted_pairs::<32>(100, &mut rng);
 
-        let second_root = test_batch_insert(&ipfs, first_root, key_values.clone())
-            .await
-            .expect("Tree Batch Write");
+        let tree_cid =
+            batch_insert::<u16, DataBlob>(ipfs.clone(), root, config.clone(), batch.clone())
+                .await
+                .expect("Batch Insert");
 
-        println!("Second tree root {}", second_root.link);
+        println!("New Root {}", tree_cid);
 
-        assert_eq!(first_root, second_root);
+        let result: Vec<_> = stream_pairs::<u16, DataBlob>(ipfs, tree_cid, config.codec)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Streaming");
+
+        assert_eq!(result, batch);
     }
 
-    async fn test_batch_remove(
-        ipfs: &IpfsService,
-        root: Cid,
-        keys: Vec<usize>,
-    ) -> Result<Option<Cid>, Error> {
-        let root_node = ipfs
-            .dag_get::<&str, TreeNode<usize, usize>>(root.link, None)
-            .await?;
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn tree_batch_get() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
+        let ipfs = IpfsService::default();
 
-        let base = root_node.base;
+        let mut config = Config::default();
+        config.base = 2;
 
-        let mut elements: Vec<_> = keys
-            .into_iter()
-            .map(|key| {
-                let layer = calculate_layer(base, &key.to_be_bytes());
-                (key, 0, layer)
-            })
+        //Run first test to generate the mst
+        let tree_cid =
+            Cid::try_from("bafyreiejcj45rskegzvo6fn6a6q6nrwcwilxbqnh44p2325huwhyrrdl2i").unwrap();
+
+        let batch = unique_random_sorted_pairs::<32>(100, &mut rng);
+
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        // 10 random KVs
+        let mut batch: Vec<_> = (0..10)
+            .map(|_| batch[rng.gen_range(0..batch.len())].clone())
             .collect();
 
-        elements.sort_unstable_by(|(a, _, _), (b, _, _)| a.cmp(&b));
+        batch.sort_unstable_by(|(key, _), (other, _)| key.cmp(other));
+        batch.dedup_by(|(key, _), (other, _)| key == other);
 
-        let elements = VecDeque::from(elements);
+        let keys: Vec<_> = batch.clone().into_iter().map(|(key, _)| key).collect();
 
-        /* let mut ranges = VecDeque::with_capacity(elements.len() + 1);
-        for i in 0..elements.len() {
-            let range = if i == 0 {
-                let key = elements[i].0;
-                (Bound::Unbounded, Bound::Excluded(key))
-            } else if i == elements.len() - 1 {
-                let key = elements[i].0;
-                (Bound::Excluded(key), Bound::Unbounded)
-            } else {
-                let low_b = {
-                    let key = elements[i - 1].0;
-                    Bound::Excluded(key)
-                };
+        println!("Get keys {:?}", keys);
 
-                let up_b = {
-                    let key = elements[i].0;
-                    Bound::Excluded(key)
-                };
+        let result: Vec<_> = batch_get::<u16, DataBlob>(ipfs, tree_cid, config.codec, keys)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Batch Get");
 
-                (low_b, up_b)
-            };
+        assert_eq!(result, batch);
+    }
 
-            ranges.push_back(range);
+    #[tokio::test]
+    #[ignore]
+    async fn tree_batch_insert() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        config.base = 2;
+
+        let original_batch = unique_random_sorted_pairs::<32>(100, &mut rng);
+
+        //Run first test to generate the prolly tree
+        let tree_cid =
+            Cid::try_from("bafyreiejcj45rskegzvo6fn6a6q6nrwcwilxbqnh44p2325huwhyrrdl2i").unwrap();
+
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        let batch = unique_random_sorted_pairs::<32>(10, &mut rng);
+
+        println!(
+            "Test Insert Keys {:?}",
+            batch.iter().map(|(key, _)| *key).collect::<Vec<_>>()
+        );
+
+        let tree_cid =
+            batch_insert::<u16, DataBlob>(ipfs.clone(), tree_cid, config.clone(), batch.clone())
+                .await
+                .expect("Empty tree");
+
+        println!("Result {}", tree_cid);
+
+        let keys: Vec<_> = batch.clone().into_iter().map(|(key, _)| key).collect();
+
+        let result: Vec<_> =
+            batch_get::<u16, DataBlob>(ipfs.clone(), tree_cid, config.codec, keys.clone())
+                .collect()
+                .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Batch Get");
+
+        assert_eq!(result, batch);
+
+        let result: Vec<_> = stream_pairs::<u16, DataBlob>(ipfs, tree_cid, config.codec)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Streaming");
+
+        let result_keys: Vec<_> = result.into_iter().map(|(key, _)| key).collect();
+
+        let mut batch_keys: Vec<_> = original_batch.into_iter().map(|(key, _)| key).collect();
+        batch_keys.extend(keys.into_iter());
+        batch_keys.sort_unstable();
+        batch_keys.dedup();
+
+        assert_eq!(result_keys, batch_keys);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn tree_remove_all() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        config.base = 2;
+
+        let batch = unique_random_sorted_pairs::<32>(100, &mut rng);
+        let (keys, _): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
+
+        //Run first test to generate the prolly tree
+        let empty_tree_cid =
+            Cid::try_from("bafyreibhg6tzrxlknugy5zkqs6da3cftxt7mi7rpvfb7lkbubfqcc63fmm").unwrap();
+        let tree_cid =
+            Cid::try_from("bafyreiejcj45rskegzvo6fn6a6q6nrwcwilxbqnh44p2325huwhyrrdl2i").unwrap();
+
+        let result = batch_remove::<u16, DataBlob>(ipfs, tree_cid, config, keys)
+            .await
+            .expect("Empty tree");
+
+        assert_eq!(result, empty_tree_cid);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn tree_remove_some() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(6784236783546783546u64);
+        let ipfs = IpfsService::default();
+
+        let mut config = Config::default();
+        config.base = 2;
+
+        let mut batch = unique_random_sorted_pairs::<32>(100, &mut rng);
+
+        //Run first test to generate the prolly tree
+        let tree_cid =
+            Cid::try_from("bafyreiejcj45rskegzvo6fn6a6q6nrwcwilxbqnh44p2325huwhyrrdl2i").unwrap();
+
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        // 10 random KVs
+        let mut keys = Vec::with_capacity(10);
+
+        for _ in 0..10 {
+            let (key, _) = batch.remove(rng.gen_range(0..batch.len()));
+            keys.push(key);
+        }
+
+        keys.sort_unstable();
+        keys.dedup();
+
+        /* let keys = vec![
+            11315, 19836, 23920, 25250, 27716, 31983, 40144, 42431, 44103, 57053,
+        ];
+
+        for other in keys.iter() {
+            let idx = batch.binary_search_by(|(k, _)| k.cmp(other)).unwrap();
+            batch.remove(idx);
         } */
 
-        let main_batch = Batch {
-            elements,
-            ranges: VecDeque::from(vec![(Bound::Unbounded, Bound::Unbounded)]),
-        };
+        println!("Test Remove Keys {:?}", keys);
 
-        //let main_batch = Batch { elements, ranges };
+        let tree_cid =
+            batch_remove::<u16, DataBlob>(ipfs.clone(), tree_cid, config.clone(), keys.clone())
+                .await
+                .expect("Empty tree");
 
-        println!("Start {:?}", main_batch);
+        println!("Result {}", tree_cid);
 
-        let result = execute_batch_remove(ipfs.clone(), vec![root], main_batch).await?;
+        let result: Vec<_> = batch_get::<u16, DataBlob>(ipfs.clone(), tree_cid, config.codec, keys)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Batch Get");
 
-        let link = result.map(|(link, _)| link);
+        assert!(result.is_empty(), "Result {:?}", result);
 
-        return Ok(link);
+        let result: Vec<_> = stream_pairs::<u16, DataBlob>(ipfs, tree_cid, config.codec)
+            .collect()
+            .await;
+        let results: Result<Vec<_>, Error> = result.into_iter().collect();
+        let result = results.expect("Tree Streaming");
+
+        let (result_keys, _): (Vec<_>, Vec<_>) = result.into_iter().unzip();
+        let (batch_keys, _): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
+
+        assert_eq!(result_keys, batch_keys);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_batch_remove_all() {
-        const LAYERS: usize = 4;
-        let keys_per_layers = 10;
-        let base = 16;
+    type DataBlob = Vec<u8>;
 
-        let key_values = generate_simple_key_value_pairs::<LAYERS>(base, keys_per_layers);
+    fn unique_random_sorted_pairs<const T: usize>(
+        numb: usize,
+        rng: &mut Xoshiro256StarStar,
+    ) -> Vec<(u16, DataBlob)> {
+        let mut key_values = Vec::with_capacity(numb);
 
-        let ipfs = IpfsService::default();
+        for _ in 0..numb {
+            let key = rng.next_u32() as u16;
+            let mut value = [0u8; T];
+            rng.fill_bytes(&mut value);
 
-        let link: Cid =
-            Cid::try_from("bafyreignwxdfgye6y56cufzybds4zjdx4hgxvipmxaq2ya7pmbylzsq44u")
-                .unwrap()
-                .into();
-        let remove_batch: Vec<_> = key_values.into_iter().map(|(key, _)| key).collect();
+            key_values.push((key, value.to_vec()));
+        }
 
-        let second_root = test_batch_remove(&ipfs, link, remove_batch)
-            .await
-            .expect("Tree Batch Remove");
+        key_values.sort_unstable_by(|(a, _), (b, _)| a.cmp(&b));
+        key_values.dedup_by(|(a, _), (b, _)| a == b);
 
-        assert_eq!(second_root, None);
+        key_values
     }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_batch_remove_some() {
-        let ipfs = IpfsService::default();
-
-        /* const LAYERS: usize = 4;
-        let keys_per_layers = 10;
-        let base = 16;
-
-        let key_values = generate_simple_key_value_pairs::<LAYERS>(base, keys_per_layers); */
-        //Previously added
-        let link: Cid =
-            Cid::try_from("bafyreignwxdfgye6y56cufzybds4zjdx4hgxvipmxaq2ya7pmbylzsq44u")
-                .unwrap()
-                .into();
-
-        let remove_batch = vec![1, 2, 3];
-
-        let second_root = test_batch_remove(&ipfs, link, remove_batch)
-            .await
-            .expect("Tree Batch Remove");
-
-        println!("Second tree root {:?}", second_root);
-
-        assert!(second_root.is_some());
-    }
-} */
+}

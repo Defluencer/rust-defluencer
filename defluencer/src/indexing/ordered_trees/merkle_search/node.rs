@@ -50,45 +50,56 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     ///
     /// Idempotent.
     pub fn insert_link(&mut self, link: Cid, range: (Bound<&K>, Bound<&K>)) {
-        let start_idx = match range.start_bound() {
-            Bound::Included(key) => match self.keys.binary_search(key) {
-                Ok(_) => {
-                    panic!("An included link range key should never be found in another node.")
-                }
-                Err(idx) => idx,
-            },
-            Bound::Excluded(key) => match self.keys.binary_search(key) {
-                Ok(idx) => idx + 1,
-                Err(idx) => idx,
-            },
-            Bound::Unbounded => 0,
-        };
+        /* #[cfg(debug_assertions)]
+        println!("Insert Link\nIn Keys {:?}\nAt Range {:?}", self.keys, range); */
 
-        let end_idx = match range.end_bound() {
-            Bound::Included(key) => match self.keys.binary_search(key) {
-                Ok(_) => {
-                    panic!("An included link range key should never be found in another node.")
-                }
-                Err(idx) => idx,
-            },
-            Bound::Excluded(key) => match self.keys.binary_search(key) {
-                Ok(idx) => idx,
-                Err(idx) => idx,
-            },
-            Bound::Unbounded => self.keys.len(),
+        let (start_idx, end_idx) = match (range.start_bound(), range.end_bound()) {
+            (Bound::Excluded(start_key), Bound::Excluded(end_key)) => {
+                let start_idx = match self.keys.binary_search(start_key) {
+                    Ok(idx) => idx + 1,
+                    Err(idx) => idx,
+                };
+
+                let end_idx = self.keys.binary_search(end_key).unwrap_or_else(|x| x);
+
+                (start_idx, end_idx)
+            }
+            (Bound::Unbounded, Bound::Excluded(end_key)) => {
+                let end_idx = match self.keys.binary_search(end_key) {
+                    Ok(idx) => idx,
+                    Err(idx) => idx,
+                };
+
+                (0, end_idx)
+            }
+            (Bound::Excluded(start_key), Bound::Unbounded) => {
+                let start_idx = match self.keys.binary_search(start_key) {
+                    Ok(idx) => idx + 1,
+                    Err(idx) => idx,
+                };
+
+                (start_idx, self.keys.len())
+            }
+            (Bound::Unbounded, Bound::Unbounded) => (0, self.keys.len()),
+            _ => panic!("never used"),
         };
 
         if start_idx != end_idx {
-            panic!("Lower and higher bounds should always agree when inserting a link");
+            let idx = self.indices.binary_search(&end_idx).unwrap_or_else(|x| x);
+
+            self.indices.insert(idx, end_idx);
+            self.links.insert(idx, link);
+
+            return;
         }
 
-        match self.indices.binary_search(&start_idx) {
+        match self.indices.binary_search(&end_idx) {
             Ok(idx) => {
-                self.indices[idx] = start_idx;
+                self.indices[idx] = end_idx;
                 self.links[idx] = link;
             }
             Err(idx) => {
-                self.indices.insert(idx, start_idx);
+                self.indices.insert(idx, end_idx);
                 self.links.insert(idx, link);
             }
         }
@@ -176,27 +187,28 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     }
 
     /// Remove all links and calculate each range bounds based on node keys.
-    pub fn rm_link_ranges(&mut self) -> Vec<(Cid, (Bound<K>, Bound<K>))> {
+    pub fn rm_link_ranges(
+        &mut self,
+        node_range: &(Bound<K>, Bound<K>),
+    ) -> Vec<(Cid, (Bound<K>, Bound<K>))> {
         self.indices
             .drain(..)
             .zip(self.links.drain(..))
             .map(|(idx, link)| {
                 let low_b = {
                     if idx == 0 {
-                        Bound::Unbounded
+                        node_range.start_bound().cloned()
                     } else {
                         match self.keys.get(idx - 1) {
                             Some(key) => Bound::Excluded(key.clone()),
-                            None => Bound::Unbounded,
+                            None => node_range.start_bound().cloned(),
                         }
                     }
                 };
-
                 let up_b = match self.keys.get(idx) {
                     Some(key) => Bound::Excluded(key.clone()),
-                    None => Bound::Unbounded,
+                    None => node_range.end_bound().cloned(),
                 };
-
                 let range = (low_b, up_b);
 
                 (link, range)
@@ -205,26 +217,89 @@ impl<K: Key, V: Value> TreeNode<K, V> {
     }
 
     /// Returns node elements and each link with range.
-    pub fn into_inner(mut self) -> (Vec<(K, V, usize)>, Vec<(Cid, (Bound<K>, Bound<K>))>) {
-        let link_ranges = self.rm_link_ranges();
+    pub fn into_inner(
+        mut self,
+        node_range: &(Bound<K>, Bound<K>),
+    ) -> (Vec<(K, V, usize)>, Vec<(Cid, (Bound<K>, Bound<K>))>) {
+        let link_ranges = self.rm_link_ranges(node_range);
         let elements = self.rm_elements();
 
         (elements, link_ranges)
     }
 
     /// Merge all elements and links of two nodes.
-    pub fn merge(&mut self, other: Self) {
+    pub fn merge(
+        &mut self,
+        node_range: &(Bound<K>, Bound<K>),
+        mut other: Self,
+        other_range: &(Bound<K>, Bound<K>),
+    ) {
+        /* #[cfg(debug_assertions)]
+        println!(
+            "Merging Nodes\nKeys\n{:?}\n{:?}\nIndices\n{:?}\n{:?}",
+            self.keys, other.keys, self.indices, other.indices
+        ); */
+
         if self.layer != other.layer {
-            panic!("Can never merge nodes with different layer");
+            panic!("Cannot Merge Nodes With Different Layers!");
         }
 
-        let (elements, link_ranges) = other.into_inner();
+        if other.keys.is_empty() && other.links.len() == 1 {
+            self.indices.push_back(self.keys.len());
+            self.links.push_back(other.links[0]);
 
-        self.batch_insert(elements.into_iter().map(|(key, value, _)| (key, value)));
+            /* #[cfg(debug_assertions)]
+            println!(
+                "Merged Node\nKeys\n{:?}\nIndices\n{:?}",
+                self.keys, self.indices,
+            ); */
 
-        for (link, (lb, hb)) in link_ranges {
-            self.insert_link(link, (lb.as_ref(), hb.as_ref()));
+            return;
         }
+
+        if self.keys.is_empty() && self.links.len() == 1 {
+            self.keys = other.keys;
+            self.values = other.values;
+
+            self.indices.extend(other.indices);
+            self.links.extend(other.links);
+
+            /* #[cfg(debug_assertions)]
+            println!(
+                "Merged Node\nKeys\n{:?}\nIndices\n{:?}",
+                self.keys, self.indices,
+            ); */
+
+            return;
+        }
+
+        if self.keys.front() < other.keys.front() {
+            let link_ranges = other.rm_link_ranges(other_range);
+
+            self.keys.extend(other.keys);
+            self.values.extend(other.values);
+
+            for (link, range) in link_ranges {
+                self.insert_link(link, (range.start_bound(), range.end_bound()));
+            }
+        } else {
+            let link_ranges = self.rm_link_ranges(node_range);
+            let elements = self.rm_elements();
+
+            other.batch_insert(elements.into_iter().map(|(key, value, _)| (key, value)));
+
+            for (link, range) in link_ranges {
+                other.insert_link(link, (range.start_bound(), range.end_bound()));
+            }
+
+            *self = other;
+        }
+
+        /* #[cfg(debug_assertions)]
+        println!(
+            "Merged Node\nKeys\n{:?}\nIndices\n{:?}",
+            self.keys, self.indices,
+        ); */
     }
 
     /// Return either splitted batches or the KVs searched for.
@@ -238,12 +313,23 @@ impl<K: Key, V: Value> TreeNode<K, V> {
 
     /// Adds the batch KVs in this node, remove outdated links and
     /// iterate through links, ranges and  batches.
-    pub fn insert_iter(&mut self, batch: impl IntoIterator<Item = (K, V, usize)>) -> Insert<K, V> {
+    pub fn insert_iter<'a>(
+        &'a mut self,
+        node_range: &'a (Bound<K>, Bound<K>),
+        batch: impl IntoIterator<Item = (K, V, usize)>,
+        link_ranges: impl IntoIterator<Item = (Cid, (Bound<K>, Bound<K>))>,
+    ) -> Insert<K, V> {
+        let batch: VecDeque<_> = batch.into_iter().collect();
+
+        self.layer = batch
+            .iter()
+            .fold(0, |state, (_, _, layer)| state.max(*layer));
+
         Insert {
             node: self,
-            batch: batch.into_iter().collect(),
-            outdated_link_idx: Vec::new(),
-            split_second_half: None,
+            node_range,
+            batch,
+            link_ranges: link_ranges.into_iter().collect(),
         }
     }
 
@@ -258,6 +344,8 @@ impl<K: Key, V: Value> TreeNode<K, V> {
             node: self,
             batch: batch.into_iter().collect(),
             node_range,
+            key_rm_idx: vec![],
+            indices_rm_idx: vec![],
         }
     }
 }
@@ -266,6 +354,7 @@ impl<K: Key, V: Value> TreeNode<K, V> {
 mod tests {
     use super::*;
 
+    use rand::Rng;
     use rand_core::RngCore;
 
     use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
@@ -386,6 +475,105 @@ mod tests {
         node.crop(range);
         assert_eq!(node.keys, keys);
         assert_eq!(node.indices, indices);
+    }
+
+    #[test]
+    fn node_merge() {
+        let mut rng = Xoshiro256StarStar::from_entropy();
+
+        for _ in 0..100 {
+            let mut kvs = Vec::with_capacity(20);
+            let mut index_links: Vec<(usize, Cid)> = Vec::with_capacity(10);
+
+            for _ in 0..20 {
+                let key = rng.next_u32() as usize;
+                let value = random_cid(&mut rng);
+
+                kvs.push((key, value));
+            }
+
+            kvs.sort_unstable_by(|(key, _), (other, _)| key.cmp(other));
+            kvs.dedup_by(|(key, _), (other, _)| key == other);
+
+            for _ in 0..10 {
+                let mut index = rng.gen_range(0..kvs.len() + 1);
+
+                while index_links.binary_search_by(|(k, _)| k.cmp(&index)).is_ok() {
+                    index = rng.gen_range(0..kvs.len());
+                }
+
+                let link = random_cid(&mut rng);
+
+                index_links.push((index, link));
+            }
+
+            index_links.sort_unstable_by(|(idx, _), (other, _)| idx.cmp(other));
+            index_links.dedup_by(|(idx, _), (other, _)| idx == other);
+            let part_i = index_links.partition_point(|&(idx, _)| idx < 11);
+            //println!("Partition {}", part_i);
+
+            let second_kvs = kvs.clone().split_off(10);
+            let (keys, values) = second_kvs.into_iter().unzip();
+
+            let second_index_links = index_links.clone().split_off(part_i);
+            let (mut indices, links): (VecDeque<_>, _) = second_index_links.into_iter().unzip();
+
+            indices.iter_mut().for_each(|idx| *idx -= 10);
+
+            let node_two = TreeNode {
+                layer: 0,
+                keys,
+                values,
+                indices,
+                links,
+            };
+
+            let mut first_kvs = kvs.clone();
+            first_kvs.truncate(10);
+            let (keys, values) = first_kvs.into_iter().unzip();
+
+            let mut first_index_links = index_links.clone();
+            first_index_links.truncate(part_i);
+            let (indices, links) = first_index_links.into_iter().unzip();
+
+            let mut node_one = TreeNode {
+                layer: 0,
+                keys,
+                values,
+                indices,
+                links,
+            };
+
+            /* println!(
+                "Node One Keys {:?} Indices {:?}",
+                node_one.keys, node_one.indices
+            ); */
+
+            /* println!(
+                "Node Two Keys {:?} Indices {:?}",
+                node_two.keys, node_two.indices
+            ); */
+
+            node_one.merge(
+                &(Bound::Unbounded, Bound::Unbounded),
+                node_two,
+                &(Bound::Unbounded, Bound::Unbounded),
+            );
+            let result = node_one;
+
+            let (keys, values) = kvs.into_iter().unzip();
+            let (indices, links) = index_links.into_iter().unzip();
+
+            let expected = TreeNode {
+                layer: 0,
+                keys,
+                values,
+                indices,
+                links,
+            };
+
+            assert_eq!(result, expected);
+        }
     }
 
     fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {

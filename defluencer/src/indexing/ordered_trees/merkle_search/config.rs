@@ -30,7 +30,7 @@ impl Default for Config {
         Self {
             base: 16,
             codec: Codec::DagCbor,
-            multihash_code: Code::Sha2_512,
+            multihash_code: Code::Sha2_256,
         }
     }
 }
