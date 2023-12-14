@@ -12,7 +12,9 @@ defluencer = { path = "../defluencer" }
 futures-util = "0.3"
 heck = { version = "0.4", default-features = false, features = [] }
 hex = "0.4"
-hyper = { version = "0.14", features = ["http1", "server", "runtime", "stream"] }
+http-body-util = { version = "0.1", default-features = false, features = [] }
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["server-auto", "tokio"] }
 ipfs-api = { path = "../ipfs-api" }
 linked-data = { path = "../linked-data" }
 mime_guess = "2.0"

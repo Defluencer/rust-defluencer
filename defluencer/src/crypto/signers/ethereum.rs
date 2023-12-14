@@ -4,6 +4,8 @@ use async_trait::async_trait;
 
 use sha3::{Digest, Keccak256};
 
+use k256::ecdsa::{Signature, VerifyingKey};
+
 use crate::crypto::ledger::EthereumLedgerApp;
 
 use crate::{crypto::signed_link::HashAlgorithm, errors::Error};
@@ -33,15 +35,8 @@ impl Signer for EthereumSigner {
     async fn sign(
         &self,
         signing_input: &[u8],
-    ) -> Result<
-        (
-            k256::ecdsa::VerifyingKey,
-            k256::ecdsa::Signature,
-            HashAlgorithm,
-        ),
-        Error,
-    > {
-        let signature = self
+    ) -> Result<(VerifyingKey, Signature, HashAlgorithm), Error> {
+        let (signature, rec_id) = self
             .app
             .sign_personal_message(signing_input, self.account_index)?;
 
@@ -51,9 +46,7 @@ impl Signer for EthereumSigner {
 
         let digest = Keccak256::new_with_prefix(eth_message);
 
-        let recovered_key = signature.recover_verifying_key_from_digest(digest)?;
-
-        let signature = k256::ecdsa::Signature::from(signature);
+        let recovered_key = VerifyingKey::recover_from_digest(digest, &signature, rec_id)?;
 
         Ok((recovered_key, signature, HashAlgorithm::EthereumLedgerApp))
     }
@@ -62,8 +55,6 @@ impl Signer for EthereumSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use k256::ecdsa::VerifyingKey;
 
     #[test]
     #[ignore]
@@ -80,7 +71,7 @@ mod tests {
         let signing_input = b"The root problem with conventional currency is all the trust that's required to make it work. The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible.";
         //let signing_input = &[255_u8; 85];
 
-        let signature = app
+        let (signature, rec_id) = app
             .sign_personal_message(signing_input, account_index)
             .unwrap();
 
@@ -90,9 +81,8 @@ mod tests {
 
         let digest = Keccak256::new_with_prefix(eth_message);
 
-        let recovered_key = signature
-            .recover_verifying_key_from_digest(digest.clone())
-            .unwrap();
+        let recovered_key =
+            VerifyingKey::recover_from_digest(digest.clone(), &signature, rec_id).unwrap();
 
         assert_eq!(recovered_key, verif_key);
 

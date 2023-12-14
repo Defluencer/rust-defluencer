@@ -3,14 +3,18 @@ use crate::{
     server::services::put_requests,
 };
 
-use std::{convert::Infallible, net::SocketAddr};
+use std::net::SocketAddr;
 
-use tokio::sync::{mpsc::UnboundedSender, watch::Receiver};
+use defluencer::errors::Error;
 
-use hyper::{
-    service::{make_service_fn, service_fn},
-    Server,
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc::UnboundedSender, watch::Receiver},
 };
+
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper_util::rt::TokioIo;
 
 use ipfs_api::IpfsService;
 
@@ -20,34 +24,56 @@ pub async fn start_server(
     setup_tx: UnboundedSender<SetupData>,
     ipfs: IpfsService,
     mut shutdown: Receiver<()>,
-) {
-    let service = make_service_fn(move |_| {
-        let ipfs = ipfs.clone();
-        let video_tx = video_tx.clone();
-        let setup_tx = setup_tx.clone();
-
-        async move {
-            Ok::<_, Infallible>(service_fn(move |req| {
-                put_requests(req, video_tx.clone(), setup_tx.clone(), ipfs.clone())
-            }))
-        }
-    });
-
-    let server = Server::bind(&server_addr)
-        .http1_half_close(true) //FFMPEG requirement
-        .serve(service);
+) -> Result<(), Error> {
+    let listener = TcpListener::bind(server_addr).await?;
 
     println!("✅ Ingess Server Online");
 
-    let graceful = server.with_graceful_shutdown(async {
-        if let Err(e) = shutdown.changed().await {
-            eprintln!("{}", e);
-        }
-    });
+    loop {
+        tokio::select! {
+            res = listener.accept() => {
+                let (tcp, _remote_address) = match res {
+                    Ok(val) => val,
+                    Err(e) => {
+                        eprintln!("Tcp listener error: {:#?}", e);
+                        continue
+                    }
+                };
 
-    if let Err(e) = graceful.await {
-        eprintln!("Server: {}", e);
+                let io = TokioIo::new(tcp);
+
+                let video_tx = video_tx.clone();
+                let setup_tx = setup_tx.clone();
+                let ipfs = ipfs.clone();
+
+                let service = service_fn(move |req| {
+                    let video_tx = video_tx.clone();
+                    let setup_tx = setup_tx.clone();
+                    let ipfs = ipfs.clone();
+
+                    put_requests(req, video_tx, setup_tx, ipfs)
+                });
+
+                let fut = http1::Builder::new()
+                    .half_close(true)
+                    .serve_connection(io, service);
+
+                tokio::task::spawn(fut);
+            }
+
+            res = shutdown.changed() => {
+                match res {
+                    Ok(()) => break,
+                    Err(e) => {
+                        eprintln!("Shutdown receiver error: {:#?}", e);
+                        break
+                    }
+                }
+            }
+        }
     }
 
     println!("❌ Ingess Server Offline");
+
+    Ok(())
 }

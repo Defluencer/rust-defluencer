@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use signature::{Signature, Signer};
+use signature::{SignatureEncoding, Signer};
 
 use async_signature::AsyncSigner;
 
@@ -17,7 +17,7 @@ use crate::CryptoKey;
 /// - In what format?
 pub trait RecordSigner<S>: Signer<S>
 where
-    S: Signature,
+    S: SignatureEncoding,
 {
     fn crypto_key(&self) -> CryptoKey;
 }
@@ -25,7 +25,7 @@ where
 #[async_trait]
 pub trait AsyncRecordSigner<S>: AsyncSigner<S>
 where
-    S: Signature + Send + 'static,
+    S: SignatureEncoding + Send + 'static,
 {
     async fn crypto_key(&self) -> CryptoKey;
 }

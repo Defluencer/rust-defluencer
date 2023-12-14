@@ -1,3 +1,5 @@
+use std::{convert::Infallible, collections::TryReserveError};
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -19,4 +21,13 @@ pub enum Error {
 
     #[error("Signature: {0}")]
     Signatue(#[from] signature::Error),
+
+    #[error("Encoding: {0}")]
+    SPKI(#[from] spki::Error),
+
+    #[error("DAG-CBOR: {0}")]
+    DAGCBORDecode(#[from] serde_ipld_dagcbor::DecodeError<Infallible>),
+
+    #[error("DAG-CBOR: {0}")]
+    DAGCBOREncode(#[from] serde_ipld_dagcbor::EncodeError<TryReserveError>),
 }

@@ -323,7 +323,9 @@ impl<K: Key, V: Value> TreeNode<K, V> {
 
         self.layer = batch
             .iter()
-            .fold(0, |state, (_, _, layer)| state.max(*layer));
+            .map(|(_, _, layer)| *layer)
+            .max()
+            .unwrap_or_default();
 
         Insert {
             node: self,

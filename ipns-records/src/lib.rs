@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use sha2::{Digest, Sha256};
 
-use signature::Signature;
+use signature::SignatureEncoding;
 
 pub use traits::{AsyncRecordSigner, RecordSigner};
 
@@ -20,8 +20,7 @@ use chrono::{Duration, SecondsFormat, Utc};
 
 use cid::Cid;
 
-use multihash::MultihashGeneric;
-type Multihash = MultihashGeneric<64>;
+type Multihash = multihash::MultihashGeneric<64>;
 
 use prost::{self, Enumeration, Message};
 
@@ -52,15 +51,13 @@ pub struct CryptoKey {
 }
 
 impl CryptoKey {
-    pub fn new_ed15519_dalek(public_key: &ed25519_dalek::PublicKey) -> Self {
+    pub fn new_ed15519_dalek(public_key: &ed25519_dalek::VerifyingKey) -> Self {
         let r#type = KeyType::Ed25519 as i32;
         let data = public_key.to_bytes().to_vec();
         CryptoKey { r#type, data }
     }
 
     pub fn new_k256(public_key: &k256::ecdsa::VerifyingKey) -> Self {
-        use elliptic_curve::sec1::ToEncodedPoint;
-
         let r#type = KeyType::Secp256k1 as i32;
         let data = public_key.to_encoded_point(true).to_bytes().into_vec();
         CryptoKey { r#type, data }
@@ -206,8 +203,7 @@ impl IPNSRecord {
 
         let crypto_key = CryptoKey::decode(data)?;
 
-        let document: DagCborDocument =
-            serde_ipld_dagcbor::from_slice(&self.data).expect("Valid Dag Cbor");
+        let document: DagCborDocument = serde_ipld_dagcbor::from_slice(&self.data)?;
 
         if document.value != self.value
             || document.validity != self.validity
@@ -230,10 +226,10 @@ impl IPNSRecord {
             KeyType::RSA => unimplemented!(),
             KeyType::Ed25519 => {
                 use ed25519::Signature;
-                use ed25519_dalek::PublicKey;
+                use ed25519_dalek::VerifyingKey;
 
-                let public_key = PublicKey::from_bytes(&crypto_key.data)?;
-                let signature = Signature::from_bytes(&self.signature_v2)?;
+                let public_key = VerifyingKey::try_from(crypto_key.data.as_slice())?;
+                let signature = Signature::try_from(self.signature_v2.as_slice())?;
 
                 public_key.verify(&signing_input_v2, &signature)?;
             }
@@ -241,7 +237,7 @@ impl IPNSRecord {
                 use k256::ecdsa::Signature;
                 use k256::ecdsa::VerifyingKey;
 
-                let verif_key = VerifyingKey::from_sec1_bytes(&crypto_key.data)?;
+                let verif_key = VerifyingKey::try_from(crypto_key.data.as_slice())?;
                 let signature = Signature::from_der(&self.signature_v2)?;
 
                 verif_key.verify(&signing_input_v2, &signature)?;
@@ -250,8 +246,7 @@ impl IPNSRecord {
                 use p256::ecdsa::Signature;
                 use p256::ecdsa::VerifyingKey;
 
-                let verif_key =
-                    VerifyingKey::from_public_key_der(&crypto_key.data).expect("Valid Public Key");
+                let verif_key = VerifyingKey::from_public_key_der(&crypto_key.data)?;
                 let signature = Signature::from_der(&self.signature_v2)?;
 
                 verif_key.verify(&signing_input_v2, &signature)?;
@@ -271,7 +266,7 @@ impl IPNSRecord {
     ) -> Result<Self, Error>
     where
         S: RecordSigner<U>,
-        U: Signature,
+        U: SignatureEncoding,
     {
         let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
 
@@ -301,7 +296,7 @@ impl IPNSRecord {
         }
 
         let signature_v1 = signer.try_sign(&signing_input_v1)?;
-        let signature_v1 = signature_v1.as_bytes().to_vec();
+        let signature_v1 = signature_v1.to_vec();
 
         let document = DagCborDocument {
             value: value.clone(),
@@ -311,7 +306,7 @@ impl IPNSRecord {
             ttl,
         };
 
-        let data = serde_ipld_dagcbor::to_vec(&document).expect("Valid Dag Cbor");
+        let data = serde_ipld_dagcbor::to_vec(&document)?;
 
         //prefix
         let mut signing_input_v2: Vec<u8> = vec![
@@ -322,7 +317,7 @@ impl IPNSRecord {
         signing_input_v2.extend(data.iter());
 
         let signature_v2 = signer.try_sign(&signing_input_v2)?;
-        let signature_v2 = signature_v2.as_bytes().to_vec();
+        let signature_v2 = signature_v2.to_vec();
 
         Ok(Self {
             value,
@@ -347,7 +342,7 @@ impl IPNSRecord {
     ) -> Result<Self, Error>
     where
         S: AsyncRecordSigner<U>,
-        U: Signature + Send + 'static,
+        U: SignatureEncoding + Send + 'static,
     {
         let value = format!("/ipfs/{}", cid.to_string()).into_bytes();
 
@@ -377,7 +372,7 @@ impl IPNSRecord {
         }
 
         let signature_v1 = signer.sign_async(&signing_input_v1).await?;
-        let signature_v1 = signature_v1.as_bytes().to_vec();
+        let signature_v1 = signature_v1.to_vec();
 
         let document = DagCborDocument {
             value: value.clone(),
@@ -387,7 +382,7 @@ impl IPNSRecord {
             ttl,
         };
 
-        let data = serde_ipld_dagcbor::to_vec(&document).expect("Valid Dag Cbor");
+        let data = serde_ipld_dagcbor::to_vec(&document)?;
 
         //prefix
         let mut signing_input_v2: Vec<u8> = vec![
@@ -398,7 +393,7 @@ impl IPNSRecord {
         signing_input_v2.extend(data.iter());
 
         let signature_v2 = signer.sign_async(&signing_input_v2).await?;
-        let signature_v2 = signature_v2.as_bytes().to_vec();
+        let signature_v2 = signature_v2.to_vec();
 
         Ok(Self {
             value,
@@ -508,7 +503,7 @@ impl IPNSRecord {
             ttl,
         };
 
-        let data = serde_ipld_dagcbor::to_vec(&document).expect("Valid Dag Cbor");
+        let data = serde_ipld_dagcbor::to_vec(&document)?;
 
         Ok(Self {
             value,

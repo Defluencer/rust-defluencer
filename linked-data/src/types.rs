@@ -7,8 +7,7 @@ use cid::Cid;
 
 use multibase::Base;
 
-use multihash::MultihashGeneric;
-type Multihash = MultihashGeneric<64>;
+type Multihash = multihash::MultihashGeneric<64>;
 
 /// Ethereum address
 pub type Address = [u8; 20];

@@ -2,10 +2,7 @@
 
 use std::{collections::VecDeque, sync::Arc};
 
-use k256::{
-    ecdsa::recoverable::{Id, Signature},
-    PublicKey,
-};
+use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 
 use ledger_transport::{APDUAnswer, APDUCommand, APDUErrorCode};
 use ledger_transport_hid::{LedgerHIDError, TransportNativeHID};
@@ -43,7 +40,7 @@ impl BitcoinLedgerApp {
     /// The public key is shown on the screen. After confirmation by the user.
     ///
     /// Returns the public key & full serialized extended version as per BIP-32.
-    pub fn get_extended_pubkey(&self, index: u32) -> Result<(PublicKey, String), Error> {
+    pub fn get_extended_pubkey(&self, index: u32) -> Result<(VerifyingKey, String), Error> {
         let response = self.addr(index)?;
 
         let addr = std::str::from_utf8(response.data())?;
@@ -61,7 +58,7 @@ impl BitcoinLedgerApp {
             &decoded[45..78]
         ); */
 
-        let public_key = k256::PublicKey::from_sec1_bytes(&decoded[45..78])?;
+        let public_key = VerifyingKey::from_sec1_bytes(&decoded[45..78])?;
 
         Ok((public_key, addr.to_owned()))
     }
@@ -137,23 +134,20 @@ impl BitcoinLedgerApp {
     /// The display hash is the Sha2-256 of the message.
     ///
     /// Returns EcDSA signature.
-    pub fn sign_message(&self, message: &[u8], index: u32) -> Result<Signature, Error> {
+    pub fn sign_message(&self, message: &[u8], index: u32) -> Result<(Signature, RecoveryId), Error> {
         let response = self.sign(message, index)?;
-
-        use k256::ecdsa::signature::Signature;
 
         /* #[cfg(debug_assertions)]
         println!("Response Data: {:?}", response.data()); */
 
-        // R & S returned from ledger in same order as k256 signature
-        let signature = k256::ecdsa::Signature::from_bytes(&response.data()[1..])?;
         // V returned at byte index 0 instead of last
         // k256 crate only use id 0 or 1 so for BTC minus 31
-        let id = Id::new(response.data()[0] - 31)?;
+        let id = RecoveryId::try_from(response.data()[0] - 31)?;
 
-        let signature = k256::ecdsa::recoverable::Signature::new(&signature, id)?;
+        // R & S returned from ledger in same order as k256 signature
+        let signature = k256::ecdsa::Signature::try_from(&response.data()[1..])?;
 
-        Ok(signature)
+        Ok((signature, id))
     }
 
     fn sign(

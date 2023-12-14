@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use signature::{Signature, Signer};
+use signature::{SignatureEncoding, Signer};
 
 use async_signature::AsyncSigner;
 
@@ -23,7 +23,7 @@ use crate::{AlgorithmType, JsonWebKey};
 /// https://www.rfc-editor.org/rfc/rfc8037.html
 pub trait BlockSigner<U>: Signer<U>
 where
-    U: Signature,
+    U: SignatureEncoding,
 {
     fn algorithm(&self) -> AlgorithmType;
 
@@ -33,7 +33,7 @@ where
 #[async_trait]
 pub trait AsyncBlockSigner<S>: AsyncSigner<S>
 where
-    S: Signature + Send + 'static,
+    S: SignatureEncoding + Send + 'static,
 {
     async fn algorithm(&self) -> AlgorithmType;
 

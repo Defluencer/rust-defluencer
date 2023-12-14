@@ -458,8 +458,6 @@ where
     }
 
     async fn create_signed_link(&self, cid: Cid) -> Result<Cid, Error> {
-        use k256::elliptic_curve::sec1::ToEncodedPoint;
-
         let (verif_key, signature, hash_algo) = self.signer.sign(cid.hash().digest()).await?;
 
         let signed_link = SignedLink {

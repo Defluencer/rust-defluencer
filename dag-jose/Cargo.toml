@@ -4,19 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-signature =  { version = "0.2", default-features = false, features = [] }
+async-signature =  { version = "0.4", default-features = false, features = [] }
 async-trait = "0.1"
 cid = { version = "0.10", default-features = false, features = ["std"] }
-ed25519 = { version = "1", default-features = false, features = [] }
-ed25519-dalek = { version = "1", default-features = false, features = ["u64_backend"] }
-elliptic-curve = { version = "0.12", default-features = false, features = [] }
-k256 = { version = "0.11", default-features = false, features = ["std", "ecdsa"] }
+ed25519 = { version = "2", default-features = false, features = [] }
+ed25519-dalek = { version = "2", default-features = false, features = [] }
+elliptic-curve = { version = "0.13", default-features = false, features = [] }
+k256 = { version = "0.13", default-features = false, features = ["std", "ecdsa"] }
 linked-data = { path = "../linked-data" }
 multibase = { version = "0.9", default-features = false, features = ["std"] }
-p256 = { version = "0.11", default-features = false, features = ["ecdsa"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
-signature = { version = "1", default-features = false, features = [] }
+signature = { version = "2", default-features = false, features = [] }
 thiserror = { version = "1", default-features = false, features = [] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -24,5 +24,4 @@ getrandom = { version = "0.2", default-features = false, features = ["js"] }
 
 [dev-dependencies]
 rand_core = { version = "0.6", features = ["getrandom"] }
-#rand_core = { version = "0.5", features = ["getrandom"] }
-ed25519-dalek = { version = "1", features = ["rand"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }

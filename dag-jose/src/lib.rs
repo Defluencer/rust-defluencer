@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 
 pub use traits::{AsyncBlockSigner, BlockSigner};
 
+use signature::SignatureEncoding;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum AlgorithmType {
     //https://www.rfc-editor.org/rfc/rfc7518.html#section-3.1
@@ -160,7 +162,7 @@ impl JsonWebSignature {
 
     /// Verify a dag-jose block.
     pub fn verify(&self) -> Result<(), Error> {
-        use signature::{Signature, Verifier};
+        use signature::Verifier;
 
         let header = self.get_header()?;
 
@@ -175,36 +177,38 @@ impl JsonWebSignature {
 
         match (algo, &jwk.key_type, &jwk.curve) {
             (AlgorithmType::ES256, KeyType::EllipticCurve, CurveType::P256) => {
+                let Some(y) = jwk.y else {
+                    return Err(Error::Key);
+                };
+                
                 let mut public_key = vec![0x04]; // Uncompressed key prefix
+                public_key.extend(Base::Base64Url.decode(jwk.x)?);
+                public_key.extend(Base::Base64Url.decode(y)?);
 
-                public_key.extend(Base::Base64Url.decode(&jwk.x)?);
-                public_key
-                    .extend(Base::Base64Url.decode(&jwk.y.expect("Uncompressed Public Key"))?);
-
-                let verif_key = p256::ecdsa::VerifyingKey::from_sec1_bytes(&public_key)?;
-
-                let signature = p256::ecdsa::Signature::from_bytes(&signature)?;
+                let verif_key = p256::ecdsa::VerifyingKey::try_from(public_key.as_slice())?;
+                let signature = p256::ecdsa::Signature::try_from(signature.as_slice())?;
 
                 verif_key.verify(signing_input.as_bytes(), &signature)?;
             }
             (AlgorithmType::ES256K, KeyType::EllipticCurve, CurveType::Secp256k1) => {
+                let Some(y) = jwk.y else {
+                    return Err(Error::Key);
+                };
+                
                 let mut public_key = vec![0x04]; // Uncompressed key prefix
+                public_key.extend(Base::Base64Url.decode(jwk.x)?);
+                public_key.extend(Base::Base64Url.decode(y)?);
 
-                public_key.extend(Base::Base64Url.decode(&jwk.x)?);
-                public_key
-                    .extend(Base::Base64Url.decode(&jwk.y.expect("Uncompressed Public Key"))?);
-
-                let verif_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&public_key)?;
-
-                let signature = k256::ecdsa::Signature::from_bytes(&signature)?;
+                let verif_key = k256::ecdsa::VerifyingKey::try_from(public_key.as_slice())?;
+                let signature = k256::ecdsa::Signature::try_from(signature.as_slice())?;
 
                 verif_key.verify(signing_input.as_bytes(), &signature)?;
             }
             (AlgorithmType::EdDSA, KeyType::OctetString, CurveType::Ed25519) => {
-                let public_key = Base::Base64Url.decode(&jwk.x)?;
-                let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key)?;
+                let public_key = Base::Base64Url.decode(jwk.x)?;
 
-                let signature = ed25519::Signature::from_bytes(&signature)?;
+                let public_key = ed25519_dalek::VerifyingKey::try_from(public_key.as_slice())?;
+                let signature = ed25519::Signature::try_from(signature.as_slice())?;
 
                 public_key.verify(signing_input.as_bytes(), &signature)?;
             }
@@ -217,7 +221,7 @@ impl JsonWebSignature {
     pub fn new<S, U>(cid: Cid, signer: S) -> Result<Self, Error>
     where
         S: BlockSigner<U>,
-        U: signature::Signature,
+        U: SignatureEncoding,
     {
         let payload = cid.to_bytes();
         let payload = Base::Base64Url.encode(payload);
@@ -241,7 +245,7 @@ impl JsonWebSignature {
             json_web_key: Some(jwk),
         });
 
-        let signature = Base::Base64Url.encode(signature);
+        let signature = Base::Base64Url.encode(signature.to_bytes());
 
         let jws = Self {
             payload,
@@ -259,7 +263,7 @@ impl JsonWebSignature {
     pub async fn new_async<S, U>(cid: Cid, signer: S) -> Result<Self, Error>
     where
         S: AsyncBlockSigner<U>,
-        U: signature::Signature + Send + 'static,
+        U: SignatureEncoding + Send + 'static,
     {
         //TODO code reuse
 
@@ -285,7 +289,7 @@ impl JsonWebSignature {
             json_web_key: Some(jwk),
         });
 
-        let signature = Base::Base64Url.encode(signature);
+        let signature = Base::Base64Url.encode(signature.to_bytes());
 
         let jws = Self {
             payload,
@@ -323,7 +327,7 @@ impl JsonWebSignature {
         cid: Cid,
         algorithm: AlgorithmType,
         jwk: JsonWebKey,
-        signature: impl signature::Signature,
+        signature: impl SignatureEncoding,
     ) -> Result<Self, Error> {
         let payload = cid.to_bytes();
         let payload = Base::Base64Url.encode(payload);
@@ -341,7 +345,7 @@ impl JsonWebSignature {
             json_web_key: Some(jwk),
         });
 
-        let signature = Base::Base64Url.encode(signature);
+        let signature = Base::Base64Url.encode(signature.to_bytes());
 
         let jws = Self {
             payload,

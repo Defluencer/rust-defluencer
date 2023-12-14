@@ -2,10 +2,7 @@
 
 use std::sync::Arc;
 
-use k256::{
-    ecdsa::recoverable::{Id, Signature},
-    PublicKey,
-};
+use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 
 use ledger_transport::{APDUAnswer, APDUCommand, APDUErrorCode};
 use ledger_transport_hid::{LedgerHIDError, TransportNativeHID};
@@ -47,7 +44,7 @@ impl EthereumLedgerApp {
     }
 
     /// Return Public key and the address.
-    pub fn get_public_address(&self, index: u32) -> Result<(PublicKey, String), Error> {
+    pub fn get_public_address(&self, index: u32) -> Result<(VerifyingKey, String), Error> {
         let response = self.addr(index)?;
         let data = response.data();
 
@@ -63,7 +60,7 @@ impl EthereumLedgerApp {
 
         let addr = &data[addr_start..addr_end];
 
-        let public_key = k256::PublicKey::from_sec1_bytes(pubkey)?;
+        let public_key = VerifyingKey::from_sec1_bytes(pubkey)?;
         let address = std::str::from_utf8(addr)?.to_owned();
 
         Ok((public_key, address))
@@ -73,20 +70,17 @@ impl EthereumLedgerApp {
     ///
     /// The signature is standard ETH signature scheme.
     /// Message with prefix hashed with Keccak256.
-    pub fn sign_personal_message(&self, message: &[u8], index: u32) -> Result<Signature, Error> {
-        use k256::ecdsa::signature::Signature;
-
+    pub fn sign_personal_message(&self, message: &[u8], index: u32) -> Result<(Signature, RecoveryId), Error> {
         let response = self.sign(message, index)?;
 
-        // R & S returned from ledger in same order as k256 signature
-        let signature = k256::ecdsa::Signature::from_bytes(&response.data()[1..])?;
         // V returned at byte index 0 instead of last
         // k256 crate only use id 0 or 1 so for ETH minus 27
-        let id = Id::new(response.data()[0] - 27)?;
+        let id = RecoveryId::try_from(response.data()[0] - 27)?;
 
-        let signature = k256::ecdsa::recoverable::Signature::new(&signature, id)?;
+        // R & S returned from ledger in same order as k256 signature
+        let signature = Signature::try_from(&response.data()[1..])?;
 
-        Ok(signature)
+        Ok((signature, id))
     }
 
     fn addr(&self, index: u32) -> Result<APDUAnswer<Vec<u8>>, LedgerAppError<LedgerHIDError>> {

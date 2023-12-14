@@ -4,6 +4,8 @@ use async_trait::async_trait;
 
 use sha2::{Digest, Sha256};
 
+use k256::ecdsa::{Signature, VerifyingKey};
+
 use crate::{
     crypto::{ledger::BitcoinLedgerApp, signed_link::HashAlgorithm},
     errors::Error,
@@ -35,15 +37,8 @@ impl Signer for BitcoinSigner {
     async fn sign(
         &self,
         signing_input: &[u8],
-    ) -> Result<
-        (
-            k256::ecdsa::VerifyingKey,
-            k256::ecdsa::Signature,
-            HashAlgorithm,
-        ),
-        Error,
-    > {
-        let signature = self.app.sign_message(signing_input, self.account_index)?;
+    ) -> Result<(VerifyingKey, Signature, HashAlgorithm), Error> {
+        let (signature, rec_id) = self.app.sign_message(signing_input, self.account_index)?;
 
         let btc_message = {
             let mut temp = Vec::from("\x18Bitcoin Signed Message:\n");
@@ -57,9 +52,7 @@ impl Signer for BitcoinSigner {
 
         let hash = Sha256::new_with_prefix(btc_message).finalize();
         let digest = Sha256::new_with_prefix(hash);
-        let recovered_key = signature.recover_verifying_key_from_digest(digest)?;
-
-        let signature = k256::ecdsa::Signature::from(signature);
+        let recovered_key = VerifyingKey::recover_from_digest(digest, &signature, rec_id)?;
 
         Ok((recovered_key, signature, HashAlgorithm::BitcoinLedgerApp))
     }
@@ -69,7 +62,7 @@ impl Signer for BitcoinSigner {
 mod tests {
     use super::*;
 
-    use k256::ecdsa::VerifyingKey;
+    use k256::ecdsa::signature::DigestVerifier;
 
     use sha2::Digest;
 
@@ -86,8 +79,6 @@ mod tests {
     #[test]
     #[ignore]
     fn sign_test() {
-        use k256::ecdsa::signature::DigestVerifier;
-
         let app = BitcoinLedgerApp::default();
         let account_index = 0;
 
@@ -100,7 +91,7 @@ mod tests {
         let display_hash = Sha256::new_with_prefix(signing_input).finalize();
         println!("Message Display Hash: 0x{}", hex::encode(display_hash));
 
-        let signature = app
+        let (signature, rec_id) = app
             .sign_message(signing_input, account_index)
             .expect("Msg signature");
 
@@ -116,9 +107,8 @@ mod tests {
         let hash = Sha256::new_with_prefix(btc_message).finalize();
         let digest = Sha256::new_with_prefix(hash);
 
-        let recov_key = signature
-            .recover_verifying_key_from_digest(digest.clone())
-            .unwrap();
+        let recov_key =
+            VerifyingKey::recover_from_digest(digest.clone(), &signature, rec_id).unwrap();
 
         assert_eq!(recov_key, verif_key);
 

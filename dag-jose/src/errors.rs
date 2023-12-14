@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Key: Y coords missing")]
+    Key,
+
     #[error("DAG-JOSE: No header present")]
     Header,
 

@@ -2,12 +2,16 @@ use crate::actors::{SetupData, VideoData};
 
 use std::{fmt::Debug, path::Path};
 
+use futures_util::StreamExt;
 use tokio::sync::mpsc::UnboundedSender;
 
 use hyper::{
+    body::{Bytes, Incoming},
     header::{HeaderValue, LOCATION},
-    Body, Error, Method, Request, Response, StatusCode,
+    Error, Method, Request, Response, StatusCode,
 };
+
+use http_body_util::{BodyExt, BodyStream, Empty};
 
 use ipfs_api::IpfsService;
 
@@ -18,15 +22,15 @@ pub const MP4: &str = "mp4";
 pub const M4S: &str = "m4s";
 
 pub async fn put_requests(
-    req: Request<Body>,
+    req: Request<Incoming>,
     video_tx: UnboundedSender<VideoData>,
     setup_tx: UnboundedSender<SetupData>,
     ipfs: IpfsService,
-) -> Result<Response<Body>, Error> {
+) -> Result<Response<Empty<Bytes>>, Error> {
     #[cfg(debug_assertions)]
     println!("Service: {:#?}", req);
 
-    let mut res = Response::new(Body::empty());
+    let mut res = Response::new(Empty::new());
 
     let (parts, body) = req.into_parts();
 
@@ -41,11 +45,24 @@ pub async fn put_requests(
         return not_found_response(res);
     }
 
+    let body_stream = BodyStream::new(body);
+
     if path.extension().unwrap() == M3U8 {
-        return manifest_response(res, body, path, setup_tx).await;
+        return manifest_response(res, body_stream, path, setup_tx).await;
     }
 
-    let cid = match ipfs.add(body).await {
+    //Map frames to bytes dropping trailers frame
+    let byte_stream = body_stream.filter_map(|res| async move {
+        match res {
+            Ok(frame) => match frame.into_data() {
+                Ok(bytes) => Some(Ok(bytes)),
+                Err(_) => None,
+            },
+            Err(e) => Some(Err(e)),
+        }
+    });
+
+    let cid = match ipfs.add(byte_stream).await {
         Ok(res) => res,
         Err(error) => return internal_error_response(res, &error),
     };
@@ -79,7 +96,7 @@ pub async fn put_requests(
     Ok(res)
 }
 
-fn not_found_response(mut res: Response<Body>) -> Result<Response<Body>, Error> {
+fn not_found_response(mut res: Response<Empty<Bytes>>) -> Result<Response<Empty<Bytes>>, Error> {
     *res.status_mut() = StatusCode::NOT_FOUND;
 
     #[cfg(debug_assertions)]
@@ -89,12 +106,12 @@ fn not_found_response(mut res: Response<Body>) -> Result<Response<Body>, Error> 
 }
 
 async fn manifest_response(
-    mut res: Response<Body>,
-    body: Body,
+    mut res: Response<Empty<Bytes>>,
+    body: BodyStream<Incoming>,
     path: &Path,
     setup_tx: UnboundedSender<SetupData>,
-) -> Result<Response<Body>, Error> {
-    let bytes = hyper::body::to_bytes(body).await?;
+) -> Result<Response<Empty<Bytes>>, Error> {
+    let bytes = BodyExt::collect(body).await?.to_bytes();
 
     let playlist = match m3u8_rs::parse_playlist(&bytes) {
         Ok((_, playlist)) => playlist,
@@ -122,9 +139,9 @@ async fn manifest_response(
 }
 
 fn internal_error_response(
-    mut res: Response<Body>,
+    mut res: Response<Empty<Bytes>>,
     error: &dyn Debug,
-) -> Result<Response<Body>, Error> {
+) -> Result<Response<Empty<Bytes>>, Error> {
     eprintln!("Service: {:#?}", error);
 
     *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;

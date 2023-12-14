@@ -4,8 +4,7 @@ use super::*;
 
 use chrono::Duration;
 
-use ed25519_dalek::{Keypair, PublicKey, SecretKey};
-
+use ecdsa::VerifyingKey;
 use prost::Message;
 
 use sha2::{Digest, Sha256};
@@ -15,22 +14,22 @@ use signature::{DigestSigner, Signer};
 use crate::{CryptoKey, IPNSRecord, KeyType, RecordSigner};
 
 pub struct Ed25519IPNSRecordSigner {
-    pub keypair: Keypair,
+    pub signing_key: ed25519_dalek::SigningKey,
 }
 
 impl Signer<ed25519::Signature> for Ed25519IPNSRecordSigner {
     fn sign(&self, msg: &[u8]) -> ed25519::Signature {
-        self.try_sign(msg).expect("signature operation failed")
+        self.signing_key.sign(msg)
     }
 
     fn try_sign(&self, msg: &[u8]) -> Result<ed25519::Signature, signature::Error> {
-        Ok(self.keypair.sign(msg))
+        self.signing_key.try_sign(msg)
     }
 }
 
 impl RecordSigner<ed25519::Signature> for Ed25519IPNSRecordSigner {
     fn crypto_key(&self) -> CryptoKey {
-        CryptoKey::new_ed15519_dalek(&self.keypair.public)
+        CryptoKey::new_ed15519_dalek(&self.signing_key.verifying_key())
     }
 }
 
@@ -44,23 +43,15 @@ fn ed25519_roundtrip() {
     let ttl = 0;
     let sequence = 0;
 
-    // Need rand_core v0.5
-    /* use rand_core::OsRng;
+    
+    use rand_core::OsRng;
     let mut csprng = OsRng {};
-    let keypair: Keypair = Keypair::generate(&mut csprng); */
-
-    let secret = SecretKey::from_bytes(&[
-        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
-        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
-    ])
-    .unwrap();
-    let public = PublicKey::from(&secret);
-    let keypair = Keypair { secret, public };
+    let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
 
     let addr = {
         let public_key = CryptoKey {
             r#type: KeyType::Ed25519 as i32,
-            data: keypair.public.to_bytes().to_vec(),
+            data: signing_key.verifying_key().as_bytes().to_vec(),
         }
         .encode_to_vec(); // Protobuf encoding
 
@@ -77,7 +68,7 @@ fn ed25519_roundtrip() {
 
     println!("Addr: {}", addr);
 
-    let signer = Ed25519IPNSRecordSigner { keypair };
+    let signer = Ed25519IPNSRecordSigner { signing_key };
 
     let record = IPNSRecord::new(value, duration, sequence, ttl, signer).unwrap();
 
@@ -124,24 +115,17 @@ fn secp256k1_roundtrip() {
     let ttl = 0;
     let sequence = 0;
 
-    // Need rand_core v0.6
-    /* use rand_core::OsRng;
+    use rand_core::OsRng;
     let mut csprng = OsRng {};
-    let signing_key = k256::ecdsa::SigningKey::random(&mut csprng); */
+    let signing_key: k256::ecdsa::SigningKey = k256::ecdsa::SigningKey::random(&mut csprng);
 
-    let signing_key = k256::ecdsa::SigningKey::from_bytes(&[
-        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
-        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
-    ])
-    .unwrap();
-
-    let verif_key = signing_key.verifying_key();
+    let verif_key = k256::ecdsa::VerifyingKey::from(&signing_key);
     let signer = Secp256k1Signer { signing_key };
 
     let addr = {
         let public_key = CryptoKey {
             r#type: KeyType::Secp256k1 as i32,
-            data: verif_key.to_bytes().to_vec(),
+            data: verif_key.to_sec1_bytes().to_vec(),
         }
         .encode_to_vec(); // Protobuf encoding
 
@@ -205,13 +189,11 @@ fn ecdsa_roundtrip() {
     let ttl = 0;
     let sequence = 0;
 
-    let signing_key = p256::ecdsa::SigningKey::from_bytes(&[
-        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
-        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
-    ])
-    .unwrap();
+    use rand_core::OsRng;
+    let mut csprng = OsRng {};
+    let signing_key = p256::ecdsa::SigningKey::random(&mut csprng);
 
-    let verif_key = signing_key.verifying_key();
+    let verif_key = VerifyingKey::from(&signing_key);
     let signer = EcdsaSigner { signing_key };
 
     let addr = {

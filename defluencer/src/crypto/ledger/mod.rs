@@ -110,10 +110,10 @@ impl TestLedgerApp {
         Ok(response)
     }
 
-    pub fn get_priv_key(&self) -> Result<k256::SecretKey, Error> {
+    pub fn get_priv_key(&self) -> Result<k256::ecdsa::SigningKey, Error> {
         let response = self.priv_key()?;
 
-        let priv_key = k256::SecretKey::from_be_bytes(response.data())?;
+        let priv_key = k256::ecdsa::SigningKey::try_from(response.data())?;
 
         Ok(priv_key)
     }
@@ -148,21 +148,20 @@ mod tests {
     use pkcs8::EncodePublicKey;
 
     use sha2::{Digest, Sha256};
+    use signature::{DigestSigner, DigestVerifier};
 
     const SIGNING_INPUT: [u8; 12] = *b"Hello World!";
 
     #[test]
     #[ignore]
     fn sign() {
-        use k256::ecdsa::signature::DigestVerifier;
-
         let app = TestLedgerApp::default();
 
         let secret_key = app.get_priv_key().unwrap();
-        println!(
+        /* println!(
             "Secret key: {}",
             *secret_key.to_pem(Default::default()).unwrap()
-        );
+        ); */
         let sign_key = k256::ecdsa::SigningKey::from(secret_key);
 
         let pub_key = app.get_pubkey().unwrap();
@@ -211,11 +210,9 @@ mod tests {
     #[test]
     #[ignore]
     fn example() {
-        use k256::ecdsa::signature::{DigestSigner, DigestVerifier};
-
-        let signing_key = k256::ecdsa::SigningKey::from_bytes(
-            &hex::decode("58c185d9033b7624fe0a85f2d784050f7cbc5ec2516ead2631714f25a1ad0d62")
-                .unwrap(),
+        let signing_key = k256::ecdsa::SigningKey::try_from(
+            hex::decode("58c185d9033b7624fe0a85f2d784050f7cbc5ec2516ead2631714f25a1ad0d62")
+                .unwrap().as_slice(),
         )
         .unwrap();
 

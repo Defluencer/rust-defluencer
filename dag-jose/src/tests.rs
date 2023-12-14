@@ -8,19 +8,17 @@ use signature::Signer;
 
 use crate::JsonWebSignature;
 
-use ed25519_dalek::{Keypair, PublicKey, SecretKey};
-
 pub struct Ed25519Signer {
-    pub keypair: Keypair,
+    pub signing_key: ed25519_dalek::SigningKey,
 }
 
 impl Signer<ed25519::Signature> for Ed25519Signer {
     fn sign(&self, msg: &[u8]) -> ed25519::Signature {
-        self.try_sign(msg).expect("signature operation failed")
+        self.signing_key.sign(msg)
     }
 
     fn try_sign(&self, msg: &[u8]) -> Result<ed25519::Signature, signature::Error> {
-        Ok(self.keypair.sign(msg))
+        self.signing_key.try_sign(msg)
     }
 }
 
@@ -33,7 +31,7 @@ impl BlockSigner<ed25519::Signature> for Ed25519Signer {
         JsonWebKey {
             key_type: KeyType::OctetString,
             curve: CurveType::Ed25519,
-            x: Base::Base64Url.encode(self.keypair.public.to_bytes()),
+            x: Base::Base64Url.encode(self.signing_key.verifying_key().as_bytes()),
             y: None,
         }
     }
@@ -41,20 +39,12 @@ impl BlockSigner<ed25519::Signature> for Ed25519Signer {
 
 #[test]
 fn ed25519_roundtrip() {
-    let secret = SecretKey::from_bytes(&[
-        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
-        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
-    ])
-    .unwrap();
-    let public = PublicKey::from(&secret);
-    let keypair = Keypair { secret, public };
+    use rand_core::OsRng;
 
-    // Need rand_core v0.5
-    //use rand_core::OsRng;
-    //let mut csprng = OsRng {};
-    //let keypair: Keypair = Keypair::generate(&mut csprng);
+    let mut csprng = OsRng {};
+    let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
 
-    let signer = Ed25519Signer { keypair };
+    let signer = Ed25519Signer { signing_key };
 
     let value =
         Cid::try_from("bafyreih223c6mqauz5ouolokqrofaekpuu45eblm33fm3g2rlwdkqfabo4").unwrap();
@@ -74,7 +64,7 @@ pub struct Secp256k1Signer {
 
 impl Signer<k256::ecdsa::Signature> for Secp256k1Signer {
     fn sign(&self, msg: &[u8]) -> k256::ecdsa::Signature {
-        self.try_sign(msg).expect("signature operation failed")
+        self.signing_key.sign(msg)
     }
 
     fn try_sign(&self, msg: &[u8]) -> Result<k256::ecdsa::Signature, signature::Error> {
@@ -88,8 +78,6 @@ impl BlockSigner<k256::ecdsa::Signature> for Secp256k1Signer {
     }
 
     fn web_key(&self) -> JsonWebKey {
-        use k256::elliptic_curve::sec1::ToEncodedPoint;
-
         let verif_key = self.signing_key.verifying_key();
         let point = verif_key.to_encoded_point(false);
 
@@ -109,17 +97,10 @@ impl BlockSigner<k256::ecdsa::Signature> for Secp256k1Signer {
 
 #[test]
 fn secp256k1_roundtrip() {
-    // Need rand_core v0.6
-    //use rand_core::OsRng;
-    //let mut csprng = OsRng {};
-    //let signing_key = SigningKey::random(&mut csprng);
+    use rand_core::OsRng;
 
-    let signing_key = k256::ecdsa::SigningKey::from_bytes(&[
-        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
-        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
-    ])
-    .unwrap();
-
+    let mut csprng = OsRng {};
+    let signing_key = k256::ecdsa::SigningKey::random(&mut csprng);
     let signer = Secp256k1Signer { signing_key };
 
     let value =
@@ -140,7 +121,7 @@ pub struct EcdsaSigner {
 
 impl Signer<p256::ecdsa::Signature> for EcdsaSigner {
     fn sign(&self, msg: &[u8]) -> p256::ecdsa::Signature {
-        self.try_sign(msg).expect("signature operation failed")
+        self.signing_key.sign(msg)
     }
 
     fn try_sign(&self, msg: &[u8]) -> Result<p256::ecdsa::Signature, signature::Error> {
@@ -154,8 +135,6 @@ impl BlockSigner<p256::ecdsa::Signature> for EcdsaSigner {
     }
 
     fn web_key(&self) -> JsonWebKey {
-        //use p256::elliptic_curve::sec1::ToEncodedPoint;
-
         let verif_key = self.signing_key.verifying_key();
         let point = verif_key.to_encoded_point(false);
 
@@ -175,16 +154,10 @@ impl BlockSigner<p256::ecdsa::Signature> for EcdsaSigner {
 
 #[test]
 fn ecdsa_roundtrip() {
-    // Need rand_core v0.6
-    //use rand_core::OsRng;
-    //let mut csprng = OsRng {};
-    //let signing_key = SigningKey::random(&mut csprng);
+    use rand_core::OsRng;
 
-    let signing_key = p256::ecdsa::SigningKey::from_bytes(&[
-        222, 218, 29, 35, 117, 129, 206, 122, 47, 90, 70, 229, 253, 253, 204, 204, 160, 70, 124,
-        57, 146, 74, 25, 20, 254, 63, 216, 191, 230, 168, 10, 198,
-    ])
-    .unwrap();
+    let mut csprng = OsRng {};
+    let signing_key = p256::ecdsa::SigningKey::random(&mut csprng);
 
     let signer = EcdsaSigner { signing_key };
 
