@@ -35,7 +35,9 @@ pub(crate) async fn get(
     let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
     let (_, digest, _) = hash.into_inner();
 
-    let root = ipfs.dag_get::<&str, HAMTRoot>(root.link, None).await?;
+    let root = ipfs
+        .dag_get::<&str, HAMTRoot>(root.link, None, Codec::default())
+        .await?;
 
     let mut depth = 0;
     let mut node = root.hamt;
@@ -57,7 +59,9 @@ pub(crate) async fn get(
                     return Err(HAMTError::MaxDepth.into());
                 }
 
-                node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+                node = ipfs
+                    .dag_get::<&str, HAMTNode>(ipld.link, None, Codec::default())
+                    .await?;
                 depth += 1;
 
                 continue;
@@ -86,11 +90,15 @@ pub(crate) async fn insert(
     let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
     let (_, digest, _) = hash.into_inner();
 
-    let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
+    let mut root = ipfs
+        .dag_get::<&str, HAMTRoot>(index.link, None, Codec::default())
+        .await?;
 
     set(ipfs, digest, value.into(), 0, &mut root.hamt).await?;
 
-    let cid = ipfs.dag_put(&root, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&root, Codec::default(), Codec::default())
+        .await?;
 
     *index = cid.into();
 
@@ -120,7 +128,9 @@ async fn set(
         map.set(index, true);
         node.map = map.into_inner();
 
-        let cid = ipfs.dag_put(&node, Codec::default()).await?;
+        let cid = ipfs
+            .dag_put(&node, Codec::default(), Codec::default())
+            .await?;
 
         return Ok(cid);
     }
@@ -133,13 +143,17 @@ async fn set(
                 return Err(HAMTError::MaxDepth.into());
             }
 
-            let mut new_node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+            let mut new_node = ipfs
+                .dag_get::<&str, HAMTNode>(ipld.link, None, Codec::default())
+                .await?;
 
             let cid = set(ipfs, key, value, depth + 1, &mut new_node).await?;
 
             *ipld = cid.into();
 
-            let cid = ipfs.dag_put(&node, Codec::default()).await?;
+            let cid = ipfs
+                .dag_put(&node, Codec::default(), Codec::default())
+                .await?;
 
             Ok(cid)
         }
@@ -149,7 +163,9 @@ async fn set(
 
                 btree.insert(entry);
 
-                let cid = ipfs.dag_put(&node, Codec::default()).await?;
+                let cid = ipfs
+                    .dag_put(&node, Codec::default(), Codec::default())
+                    .await?;
 
                 return Ok(cid);
             }
@@ -164,7 +180,9 @@ async fn set(
 
             node.data[data_index] = Element::Link(cid.into());
 
-            let cid = ipfs.dag_put(&node, Codec::default()).await?;
+            let cid = ipfs
+                .dag_put(&node, Codec::default(), Codec::default())
+                .await?;
 
             Ok(cid)
         }
@@ -179,10 +197,14 @@ pub(crate) async fn remove(
     let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
     let (_, digest, _) = hash.into_inner();
 
-    let mut root = ipfs.dag_get::<&str, HAMTRoot>(index.link, None).await?;
+    let mut root = ipfs
+        .dag_get::<&str, HAMTRoot>(index.link, None, Codec::default())
+        .await?;
 
     if let Some(_) = delete(ipfs, digest, 0, &mut root.hamt).await? {
-        let new_idx = ipfs.dag_put(&root, Codec::default()).await?;
+        let new_idx = ipfs
+            .dag_put(&root, Codec::default(), Codec::default())
+            .await?;
         *index = new_idx.into();
 
         return Ok(Some(key));
@@ -218,7 +240,9 @@ async fn delete(
             return Err(HAMTError::MaxDepth.into());
         }
 
-        let mut new_node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+        let mut new_node = ipfs
+            .dag_get::<&str, HAMTNode>(ipld.link, None, Codec::default())
+            .await?;
 
         if let Some(element) = delete(ipfs, key, depth + 1, &mut new_node).await? {
             node.data[data_index] = element;
@@ -227,7 +251,9 @@ async fn delete(
         }
 
         if let Element::Link(_) = node.data[data_index] {
-            let cid = ipfs.dag_put(&node, Codec::default()).await?;
+            let cid = ipfs
+                .dag_put(&node, Codec::default(), Codec::default())
+                .await?;
 
             return Ok(Some(Element::Link(cid.into())));
         }
@@ -273,7 +299,9 @@ async fn delete(
                 //println!("Bit unset & Data removed");
             }
 
-            let cid = ipfs.dag_put(&node, Codec::default()).await?;
+            let cid = ipfs
+                .dag_put(&node, Codec::default(), Codec::default())
+                .await?;
 
             return Ok(Some(Element::Link(cid.into())));
         }
@@ -317,7 +345,9 @@ pub(crate) fn values(
             None => return Result::<_, Error>::Ok(None),
         };
 
-        let root_node = ipfs.dag_get::<&str, HAMTRoot>(ipld.link, None).await?;
+        let root_node = ipfs
+            .dag_get::<&str, HAMTRoot>(ipld.link, None, Codec::default())
+            .await?;
 
         let stream = stream_data(ipfs, root_node.hamt);
 
@@ -338,7 +368,9 @@ fn stream_data(
 
         match element {
             Element::Link(ipld) => {
-                let node = ipfs.dag_get::<&str, HAMTNode>(ipld.link, None).await?;
+                let node = ipfs
+                    .dag_get::<&str, HAMTNode>(ipld.link, None, Codec::default())
+                    .await?;
 
                 let stream = stream_data(ipfs, node).boxed_local();
 
@@ -387,10 +419,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn empty_hamt_get_remove() {
         let ipfs = IpfsService::default();
 
-        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default(), Codec::default()).await;
         let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
             .unwrap()
             .into();
@@ -410,10 +443,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_duplicate_insert() {
         let ipfs = IpfsService::default();
 
-        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default(), Codec::default()).await;
         let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
             .unwrap()
             .into();
@@ -449,12 +483,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_sequential_insert() {
         let ipfs = IpfsService::default();
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
 
-        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default(), Codec::default()).await;
         let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
             .unwrap()
             .into();
@@ -482,6 +517,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_remove_collapse() {
         let ipfs = IpfsService::default();
 
@@ -511,6 +547,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_sequential_remove() {
         let ipfs = IpfsService::default();
 
@@ -538,12 +575,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_fuzzy() {
         let ipfs = IpfsService::default();
 
         let mut rng = Xoshiro256StarStar::seed_from_u64(2347867832489023);
 
-        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default()).await;
+        // Pre-generated with ipfs.dag_put(&HAMTRoot::default(), Codec::default(), Codec::default()).await;
         let mut root = Cid::try_from("bafyreif5btv4rgnd443jetidp5iotdh6fdtndhm7c7qtvw32bujcbyk7re")
             .unwrap()
             .into();

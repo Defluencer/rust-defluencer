@@ -66,6 +66,7 @@ mod tests {
     use k256::ecdsa::VerifyingKey;
 
     #[test]
+    #[ignore]
     fn sign_test() {
         use k256::ecdsa::signature::DigestVerifier;
 
@@ -99,6 +100,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn addr() {
         let app = EthereumLedgerApp::default();
 

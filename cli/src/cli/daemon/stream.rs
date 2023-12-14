@@ -17,7 +17,7 @@ use tokio::{
     sync::{mpsc::unbounded_channel, watch},
 };
 
-use ipfs_api::IpfsService;
+use ipfs_api::{responses::Codec, IpfsService};
 
 use clap::Parser;
 
@@ -59,10 +59,15 @@ async fn stream(args: Stream) -> Result<(), Error> {
     } = args;
 
     let cid = ipfs.name_resolve(ipns_addr).await?;
-    let metadata = ipfs.dag_get::<&str, ChannelMetadata>(cid, None).await?;
+    let metadata = ipfs
+        .dag_get::<&str, ChannelMetadata>(cid, None, Codec::default())
+        .await?;
 
     let settings = match metadata.live {
-        Some(ipld) => ipfs.dag_get::<&str, LiveSettings>(ipld.link, None).await?,
+        Some(ipld) => {
+            ipfs.dag_get::<&str, LiveSettings>(ipld.link, None, Codec::default())
+                .await?
+        }
         None => {
             eprintln!("❗ Channel live settings not found.\nAborting...");
             return Ok(());

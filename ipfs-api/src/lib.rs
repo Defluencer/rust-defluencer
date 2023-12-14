@@ -243,11 +243,18 @@ impl IpfsService {
     }
 
     /// Serialize then add dag node to IPFS. Return a CID.
-    pub async fn dag_put<T>(&self, node: &T, store_codec: Codec) -> Result<Cid, Error>
+    pub async fn dag_put<T>(&self, node: &T, input: Codec, store: Codec) -> Result<Cid, Error>
     where
         T: ?Sized + Serialize,
     {
-        let data = serde_json::to_vec(node)?;
+        //TODO add hash option
+
+        let data = match input {
+            Codec::DagCbor => serde_ipld_dagcbor::to_vec(node)?,
+            Codec::DagJson => serde_json::to_vec(node)?,
+            Codec::DagJose => unimplemented!(),
+        };
+
         let part = Part::bytes(data);
         let form = Form::new().part("object data", part);
 
@@ -256,8 +263,8 @@ impl IpfsService {
         let bytes = self
             .client
             .post(url)
-            .query(&[("store-codec", store_codec.to_string())])
-            .query(&[("input-codec", "dag-json")])
+            .query(&[("store-codec", store.to_string())])
+            .query(&[("input-codec", input.to_string())])
             .query(&[("pin", "false")])
             .multipart(form)
             .send()
@@ -277,7 +284,7 @@ impl IpfsService {
     }
 
     /// Deserialize dag node from IPFS path. Return dag node.
-    pub async fn dag_get<U, T>(&self, cid: Cid, path: Option<U>) -> Result<T, Error>
+    pub async fn dag_get<U, T>(&self, cid: Cid, path: Option<U>, output: Codec) -> Result<T, Error>
     where
         U: Into<Cow<'static, str>>,
         T: ?Sized + DeserializeOwned,
@@ -294,7 +301,7 @@ impl IpfsService {
             .client
             .post(url)
             .query(&[("arg", &origin)])
-            .query(&[("output-codec", "dag-json")])
+            .query(&[("output-codec", output.to_string())])
             .send()
             .await?
             .bytes()
@@ -302,9 +309,19 @@ impl IpfsService {
 
         //println!("{}", std::str::from_utf8(&bytes).unwrap());
 
-        if let Ok(res) = serde_json::from_slice::<T>(&bytes) {
-            return Ok(res);
-        }
+        match output {
+            Codec::DagCbor => {
+                if let Ok(res) = serde_ipld_dagcbor::from_slice(&bytes) {
+                    return Ok(res);
+                }
+            }
+            Codec::DagJson => {
+                if let Ok(res) = serde_json::from_slice::<T>(&bytes) {
+                    return Ok(res);
+                }
+            }
+            Codec::DagJose => unimplemented!(),
+        };
 
         let error = serde_json::from_slice::<IPFSError>(&bytes)?;
 
@@ -487,7 +504,9 @@ impl IpfsService {
 
         let cid = self.name_resolve(addr).await?;
 
-        let node = self.dag_get(cid, Option::<&str>::None).await?;
+        let node = self
+            .dag_get(cid, Option::<&str>::None, Codec::default())
+            .await?;
 
         Ok((cid, node))
     }
@@ -502,7 +521,9 @@ impl IpfsService {
     where
         T: ?Sized + Serialize,
     {
-        let cid = self.dag_put(content, Codec::default()).await?;
+        let cid = self
+            .dag_put(content, Codec::default(), Codec::default())
+            .await?;
 
         self.pin_update(cid, old_cid).await?;
 
@@ -521,7 +542,9 @@ impl IpfsService {
     where
         T: ?Sized + Serialize,
     {
-        let cid = self.dag_put(content, Codec::default()).await?;
+        let cid = self
+            .dag_put(content, Codec::default(), Codec::default())
+            .await?;
 
         self.pin_add(cid, recursive).await?;
 

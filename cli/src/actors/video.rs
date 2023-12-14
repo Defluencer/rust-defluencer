@@ -162,7 +162,11 @@ impl Videograph {
             return None;
         }
 
-        let cid = match self.ipfs.dag_put(node, Codec::default()).await {
+        let cid = match self
+            .ipfs
+            .dag_put(node, Codec::default(), Codec::default())
+            .await
+        {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);

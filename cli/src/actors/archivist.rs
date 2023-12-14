@@ -105,7 +105,11 @@ impl Archivist {
     /// Create DAG node containing a link to video segment and all chat messages.
     /// Minute is then appended with the CID.
     async fn collect_second(&mut self, node: Second) {
-        let cid = match self.ipfs.dag_put(&node, Codec::default()).await {
+        let cid = match self
+            .ipfs
+            .dag_put(&node, Codec::default(), Codec::default())
+            .await
+        {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -118,7 +122,11 @@ impl Archivist {
 
     /// Create DAG node containing 60 Second links. Hour is then appended with the CID.
     async fn collect_minute(&mut self) {
-        let cid = match self.ipfs.dag_put(&self.minute_node, Codec::default()).await {
+        let cid = match self
+            .ipfs
+            .dag_put(&self.minute_node, Codec::default(), Codec::default())
+            .await
+        {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -133,7 +141,11 @@ impl Archivist {
 
     /// Create DAG node containing 60 Minute links. Day is then appended with the CID.
     async fn collect_hour(&mut self) {
-        let cid = match self.ipfs.dag_put(&self.hour_node, Codec::default()).await {
+        let cid = match self
+            .ipfs
+            .dag_put(&self.hour_node, Codec::default(), Codec::default())
+            .await
+        {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -169,7 +181,11 @@ impl Archivist {
             return;
         }
 
-        let cid = match self.ipfs.dag_put(&self.day_node, Codec::default()).await {
+        let cid = match self
+            .ipfs
+            .dag_put(&self.day_node, Codec::default(), Codec::default())
+            .await
+        {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);
@@ -181,7 +197,11 @@ impl Archivist {
             timecode: cid.into(),
         };
 
-        let cid = match self.ipfs.dag_put(&stream, Codec::default()).await {
+        let cid = match self
+            .ipfs
+            .dag_put(&stream, Codec::default(), Codec::default())
+            .await
+        {
             Ok(cid) => cid,
             Err(e) => {
                 eprintln!("❗ IPFS: dag put failed {}", e);

@@ -171,7 +171,7 @@ impl Setter {
 
         let cid = self
             .ipfs
-            .dag_put(&setup_node, Codec::default())
+            .dag_put(&setup_node, Codec::default(), Codec::default())
             .await
             .expect("IPFS: SetupNode dag put failed"); // Panic because can't be recovered from anyway
 

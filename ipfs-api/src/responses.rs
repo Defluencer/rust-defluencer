@@ -4,9 +4,11 @@ use cid::{multibase::decode, Cid};
 
 use linked_data::types::{IPNSAddress, PeerId};
 
+use num_derive::{FromPrimitive, ToPrimitive};
+
 use strum::{self, Display, EnumString};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub struct AddResponse {
@@ -193,16 +195,29 @@ impl From<PinLsResponse> for PinList {
     }
 }
 
-#[derive(Debug, Display, EnumString)]
+//TODO find a way to stop depending on this!
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    EnumString,
+    Serialize,
+    Deserialize,
+    FromPrimitive,
+    ToPrimitive,
+)]
 pub enum Codec {
     #[strum(serialize = "dag-cbor")]
-    DagCbor,
+    DagCbor = 0x71,
 
     #[strum(serialize = "dag-jose")]
-    DagJose,
+    DagJose = 0x85,
 
     #[strum(serialize = "dag-json")]
-    DagJson,
+    DagJson = 0x0129,
 }
 
 impl Default for Codec {

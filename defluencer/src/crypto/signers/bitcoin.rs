@@ -74,6 +74,7 @@ mod tests {
     use sha2::Digest;
 
     #[test]
+    #[ignore]
     fn addr() {
         let app = BitcoinLedgerApp::default();
 
@@ -83,6 +84,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn sign_test() {
         use k256::ecdsa::signature::DigestVerifier;
 

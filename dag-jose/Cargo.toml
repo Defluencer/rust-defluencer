@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 async-signature =  { version = "0.2", default-features = false, features = [] }
 async-trait = "0.1"
-cid = { version = "0.9", default-features = false, features = ["std"] }
+cid = { version = "0.10", default-features = false, features = ["std"] }
 ed25519 = { version = "1", default-features = false, features = [] }
 ed25519-dalek = { version = "1", default-features = false, features = ["u64_backend"] }
 elliptic-curve = { version = "0.12", default-features = false, features = [] }

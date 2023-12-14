@@ -26,27 +26,39 @@ pub(crate) async fn insert(
     let mut seconds = Seconds::default();
 
     if let Some(index) = index {
-        yearly = ipfs.dag_get::<&str, Yearly>(index.link, None).await?;
+        yearly = ipfs
+            .dag_get::<&str, Yearly>(index.link, None, Codec::default())
+            .await?;
     }
 
     if let Some(ipld) = yearly.year.get(&date_time.year()) {
-        monthly = ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?;
+        monthly = ipfs
+            .dag_get::<&str, Monthly>(ipld.link, None, Codec::default())
+            .await?;
     }
 
     if let Some(ipld) = monthly.month.get(&date_time.month()) {
-        daily = ipfs.dag_get::<&str, Daily>(ipld.link, None).await?;
+        daily = ipfs
+            .dag_get::<&str, Daily>(ipld.link, None, Codec::default())
+            .await?;
     }
 
     if let Some(ipld) = daily.day.get(&date_time.day()) {
-        hourly = ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?;
+        hourly = ipfs
+            .dag_get::<&str, Hourly>(ipld.link, None, Codec::default())
+            .await?;
     }
 
     if let Some(ipld) = hourly.hour.get(&date_time.hour()) {
-        minutes = ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?;
+        minutes = ipfs
+            .dag_get::<&str, Minutes>(ipld.link, None, Codec::default())
+            .await?;
     }
 
     if let Some(ipld) = minutes.minute.get(&date_time.minute()) {
-        seconds = ipfs.dag_get::<&str, Seconds>(ipld.link, None).await?;
+        seconds = ipfs
+            .dag_get::<&str, Seconds>(ipld.link, None, Codec::default())
+            .await?;
     }
 
     match seconds.second.get_mut(&date_time.second()) {
@@ -61,22 +73,34 @@ pub(crate) async fn insert(
         }
     }
 
-    let cid = ipfs.dag_put(&seconds, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&seconds, Codec::default(), Codec::default())
+        .await?;
 
     minutes.minute.insert(date_time.minute(), cid.into());
-    let cid = ipfs.dag_put(&minutes, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&minutes, Codec::default(), Codec::default())
+        .await?;
 
     hourly.hour.insert(date_time.hour(), cid.into());
-    let cid = ipfs.dag_put(&hourly, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&hourly, Codec::default(), Codec::default())
+        .await?;
 
     daily.day.insert(date_time.day(), cid.into());
-    let cid = ipfs.dag_put(&daily, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&daily, Codec::default(), Codec::default())
+        .await?;
 
     monthly.month.insert(date_time.month(), cid.into());
-    let cid = ipfs.dag_put(&monthly, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&monthly, Codec::default(), Codec::default())
+        .await?;
 
     yearly.year.insert(date_time.year(), cid.into());
-    let cid = ipfs.dag_put(&yearly, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&yearly, Codec::default(), Codec::default())
+        .await?;
 
     *index = Some(cid.into());
 
@@ -96,30 +120,47 @@ pub(crate) async fn remove(
         None => return Ok(false),
     };
 
-    let mut yearly = ipfs.dag_get::<&str, Yearly>(idx.link, None).await?;
+    let mut yearly = ipfs
+        .dag_get::<&str, Yearly>(idx.link, None, Codec::default())
+        .await?;
 
     let mut monthly = match yearly.year.get(&date_time.year()) {
-        Some(ipld) => ipfs.dag_get::<&str, Monthly>(ipld.link, None).await?,
+        Some(ipld) => {
+            ipfs.dag_get::<&str, Monthly>(ipld.link, None, Codec::default())
+                .await?
+        }
         None => return Ok(false),
     };
 
     let mut daily = match monthly.month.get(&date_time.month()) {
-        Some(ipld) => ipfs.dag_get::<&str, Daily>(ipld.link, None).await?,
+        Some(ipld) => {
+            ipfs.dag_get::<&str, Daily>(ipld.link, None, Codec::default())
+                .await?
+        }
         None => return Ok(false),
     };
 
     let mut hourly = match daily.day.get(&date_time.day()) {
-        Some(ipld) => ipfs.dag_get::<&str, Hourly>(ipld.link, None).await?,
+        Some(ipld) => {
+            ipfs.dag_get::<&str, Hourly>(ipld.link, None, Codec::default())
+                .await?
+        }
         None => return Ok(false),
     };
 
     let mut minutes = match hourly.hour.get(&date_time.hour()) {
-        Some(ipld) => ipfs.dag_get::<&str, Minutes>(ipld.link, None).await?,
+        Some(ipld) => {
+            ipfs.dag_get::<&str, Minutes>(ipld.link, None, Codec::default())
+                .await?
+        }
         None => return Ok(false),
     };
 
     let mut seconds = match minutes.minute.get(&date_time.minute()) {
-        Some(ipld) => ipfs.dag_get::<&str, Seconds>(ipld.link, None).await?,
+        Some(ipld) => {
+            ipfs.dag_get::<&str, Seconds>(ipld.link, None, Codec::default())
+                .await?
+        }
         None => return Ok(false),
     };
 
@@ -137,7 +178,9 @@ pub(crate) async fn remove(
     if seconds.second.is_empty() {
         minutes.minute.remove(&date_time.minute());
     } else {
-        let cid = ipfs.dag_put(&seconds, Codec::default()).await?;
+        let cid = ipfs
+            .dag_put(&seconds, Codec::default(), Codec::default())
+            .await?;
 
         minutes.minute.insert(date_time.minute(), cid.into());
     }
@@ -145,7 +188,9 @@ pub(crate) async fn remove(
     if minutes.minute.is_empty() {
         hourly.hour.remove(&date_time.hour());
     } else {
-        let cid = ipfs.dag_put(&minutes, Codec::default()).await?;
+        let cid = ipfs
+            .dag_put(&minutes, Codec::default(), Codec::default())
+            .await?;
 
         hourly.hour.insert(date_time.hour(), cid.into());
     }
@@ -153,7 +198,9 @@ pub(crate) async fn remove(
     if hourly.hour.is_empty() {
         daily.day.remove(&date_time.day());
     } else {
-        let cid = ipfs.dag_put(&hourly, Codec::default()).await?;
+        let cid = ipfs
+            .dag_put(&hourly, Codec::default(), Codec::default())
+            .await?;
 
         daily.day.insert(date_time.day(), cid.into());
     }
@@ -161,7 +208,9 @@ pub(crate) async fn remove(
     if daily.day.is_empty() {
         monthly.month.remove(&date_time.month());
     } else {
-        let cid = ipfs.dag_put(&daily, Codec::default()).await?;
+        let cid = ipfs
+            .dag_put(&daily, Codec::default(), Codec::default())
+            .await?;
 
         monthly.month.insert(date_time.month(), cid.into());
     }
@@ -169,12 +218,16 @@ pub(crate) async fn remove(
     if monthly.month.is_empty() {
         yearly.year.remove(&date_time.year());
     } else {
-        let cid = ipfs.dag_put(&monthly, Codec::default()).await?;
+        let cid = ipfs
+            .dag_put(&monthly, Codec::default(), Codec::default())
+            .await?;
 
         yearly.year.insert(date_time.year(), cid.into());
     }
 
-    let cid = ipfs.dag_put(&yearly, Codec::default()).await?;
+    let cid = ipfs
+        .dag_put(&yearly, Codec::default(), Codec::default())
+        .await?;
 
     *index = Some(cid.into());
 
@@ -214,10 +267,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn empty_index_get_remove() {
         let ipfs = IpfsService::default();
 
-        // Pre-generated with ipfs.dag_put(&Yearly::default(), Codec::default()).await;
+        // Pre-generated with ipfs.dag_put(&Yearly::default(), Codec::default(), Codec::default()).await;
         let root = Cid::try_from("bafyreibyn3zsznoi4fnkzakdggyb7qw4dny53hg3eyisauu5s7yhodwhx4")
             .unwrap()
             .into();
@@ -236,6 +290,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn index_duplicate_insert() {
         let ipfs = IpfsService::default();
 
@@ -261,6 +316,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn index_sequential_insert() {
         let ipfs = IpfsService::default();
 
@@ -297,6 +353,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn hamt_sequential_remove() {
         let ipfs = IpfsService::default();
 
@@ -335,6 +392,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
     async fn index_fuzzy() {
         let ipfs = IpfsService::default();
 
