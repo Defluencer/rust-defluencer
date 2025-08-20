@@ -571,6 +571,7 @@ impl IpfsService {
     }
 
     /// Send data on the specified topic.
+    #[deprecated(note = "KUBO has deprecated their pubsub API")]
     pub async fn pubsub_pub<T, D>(&self, topic: T, data: D) -> Result<(), Error>
     where
         T: AsRef<[u8]>,
@@ -594,6 +595,7 @@ impl IpfsService {
     }
 
     /// Subscribe to a topic and receive pubsub messages.
+    #[deprecated(note = "KUBO has deprecated their pubsub API")]
     pub fn pubsub_sub(
         &self,
         topic: Vec<u8>,
@@ -635,11 +637,11 @@ impl IpfsService {
         .try_flatten()
     }
 
-    pub async fn dht_put<D>(&self, peer_id: Cid, data: D) -> Result<DHTPutResponse, Error>
+    pub async fn routing_put<D>(&self, peer_id: Cid, data: D) -> Result<RoutingResponse, Error>
     where
         D: Into<Cow<'static, [u8]>>,
     {
-        let url = self.base_url.join("dht/put")?;
+        let url = self.base_url.join("routing/put")?;
 
         let key = format!("/ipns/{}", peer_id.to_string_of_base(Base::Base32Lower)?);
 
@@ -650,7 +652,7 @@ impl IpfsService {
             .client
             .post(url)
             .query(&[("arg", key)])
-            .query(&[("verbose", "false")])
+            .query(&[("allow-offline", "true")])
             .multipart(form)
             .send()
             .await?
@@ -659,7 +661,7 @@ impl IpfsService {
 
         //println!("{}", std::str::from_utf8(&bytes).unwrap());
 
-        if let Ok(res) = serde_json::from_slice::<DHTPutResponse>(&bytes) {
+        if let Ok(res) = serde_json::from_slice::<RoutingResponse>(&bytes) {
             return Ok(res);
         }
 

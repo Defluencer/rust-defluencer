@@ -166,6 +166,9 @@ pub struct PinLsResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct Pin {
+    #[serde(rename = "Name")]
+    pub name: String,
+
     #[serde(rename = "Type")]
     pub mode: PinMode,
 }
@@ -227,7 +230,7 @@ impl Default for Codec {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct DHTPutResponse {
+pub struct RoutingResponse {
     #[serde(rename = "Extra")]
     pub extra: Option<String>,
 
@@ -235,14 +238,14 @@ pub struct DHTPutResponse {
     pub id: Option<String>,
 
     #[serde(rename = "Responses")]
-    pub responses: Vec<Response>,
+    pub responses: Vec<RoutingResponseInner>,
 
     #[serde(rename = "Type")]
     pub dht_put_response_type: usize,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Response {
+pub struct RoutingResponseInner {
     #[serde(rename = "Addrs")]
     pub addrs: Vec<String>,
 
