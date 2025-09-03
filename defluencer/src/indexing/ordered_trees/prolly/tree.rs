@@ -445,7 +445,8 @@ mod tests {
         let tree_cid =
             Cid::try_from("bafyreiacttehgexdhblgzfcco2chzf64s6x3e6asyzhyr4qhh2vmwkaiwu").unwrap();
 
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let batch = unique_random_sorted_pairs::<32>(100, &mut rng);
 
@@ -509,13 +510,14 @@ mod tests {
         let tree_cid =
             Cid::try_from("bafyreiacttehgexdhblgzfcco2chzf64s6x3e6asyzhyr4qhh2vmwkaiwu").unwrap();
 
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         // 100 random KVs
         let mut keys = Vec::with_capacity(10);
 
         for _ in 0..100 {
-            let (key, _) = batch.remove(rng.gen_range(0..batch.len()));
+            let (key, _) = batch.remove(rng.random_range(0..batch.len()));
             keys.push(key);
         }
 
@@ -599,10 +601,10 @@ mod tests {
         let mut added = vec![];
 
         for _ in 0..1000 {
-            let add = rng.gen_bool(2.0 / 3.0);
+            let add = rng.random_bool(2.0 / 3.0);
 
             if add {
-                let numb = rng.gen_range(1..15);
+                let numb = rng.random_range(1..15);
                 let batch = unique_random_sorted_pairs::<100_000>(numb, &mut rng);
 
                 root = batch_insert::<u16, DataBlob>(
@@ -622,14 +624,14 @@ mod tests {
 
                 let mut batch = vec![];
 
-                let numb = rng.gen_range(1..15);
+                let numb = rng.random_range(1..15);
 
                 for _ in 0..numb {
                     if added.is_empty() {
                         continue;
                     }
 
-                    let idx = rng.gen_range(0..added.len());
+                    let idx = rng.random_range(0..added.len());
                     let (key, _) = added.swap_remove(idx);
                     batch.push(key);
                 }

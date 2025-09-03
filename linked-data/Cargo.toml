@@ -8,13 +8,13 @@ description = "Defluencer linked data."
 [dependencies]
 bitvec = { version = "1", default-features = false, features = ["std", "serde"] }
 either = { version = "1", default-features = false, features = ["serde"] }
-cid = { version = "0.10", default-features = false, features = ["std"] }
+cid = { version = "0.11", default-features = false, features = ["std"] }
 multibase = { version = "0.9", default-features = false, features = [] }
-multihash = { version = "0.18", default-features = false, features = ["multihash-impl"] }
+multihash = { version = "0.19", default-features = false, features = [] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 serde_with = { version = "3", default-features = false, features = ["macros"] }
-strum = { version = "0.25", default-features = false, features = ["derive"] }
+strum = { version = "0.27", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 serde_json = "1"

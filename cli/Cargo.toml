@@ -6,11 +6,11 @@ edition = "2021"
 description = "Defluencer Command Line Interface."
 
 [dependencies]
-cid = "0.10"
+cid = "0.11.1"
 clap = { version = "4", default-features = true, features = ["derive"] }
 defluencer = { path = "../defluencer" }
 futures-util = "0.3"
-heck = { version = "0.4", default-features = false, features = [] }
+heck = { version = "0.5", default-features = false, features = [] }
 hex = "0.4"
 http-body-util = { version = "0.1", default-features = false, features = [] }
 hyper = { version = "1", default-features = false, features = ["server", "http1"] }
@@ -18,5 +18,5 @@ hyper-util = { version = "0.1", default-features = false, features = ["server-au
 ipfs-api = { path = "../ipfs-api" }
 linked-data = { path = "../linked-data" }
 mime_guess = "2.0"
-m3u8-rs = "5.0"
+m3u8-rs = "6.0"
 tokio = { version = "1", features = ["signal", "macros", "process", "rt-multi-thread", "sync"] }

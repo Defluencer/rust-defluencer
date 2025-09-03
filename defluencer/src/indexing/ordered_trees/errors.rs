@@ -17,7 +17,7 @@ pub enum Error {
     UnknownCodec,
 
     #[error("Ipld Error: {0}")]
-    IpldError(#[from] libipld_core::error::Error),
+    IpldConvertError(#[from] ipld_core::convert::ConversionError),
 
     #[error("DAG CBOR Encode: {0}")]
     Encode(#[from] serde_ipld_dagcbor::EncodeError<TryReserveError>),
@@ -30,6 +30,9 @@ pub enum Error {
 
     #[error("Multihash: {0}")]
     Multihash(#[from] multihash::Error),
+
+    #[error("Multihash code: {0}")]
+    MultihashCode(#[from] multihash_derive::UnsupportedCode),
 
     #[error("Ipfs: {0}")]
     IpfsApi(#[from] ipfs_api::errors::Error),

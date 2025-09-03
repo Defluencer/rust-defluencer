@@ -8,43 +8,46 @@ description = "Defluencer Core Crate"
 [dependencies]
 async-trait = { version = "0.1", default-features = false, features = [] }
 async-recursion = { version = "1", default-features = false, features = [] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
-cid = { version = "0.10", default-features = false, features = ["std"] }
+# serde-aux is not compatible with higher version of chronos
+chrono = { version = "0.4.34", default-features = false, features = ["clock", "wasmbind"] }
+cid = { version = "0.11", default-features = false, features = ["std"] }
 dag-jose = { path = "../dag-jose", default-features = false, features = []  }
 either = { version = "1", default-features = false, features = [] }
 futures = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
-heck = { version = "0.4", default-features = false, features = [] }
+heck = { version = "0.5", default-features = false, features = [] }
 hex = { version = "0.4", default-features = false, features = [] }
 ipfs-api = { path = "../ipfs-api", default-features = false, features = [] }
 ipns-records = { path = "../ipns-records", default-features = false, features = []  }
 k256 = { version = "0.13", default-features = false, features = ["std"] }
-# Replace with the crate once updated
-libipld-core = { git = "https://github.com/ipld/libipld", branch = "master", default-features = false, features = ["std", "serde-codec"] }
+ipld-core = { version = "0.4", default-features = false, features = ["std", "serde"] }
 linked-data = { path = "../linked-data", default-features = false, features = []  }
 mime_guess = { version = "2.0", default-features = false, features = [] }
 multibase = { version = "0.9", default-features = false, features = ["std"] }
-multihash = { version = "0.18", default-features = false, features = ["std", "multihash-impl", "sha2", "serde-codec"] }
+multihash = { version = "0.19", default-features = false, features = ["std", "serde-codec"] }
+multihash-codetable = { version = "0.1", default-features = false, features = ["sha2"]  }
+multihash-derive = {version = "0.9", default-features = false, features = ["std"] }
 num = "0.4.0"
 num-traits = "0.2"
 num-derive = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
-serde_ipld_dagcbor = { version = "0.4", default-features = false, features = [] }
+serde-aux = { version = "4", default-features = false, features = ["chrono"] }
+serde_ipld_dagcbor = { version = "0.6", default-features = false, features = [] }
 serde_json = { version = "1", default-features = false, features = [] }
 sha2 = { version = "0.10", default-features = false, features = [] }
 sha3 = { version = "0.10", default-features = false, features = [] }
 signature = { version = "2", default-features = false, features = ["std"] }
-strum = { version = "0.25", features = ["derive"] }
-thiserror = { version = "1", default-features = false, features = [] }
+strum = { version = "0.27", features = ["derive"] }
+thiserror = { version = "2", default-features = false, features = [] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 elliptic-curve = { version = "0.13", features = ["pem"]}
-rand_core = { version = "0.6", default-features = false, features = ["getrandom"]}
+rand_core = { version = "0.9", default-features = false, features = ["os_rng"]}
 tokio = { version = "1", default-features = false, features = ["fs", "macros"]}
 tokio-util = { version = "0.7", default-features = false, features = ["io"]}
-ledger-zondax-generic = { version = "0.10", default-features = false, features = [] }
-ledger-transport-hid = { version = "0.10", default-features = false, features = [] }
-ledger-transport = { version = "0.10", default-features = false, features = [] }
+ledger-zondax-generic = { version = "0.11", default-features = false, features = [] }
+ledger-transport-hid = { version = "0.11", default-features = false, features = [] }
+ledger-transport = { version = "0.11", default-features = false, features = [] }
 rs_merkle = { version = "1", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -61,8 +64,8 @@ pkcs8 = { version = "0.10", default-features = false, features = ["std", "alloc"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", features = ['full']}
-rand = "0.8"
-rand_xoshiro = "0.6"
+rand = "0.9"
+rand_xoshiro = "0.7"
 k256 = { version = "0.13" }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

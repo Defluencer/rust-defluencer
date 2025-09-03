@@ -376,19 +376,20 @@ mod tests {
     use super::*;
 
     use ipfs_api::responses::Codec;
-    use rand_core::RngCore;
 
-    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+    use rand_core::{RngCore, SeedableRng};
+    use rand_xoshiro::Xoshiro256StarStar;
 
     use sha2::{Digest, Sha512};
 
     use cid::Cid;
 
-    use multihash::{Code, Multihash};
+    use multihash_codetable::{Code, Multihash};
 
     #[test]
     fn into_search_batch() {
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let keys = VecDeque::from(vec![0, 3, 5, 7, 9, 10]);
 
@@ -416,7 +417,8 @@ mod tests {
     #[test]
     fn split_min_size() {
         /* setup */
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let mut keys = VecDeque::from(vec![0, 3, 5, 1771949, 1771950, 1771951]);
         let mut elements: Vec<_> = (0..keys.len())
@@ -472,7 +474,8 @@ mod tests {
     #[test]
     fn split() {
         /* setup */
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let mut keys = VecDeque::from(vec![0, 3, 5, 1771949, 1771950, 1771951]);
         let mut elements: Vec<_> = (0..keys.len())
@@ -558,7 +561,8 @@ mod tests {
     #[test]
     fn split_max_size() {
         /* setup */
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let (mut keys, mut elements) = unique_random_sorted_pairs(46, &mut rng);
         let mut links: VecDeque<_> = elements.clone().into();

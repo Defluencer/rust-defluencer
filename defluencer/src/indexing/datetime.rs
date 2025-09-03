@@ -248,18 +248,14 @@ mod tests {
 
     use ipfs_api::IpfsService;
 
-    use multihash::MultihashGeneric;
-    type Multihash = MultihashGeneric<64>;
+    use multihash::Multihash;
 
-    use rand_core::RngCore;
-
-    use rand::Rng;
-
-    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+    use rand::{Rng, SeedableRng};
+    use rand_xoshiro::Xoshiro256StarStar;
 
     fn random_cid(rng: &mut Xoshiro256StarStar) -> Cid {
         let mut hash = [0u8; 32];
-        rng.fill_bytes(&mut hash);
+        rng.fill(&mut hash);
 
         let multihash = Multihash::wrap(0x12, &hash).unwrap();
 
@@ -407,7 +403,7 @@ mod tests {
         let mut keys = Vec::with_capacity(count);
 
         for _ in 0..count {
-            if keys.is_empty() || rng.gen_ratio(2, 3) {
+            if keys.is_empty() || rng.random_ratio(2, 3) {
                 let key = random_cid(&mut rng);
 
                 date_time -= Duration::hours(1);
@@ -421,7 +417,7 @@ mod tests {
                     Err(e) => panic!("Index: {} Key: {} Error: {}", index.unwrap().link, key, e),
                 }
             } else {
-                let idx = rng.gen_range(0..keys.len());
+                let idx = rng.random_range(0..keys.len());
 
                 let (key, date_time) = keys.swap_remove(idx);
 

@@ -43,8 +43,7 @@ fn ed25519_roundtrip() {
     let ttl = 0;
     let sequence = 0;
 
-    
-    use rand_core::OsRng;
+    use rand::rngs::OsRng;
     let mut csprng = OsRng {};
     let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
 
@@ -115,7 +114,7 @@ fn secp256k1_roundtrip() {
     let ttl = 0;
     let sequence = 0;
 
-    use rand_core::OsRng;
+    use rand::rngs::OsRng;
     let mut csprng = OsRng {};
     let signing_key: k256::ecdsa::SigningKey = k256::ecdsa::SigningKey::random(&mut csprng);
 
@@ -189,7 +188,7 @@ fn ecdsa_roundtrip() {
     let ttl = 0;
     let sequence = 0;
 
-    use rand_core::OsRng;
+    use rand::rngs::OsRng;
     let mut csprng = OsRng {};
     let signing_key = p256::ecdsa::SigningKey::random(&mut csprng);
 

@@ -268,9 +268,9 @@ impl<K: Key> Iterator for BranchIntoIterator<K> {
 mod tests {
     use super::*;
 
-    use rand_core::RngCore;
+    use rand_core::{RngCore, SeedableRng};
 
-    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256StarStar};
+    use rand_xoshiro::Xoshiro256StarStar;
 
     use sha2::{Digest, Sha512};
 
@@ -280,7 +280,8 @@ mod tests {
 
     #[test]
     fn search_iter() {
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let keys = VecDeque::from(vec![0, 3, 5, 7, 9, 10]);
 
@@ -336,7 +337,8 @@ mod tests {
 
     #[test]
     fn insert_iter() {
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let keys = VecDeque::from(vec![0, 3, 5, 7, 9, 10]);
 
@@ -396,7 +398,8 @@ mod tests {
 
     #[test]
     fn remove_iter() {
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
 
         let keys = VecDeque::from(vec![0, 3, 5, 7, 9, 10]);
 

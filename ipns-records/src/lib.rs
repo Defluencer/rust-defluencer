@@ -20,7 +20,7 @@ use chrono::{Duration, SecondsFormat, Utc};
 
 use cid::Cid;
 
-type Multihash = multihash::MultihashGeneric<64>;
+use multihash::Multihash;
 
 use prost::{self, Enumeration, Message};
 

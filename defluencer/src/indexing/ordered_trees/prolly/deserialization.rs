@@ -6,7 +6,7 @@ use std::{
 
 use ipfs_api::responses::Codec;
 
-use multihash::Code;
+use multihash_codetable::Code;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ use super::{
     node::{Branch, Leaf, TreeNode},
 };
 
-use libipld_core::ipld::Ipld;
+use ipld_core::ipld::Ipld;
 
 use num::FromPrimitive;
 
@@ -166,7 +166,12 @@ impl TryFrom<Ipld> for Config {
             let mut map: BTreeMap<String, Ipld> = list.pop().unwrap().try_into()?;
 
             let Some((key, value)) = map.pop_last() else {
-                return Err(DecodeError::RequireLength { name: "map", expect: 1, value: map.len() }.into());
+                return Err(DecodeError::RequireLength {
+                    name: "map",
+                    expect: 1,
+                    value: map.len(),
+                }
+                .into());
             };
 
             let Ok(mut chunking_strategy) = Strategies::from_str(&key) else {

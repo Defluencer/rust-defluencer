@@ -14,8 +14,7 @@ use linked_data::{
     types::IPLDLink,
 };
 
-use multihash::MultihashGeneric;
-type Multihash = MultihashGeneric<64>;
+use multihash::Multihash;
 
 use cid::Cid;
 
@@ -32,7 +31,7 @@ pub(crate) async fn get(
     root: IPLDLink,
     key: Cid,
 ) -> Result<Option<Cid>, Error> {
-    let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
+    let hash: Multihash<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
     let (_, digest, _) = hash.into_inner();
 
     let root = ipfs
@@ -87,7 +86,7 @@ pub(crate) async fn insert(
     key: Cid,
     value: Cid,
 ) -> Result<(), Error> {
-    let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
+    let hash: Multihash<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
     let (_, digest, _) = hash.into_inner();
 
     let mut root = ipfs
@@ -194,7 +193,7 @@ pub(crate) async fn remove(
     index: &mut IPLDLink,
     key: Cid,
 ) -> Result<Option<Cid>, Error> {
-    let hash: MultihashGeneric<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
+    let hash: Multihash<DIGEST_LENGTH_BYTES> = key.hash().resize()?;
     let (_, digest, _) = hash.into_inner();
 
     let mut root = ipfs
@@ -594,7 +593,7 @@ mod tests {
         let mut keys = Vec::with_capacity(count);
 
         for _ in 0..count {
-            if keys.is_empty() || rng.gen_ratio(2, 3) {
+            if keys.is_empty() || rng.random_ratio(2, 3) {
                 let key = random_cid(&mut rng);
 
                 keys.push(key);
@@ -603,7 +602,7 @@ mod tests {
                     panic!("Index: {} Key: {} Error: {}", root.link, key, e);
                 }
             } else {
-                let idx = rng.gen_range(0..keys.len());
+                let idx = rng.random_range(0..keys.len());
 
                 let key = keys.remove(idx);
 

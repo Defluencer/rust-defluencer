@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use libipld_core::ipld::Ipld;
+use ipld_core::ipld::Ipld;
 
 /// Trait for tree keys.
 ///

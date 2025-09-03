@@ -1,12 +1,12 @@
 use cid::Cid;
 
-use multihash::{Code, MultihashDigest};
+use multihash_codetable::{Code, MultihashDigest};
 
 use serde::{Deserialize, Serialize};
 
 use ipfs_api::responses::Codec;
 
-use libipld_core::ipld::Ipld;
+use ipld_core::ipld::Ipld;
 
 use strum::{Display, EnumString};
 
@@ -138,14 +138,14 @@ pub struct Tree {
 mod tests {
     use super::*;
 
-    use rand_xoshiro::{
-        rand_core::{RngCore, SeedableRng},
-        Xoshiro256StarStar,
-    };
+    use rand_core::{RngCore, SeedableRng};
+
+    use rand_xoshiro::Xoshiro256StarStar;
 
     #[test]
     fn bounds() {
-        let mut rng = Xoshiro256StarStar::from_entropy();
+        let mut rng = rand_core::OsRng;
+        let mut rng = Xoshiro256StarStar::try_from_rng(&mut rng).expect("os rng");
         let mut hash = [0u8; 4];
         let factor = 1 << 22;
         let threshold = (u32::MAX / factor).count_zeros();
